@@ -1,0 +1,449 @@
+import { Router } from 'express';
+import { query, tx } from '../database.js';
+import { requireAuth, requireAdmin, requireSuperAdmin } from '../auth.js';
+import { fail, uuid, bigAmount, positiveInt, text, oneOf, httpsUrl } from '../http.js';
+import { isPeriod } from '../periods.js';
+import { WIP_MIN_LEVEL, WIP_MAX_LEVEL } from '../levels.js';
+import { dealerSell } from '../services/dealers.js';
+import { hub } from '../realtime.js';
+import { banIpPersist, unbanIp, listBans, securityStats } from '../firewall.js';
+import net from 'node:net';
+
+export const router = Router();
+router.use(requireAuth, requireAdmin); // admin + support; para/katalog işlemleri ayrıca requireSuperAdmin ister
+
+const INVENTORY_TYPES = ['frame', 'entrance_effect', 'badge', 'profile_effect'];
+const wipLevel = (v) => {
+  const n = positiveInt(v, 'WIP seviyesi');
+  if (n < WIP_MIN_LEVEL || n > WIP_MAX_LEVEL) throw fail(`WIP seviyesi ${WIP_MIN_LEVEL}-${WIP_MAX_LEVEL} arasında olmalı.`);
+  return n;
+};
+
+async function assertUser(id, run = query) {
+  const u = (await run(`SELECT id, username, system_role, account_status FROM users WHERE id = $1`, [id])).rows[0];
+  if (!u) throw fail('Kullanıcı bulunamadı.', 404);
+  return u;
+}
+
+// ---------------- Kullanıcı arama ve durum ----------------
+router.get('/users', async (req, res) => {
+  const q = String(req.query.q ?? '').trim().toLowerCase();
+  if (q.length < 2) throw fail('Arama için en az 2 karakter girin.');
+  const r = await query(
+    `SELECT id, username, display_name, coins, diamonds, system_role, account_status
+     FROM users WHERE lower(username) LIKE $1 ESCAPE '\\' OR lower(display_name) LIKE $1 ESCAPE '\\' OR id::text = $2
+     ORDER BY username LIMIT 20`,
+    [`%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`, q],
+  );
+  res.json({
+    users: r.rows.map((u) => ({
+      id: u.id, username: u.username, displayName: u.display_name, coins: String(u.coins), diamonds: String(u.diamonds),
+      systemRole: u.system_role, accountStatus: u.account_status,
+    })),
+  });
+});
+
+router.post('/users/:userId/status', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const status = oneOf(req.body?.status, ['active', 'banned'], 'Durum');
+  if (userId === req.user.id) throw fail('Kendi hesabınızın durumunu değiştiremezsiniz.');
+  const target = await assertUser(userId);
+  if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
+  if (target.system_role === 'admin' && req.user.system_role !== 'admin') throw fail('Yöneticiler yalnızca yöneticiler tarafından değiştirilebilir.', 403);
+  await tx(async (c) => {
+    await c.query(`UPDATE users SET account_status = $2, token_version = token_version + 1, updated_at = NOW() WHERE id = $1`, [userId, status]);
+    await c.query(
+      `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, metadata) VALUES($1,$2,'account_status','user',$3)`,
+      [req.user.id, userId, JSON.stringify({ status, reason: text(req.body?.reason, 'Neden', { max: 300 }) })],
+    );
+  });
+  if (status === 'banned') hub.disconnectUser(userId, 'banned');
+  res.json({ ok: true, status });
+});
+
+// ---------------- Coin (yalnızca yönetici) ----------------
+router.post('/users/:userId/coins', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const delta = bigAmount(req.body?.amount, 'Coin miktarı', { allowNegative: true });
+  const reason = text(req.body?.reason, 'Neden', { max: 300 }) || 'Admin Coin düzenlemesi';
+  const result = await tx(async (c) => {
+    const user = (await c.query(`SELECT coins FROM users WHERE id = $1 AND account_status = 'active' FOR UPDATE`, [userId])).rows[0];
+    if (!user) throw fail('Kullanıcı bulunamadı.', 404);
+    const before = BigInt(user.coins);
+    const after = before + delta;
+    if (after < 0n) throw fail('Bakiye negatife düşemez.');
+    await c.query(`UPDATE users SET coins = $1, updated_at = NOW() WHERE id = $2`, [after.toString(), userId]);
+    await c.query(
+      `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, description) VALUES($1,'admin_adjustment',$2,$3)`,
+      [userId, delta.toString(), reason],
+    );
+    await c.query(
+      `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, amount_coins, balance_before, balance_after, metadata)
+       VALUES($1,$2,'admin_coin_adjustment','user',$3,$4,$5,$6)`,
+      [req.user.id, userId, delta.toString(), before.toString(), after.toString(), JSON.stringify({ reason })],
+    );
+    return { before: before.toString(), after: after.toString() };
+  });
+  res.json(result);
+});
+
+// ---------------- WIP ----------------
+router.post('/users/:userId/wip', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const level = wipLevel(req.body?.level);
+  const days = positiveInt(req.body?.days, 'WIP süresi', 3650);
+  await assertUser(userId);
+  const r = await query(
+    `INSERT INTO user_wip(user_id, level, starts_at, expires_at, is_active)
+     VALUES($1,$2,NOW(),NOW() + ($3::int * INTERVAL '1 day'),TRUE)
+     ON CONFLICT (user_id) DO UPDATE SET level = EXCLUDED.level, starts_at = EXCLUDED.starts_at, expires_at = EXCLUDED.expires_at, is_active = TRUE
+     RETURNING level, starts_at, expires_at`,
+    [userId, level, days],
+  );
+  await query(
+    `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, metadata) VALUES($1,$2,'admin_wip_grant','wip',$3)`,
+    [req.user.id, userId, JSON.stringify({ level, days })],
+  );
+  res.json({ wip: r.rows[0] });
+});
+
+router.delete('/users/:userId/wip', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  await query(`UPDATE user_wip SET is_active = FALSE WHERE user_id = $1`, [userId]);
+  await query(`INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type) VALUES($1,$2,'admin_wip_revoke','wip')`, [req.user.id, userId]);
+  res.json({ ok: true });
+});
+
+const FEATURE_TYPES = { nameColor: 'color', badge: 'string', maxRooms: 'int', viewVisitors: 'bool', kickImmunity: 'bool', profileEffect: 'bool' };
+function cleanFeatures(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('Özellikler nesne olmalı.');
+  const out = {};
+  for (const [key, value] of Object.entries(input)) {
+    const type = FEATURE_TYPES[key];
+    if (!type) throw fail(`Bilinmeyen özellik: ${key}`);
+    if (type === 'bool' && typeof value !== 'boolean') throw fail(`${key} true/false olmalı.`);
+    if (type === 'int' && (!Number.isInteger(value) || value < 1 || value > 50)) throw fail(`${key} 1-50 arasında tam sayı olmalı.`);
+    if (type === 'color' && value !== null && !/^#[0-9a-fA-F]{6}$/.test(String(value))) throw fail(`${key} #RRGGBB olmalı.`);
+    if (type === 'string' && value !== null && (typeof value !== 'string' || value.length > 40)) throw fail(`${key} geçersiz.`);
+    out[key] = value;
+  }
+  return out;
+}
+
+router.patch('/wip/tiers/:level', requireSuperAdmin, async (req, res) => {
+  const level = wipLevel(Number(req.params.level));
+  const name = req.body?.name !== undefined ? text(req.body.name, 'Ad', { min: 2, max: 60, required: true }) : null;
+  const features = req.body?.features !== undefined ? cleanFeatures(req.body.features) : null;
+  if (name === null && features === null) throw fail('Değiştirilecek alan yok.');
+  const r = await query(
+    `UPDATE wip_tiers SET name = COALESCE($2, name), features = features || COALESCE($3::jsonb, '{}'::jsonb) WHERE level = $1 RETURNING level, name, features`,
+    [level, name, features ? JSON.stringify(features) : null],
+  );
+  res.json({ tier: r.rows[0] });
+});
+
+router.post('/wip/plans', requireSuperAdmin, async (req, res) => {
+  const r = await query(
+    `INSERT INTO wip_plans(name, level, duration_days, price_coins) VALUES($1,$2,$3,$4) RETURNING id, name, level, duration_days, price_coins`,
+    [text(req.body?.name, 'Ad', { min: 2, max: 100, required: true }), wipLevel(req.body?.level),
+      positiveInt(req.body?.durationDays, 'Süre', 3650), bigAmount(req.body?.priceCoins, 'Fiyat').toString()],
+  );
+  res.status(201).json({ plan: r.rows[0] });
+});
+
+// ---------------- Envanter ----------------
+router.post('/users/:userId/inventory', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const itemType = oneOf(req.body?.itemType, INVENTORY_TYPES, 'Öğe tipi');
+  const itemKey = text(req.body?.itemKey, 'Öğe anahtarı', { max: 100, required: true });
+  const itemName = text(req.body?.itemName, 'Öğe adı', { max: 120, required: true });
+  await assertUser(userId);
+  if (itemType === 'frame' || itemType === 'entrance_effect') {
+    const table = itemType === 'frame' ? 'frames' : 'entrance_effects';
+    const exists = await query(`SELECT 1 FROM ${table} WHERE id::text = $1 AND is_active = TRUE`, [itemKey]);
+    if (!exists.rowCount) throw fail('Bu anahtara sahip aktif bir katalog öğesi yok.', 404);
+  }
+  let expiresAt = null;
+  if (req.body?.expiresAt) {
+    const d = new Date(req.body.expiresAt);
+    if (Number.isNaN(d.getTime()) || d.getTime() < Date.now()) throw fail('Bitiş tarihi geçersiz veya geçmişte.');
+    expiresAt = d.toISOString();
+  }
+  const metadata = req.body?.metadata && typeof req.body.metadata === 'object' && !Array.isArray(req.body.metadata) ? req.body.metadata : {};
+  const r = await query(
+    `INSERT INTO inventory_items(user_id, item_type, item_key, item_name, expires_at, metadata) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [userId, itemType, itemKey, itemName, expiresAt, JSON.stringify(metadata)],
+  );
+  await query(
+    `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, reference_id, metadata) VALUES($1,$2,'admin_inventory_grant','inventory',$3,$4)`,
+    [req.user.id, userId, r.rows[0].id, JSON.stringify({ itemType, itemKey })],
+  );
+  res.status(201).json({ id: r.rows[0].id });
+});
+
+// ---------------- Katalog (yalnızca yönetici) ----------------
+router.post('/gifts', requireSuperAdmin, async (req, res) => {
+  const r = await query(
+    `INSERT INTO gifts(name, coin_price, icon_url, animation_url, animation_format, has_alpha) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [text(req.body?.name, 'Ad', { min: 2, max: 80, required: true }), bigAmount(req.body?.coinPrice, 'Fiyat').toString(),
+      httpsUrl(req.body?.iconUrl, 'İkon adresi'), httpsUrl(req.body?.animationUrl, 'Animasyon adresi'),
+      oneOf(req.body?.animationFormat ?? 'lottie', ['lottie', 'svga', 'mp4', 'webp'], 'Animasyon biçimi'), req.body?.hasAlpha !== false],
+  );
+  res.status(201).json({ id: r.rows[0].id });
+});
+router.post('/frames', requireSuperAdmin, async (req, res) => {
+  const r = await query(`INSERT INTO frames(name, image_url) VALUES($1,$2) RETURNING id`, [
+    text(req.body?.name, 'Ad', { min: 2, max: 100, required: true }), httpsUrl(req.body?.imageUrl, 'Görsel adresi') ?? (() => { throw fail('Görsel adresi gerekli.'); })()]);
+  res.status(201).json({ id: r.rows[0].id });
+});
+router.post('/entrance-effects', requireSuperAdmin, async (req, res) => {
+  const r = await query(`INSERT INTO entrance_effects(name, animation_url, duration_ms) VALUES($1,$2,$3) RETURNING id`, [
+    text(req.body?.name, 'Ad', { min: 2, max: 100, required: true }),
+    httpsUrl(req.body?.animationUrl, 'Animasyon adresi') ?? (() => { throw fail('Animasyon adresi gerekli.'); })(),
+    req.body?.durationMs === undefined ? 4000 : positiveInt(req.body.durationMs, 'Süre', 20000)]);
+  res.status(201).json({ id: r.rows[0].id });
+});
+const TOGGLE_TABLES = { gifts: 'gifts', frames: 'frames', 'entrance-effects': 'entrance_effects', music: 'music_tracks' };
+router.post('/catalog/:kind/:id/active', requireSuperAdmin, async (req, res) => {
+  const table = TOGGLE_TABLES[req.params.kind];
+  if (!table) throw fail('Geçersiz katalog türü.', 404);
+  if (typeof req.body?.isActive !== 'boolean') throw fail('isActive true/false olmalı.');
+  const r = await query(`UPDATE ${table} SET is_active = $2 WHERE id = $1 RETURNING id`, [uuid(req.params.id, 'Kimlik'), req.body.isActive]);
+  if (!r.rowCount) throw fail('Öğe bulunamadı.', 404);
+  res.json({ ok: true });
+});
+
+// ---------------- Bayi (yalnızca yönetici) ----------------
+router.get('/dealers', requireSuperAdmin, async (req, res) => {
+  const r = await query(
+    `SELECT d.*, u.username AS owner_username FROM dealer_accounts d LEFT JOIN users u ON u.id = d.owner_user_id ORDER BY d.created_at DESC LIMIT 200`,
+  );
+  res.json({ dealers: r.rows.map((d) => ({
+    id: d.id, name: d.name, ownerUserId: d.owner_user_id, ownerUsername: d.owner_username,
+    coinBalance: String(d.coin_balance), commissionBps: d.commission_bps, isActive: d.is_active,
+  })) });
+});
+
+router.post('/dealers', requireSuperAdmin, async (req, res) => {
+  const bps = req.body?.commissionBps === undefined ? 0 : Number(req.body.commissionBps);
+  if (!Number.isInteger(bps) || bps < 0 || bps > 10000) throw fail('Komisyon 0-10000 (baz puan) arasında olmalı.');
+  const ownerId = req.body?.ownerUserId ? uuid(req.body.ownerUserId, 'Sahip') : null;
+  if (ownerId) await assertUser(ownerId);
+  const r = await query(
+    `INSERT INTO dealer_accounts(name, owner_user_id, commission_bps) VALUES($1,$2,$3) RETURNING id, name`,
+    [text(req.body?.name, 'Bayi adı', { min: 2, max: 100, required: true }), ownerId, bps],
+  );
+  res.status(201).json({ dealer: r.rows[0] });
+});
+
+router.post('/dealers/:dealerId/coins', requireSuperAdmin, async (req, res) => {
+  const dealerId = uuid(req.params.dealerId, 'Bayi');
+  const amount = bigAmount(req.body?.amount, 'Bayi Coin miktarı');
+  const result = await tx(async (c) => {
+    const dealer = (await c.query(`SELECT * FROM dealer_accounts WHERE id = $1 FOR UPDATE`, [dealerId])).rows[0];
+    if (!dealer) throw fail('Bayi bulunamadı.', 404);
+    const before = BigInt(dealer.coin_balance);
+    const balance = before + amount;
+    await c.query(`UPDATE dealer_accounts SET coin_balance = $1 WHERE id = $2`, [balance.toString(), dealer.id]);
+    await c.query(
+      `INSERT INTO dealer_transactions(dealer_id, admin_id, type, coin_amount, description) VALUES($1,$2,'credit',$3,$4)`,
+      [dealer.id, req.user.id, amount.toString(), text(req.body?.description, 'Açıklama', { max: 200 }) || 'Admin bayi Coin yükleme'],
+    );
+    await c.query(
+      `INSERT INTO financial_audit_logs(admin_id, action, reference_type, reference_id, amount_coins, balance_before, balance_after)
+       VALUES($1,'dealer_credit','dealer',$2,$3,$4,$5)`,
+      [req.user.id, dealer.id, amount.toString(), before.toString(), balance.toString()],
+    );
+    return { balance: balance.toString() };
+  });
+  res.json(result);
+});
+
+router.post('/dealers/:dealerId/sell', requireSuperAdmin, async (req, res) => {
+  const result = await tx((c) => dealerSell(c, {
+    dealerId: uuid(req.params.dealerId, 'Bayi'), userId: uuid(req.body?.userId, 'Kullanıcı'),
+    coins: bigAmount(req.body?.amount, 'Satış Coin miktarı'), actorId: req.user.id, description: text(req.body?.description, 'Açıklama', { max: 200 }),
+  }));
+  res.json(result);
+});
+
+// ---------------- Ajans ve yayıncı ----------------
+router.get('/agencies', async (req, res) => {
+  const status = req.query.status ? oneOf(String(req.query.status), ['pending', 'active', 'suspended', 'rejected'], 'Durum') : null;
+  const r = await query(
+    `SELECT a.*, u.username AS owner_username, (SELECT COUNT(*)::int FROM broadcasters b WHERE b.agency_id = a.id) AS broadcaster_count
+     FROM agencies a JOIN users u ON u.id = a.owner_id WHERE ($1::text IS NULL OR a.status = $1) ORDER BY a.created_at DESC LIMIT 200`,
+    [status],
+  );
+  res.json({ agencies: r.rows.map((a) => ({
+    id: a.id, name: a.name, ownerId: a.owner_id, ownerUsername: a.owner_username, status: a.status,
+    commissionBps: a.commission_bps, broadcasterCount: a.broadcaster_count, createdAt: a.created_at,
+  })) });
+});
+
+// Komisyon para etkisi taşıdığı için yalnızca yönetici.
+router.post('/agencies/:agencyId/status', requireSuperAdmin, async (req, res) => {
+  const agencyId = uuid(req.params.agencyId, 'Ajans');
+  const status = oneOf(req.body?.status, ['active', 'suspended', 'rejected'], 'Durum');
+  let bps = null;
+  if (req.body?.commissionBps !== undefined) {
+    bps = Number(req.body.commissionBps);
+    if (!Number.isInteger(bps) || bps < 0 || bps > 10000) throw fail('Komisyon 0-10000 (baz puan) arasında olmalı.');
+  }
+  const r = await query(
+    `UPDATE agencies SET status = $2, commission_bps = COALESCE($3, commission_bps),
+       approved_by = CASE WHEN $2 = 'active' THEN $4::uuid ELSE approved_by END,
+       approved_at = CASE WHEN $2 = 'active' THEN NOW() ELSE approved_at END
+     WHERE id = $1 RETURNING id, status, commission_bps`,
+    [agencyId, status, bps, req.user.id],
+  );
+  if (!r.rowCount) throw fail('Ajans bulunamadı.', 404);
+  await query(
+    `INSERT INTO financial_audit_logs(admin_id, action, reference_type, reference_id, metadata) VALUES($1,'agency_status','agency',$2,$3)`,
+    [req.user.id, agencyId, JSON.stringify({ status, commissionBps: r.rows[0].commission_bps })],
+  );
+  res.json({ agency: r.rows[0] });
+});
+
+router.get('/broadcasters', async (req, res) => {
+  const status = req.query.status ? oneOf(String(req.query.status), ['pending', 'approved', 'rejected', 'suspended'], 'Durum') : null;
+  const r = await query(
+    `SELECT b.user_id, b.status, b.applied_at, b.agency_id, u.username, u.display_name, a.name AS agency_name
+     FROM broadcasters b JOIN users u ON u.id = b.user_id LEFT JOIN agencies a ON a.id = b.agency_id
+     WHERE ($1::text IS NULL OR b.status = $1) ORDER BY b.applied_at DESC LIMIT 200`,
+    [status],
+  );
+  res.json({ broadcasters: r.rows.map((b) => ({
+    userId: b.user_id, username: b.username, displayName: b.display_name, status: b.status, appliedAt: b.applied_at,
+    agencyId: b.agency_id, agencyName: b.agency_name,
+  })) });
+});
+
+router.post('/broadcasters/:userId/status', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const status = oneOf(req.body?.status, ['approved', 'rejected', 'suspended'], 'Durum');
+  const r = await query(
+    `UPDATE broadcasters SET status = $2,
+       approved_by = CASE WHEN $2 = 'approved' THEN $3::uuid ELSE approved_by END,
+       approved_at = CASE WHEN $2 = 'approved' THEN NOW() ELSE approved_at END,
+       agency_id = CASE WHEN $2 IN ('rejected','suspended') THEN NULL ELSE agency_id END
+     WHERE user_id = $1 RETURNING user_id, status`,
+    [userId, status, req.user.id],
+  );
+  if (!r.rowCount) throw fail('Yayıncı başvurusu bulunamadı.', 404);
+  await query(
+    `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, metadata) VALUES($1,$2,'broadcaster_status','broadcaster',$3)`,
+    [req.user.id, userId, JSON.stringify({ status })],
+  );
+  res.json({ broadcaster: r.rows[0] });
+});
+
+// Bir ajansın belirli dönemdeki tahakkuk eden komisyonlarını "ödendi" işaretler (ödeme platform dışında yapılır).
+router.post('/agencies/:agencyId/settle', requireSuperAdmin, async (req, res) => {
+  const agencyId = uuid(req.params.agencyId, 'Ajans');
+  const period = String(req.body?.period ?? '');
+  if (!isPeriod(period)) throw fail('Dönem YYYY-AA biçiminde olmalı.');
+  const total = await tx(async (c) => {
+    const r = await c.query(
+      `UPDATE agency_commissions SET status = 'paid', paid_at = NOW(), paid_by = $3
+       WHERE agency_id = $1 AND period = $2 AND status = 'accrued' RETURNING diamond_amount`,
+      [agencyId, period, req.user.id],
+    );
+    if (!r.rowCount) throw fail('Bu dönem için ödenecek komisyon yok.', 404);
+    const sum = r.rows.reduce((s, x) => s + BigInt(x.diamond_amount), 0n);
+    await c.query(
+      `INSERT INTO financial_audit_logs(admin_id, action, reference_type, reference_id, amount_diamonds, metadata)
+       VALUES($1,'agency_commission_settlement','agency',$2,$3,$4)`,
+      [req.user.id, agencyId, sum.toString(), JSON.stringify({ period, records: r.rowCount })],
+    );
+    return sum;
+  });
+  res.json({ ok: true, period, paidDiamonds: total.toString() });
+});
+
+router.get('/finance/audit', requireSuperAdmin, async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const userId = req.query.userId ? uuid(String(req.query.userId), 'Kullanıcı') : null;
+  const r = await query(
+    `SELECT * FROM financial_audit_logs WHERE ($1::uuid IS NULL OR user_id = $1) ORDER BY created_at DESC LIMIT $2`,
+    [userId, limit],
+  );
+  res.json({ logs: r.rows });
+});
+
+// ---------------- Müzik kütüphanesi (yalnızca yönetici) ----------------
+// Telif: yalnızca kullanım hakkına sahip olduğunuz parçaları ekleyin; lisans notu zorunludur.
+router.post('/music/tracks', requireSuperAdmin, async (req, res) => {
+  const url = httpsUrl(req.body?.url, 'Şarkı adresi');
+  if (!url) throw fail('Şarkı adresi gerekli.');
+  const r = await query(
+    `INSERT INTO music_tracks(title, artist, url, cover_url, duration_ms, license_note, created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [text(req.body?.title, 'Başlık', { min: 1, max: 120, required: true }), text(req.body?.artist, 'Sanatçı', { max: 120 }), url,
+      httpsUrl(req.body?.coverUrl, 'Kapak adresi'), positiveInt(req.body?.durationMs, 'Süre (ms)', 7200000),
+      text(req.body?.licenseNote, 'Lisans notu', { min: 3, max: 300, required: true }), req.user.id],
+  );
+  res.status(201).json({ id: r.rows[0].id });
+});
+
+router.get('/music/tracks', requireSuperAdmin, async (req, res) => {
+  const r = await query(`SELECT id, title, artist, duration_ms, is_active, license_note FROM music_tracks ORDER BY created_at DESC LIMIT 200`);
+  res.json({ tracks: r.rows.map((t) => ({ id: t.id, title: t.title, artist: t.artist, durationMs: t.duration_ms, isActive: t.is_active, licenseNote: t.license_note })) });
+});
+
+// ---------------- Şikâyetler (admin + support) ----------------
+router.get('/reports', async (req, res) => {
+  const status = oneOf(String(req.query.status ?? 'open'), ['open', 'resolved', 'dismissed'], 'Durum');
+  const r = await query(
+    `SELECT r.*, ru.username AS reporter_username, tu.username AS target_username FROM reports r
+     JOIN users ru ON ru.id = r.reporter_id LEFT JOIN users tu ON tu.id = r.target_user_id
+     WHERE r.status = $1 ORDER BY r.created_at DESC LIMIT 100`,
+    [status],
+  );
+  res.json({ reports: r.rows.map((x) => ({
+    id: x.id, kind: x.kind, reason: x.reason, details: x.details, status: x.status, createdAt: x.created_at,
+    reporter: x.reporter_username, targetUserId: x.target_user_id, target: x.target_username, roomId: x.room_id, messageId: x.message_id,
+  })) });
+});
+
+router.post('/reports/:id/resolve', async (req, res) => {
+  const status = oneOf(req.body?.status, ['resolved', 'dismissed'], 'Durum');
+  const r = await query(
+    `UPDATE reports SET status = $2, resolved_by = $3, resolved_note = $4, resolved_at = NOW() WHERE id = $1 AND status = 'open' RETURNING id`,
+    [uuid(req.params.id, 'Şikâyet'), status, req.user.id, text(req.body?.note, 'Not', { max: 300 })],
+  );
+  if (!r.rowCount) throw fail('Açık şikâyet bulunamadı.', 404);
+  res.json({ ok: true });
+});
+
+// ---------------- Güvenlik duvarı (yalnızca yönetici) ----------------
+router.get('/security/events', requireSuperAdmin, async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const type = req.query.type ? String(req.query.type).slice(0, 40) : null;
+  const r = await query(
+    `SELECT id, event_type, host(ip) AS ip, user_id, detail, created_at FROM security_events
+     WHERE ($1::text IS NULL OR event_type = $1) ORDER BY created_at DESC LIMIT $2`,
+    [type, limit],
+  );
+  res.json({ events: r.rows, stats: securityStats() });
+});
+
+router.get('/security/blocks', requireSuperAdmin, async (req, res) => {
+  res.json({ blocks: listBans().map((b) => ({ ip: b.ip, reason: b.reason, until: b.until ? new Date(b.until).toISOString() : null })) });
+});
+
+router.post('/security/blocks', requireSuperAdmin, async (req, res) => {
+  const ip = String(req.body?.ip ?? '').trim();
+  if (!net.isIP(ip)) throw fail('Geçerli bir IP adresi girin.');
+  const minutes = req.body?.minutes === undefined || req.body.minutes === null ? null : positiveInt(req.body.minutes, 'Süre (dk)', 525600);
+  if (!(await banIpPersist(ip, minutes === null ? null : minutes * 60000, text(req.body?.reason, 'Neden', { max: 200 }) || 'Yönetici kararı', req.user.id))) {
+    throw fail('Bu IP izin listesinde olduğu için engellenemez.', 409);
+  }
+  res.status(201).json({ ok: true });
+});
+
+router.delete('/security/blocks/:ip', requireSuperAdmin, async (req, res) => {
+  const ip = String(req.params.ip);
+  if (!net.isIP(ip)) throw fail('Geçerli bir IP adresi girin.');
+  await unbanIp(ip);
+  res.json({ ok: true });
+});

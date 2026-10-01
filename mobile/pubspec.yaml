@@ -1,0 +1,27 @@
+name: tr_live
+description: TR Live - canlı sesli/görüntülü odalar, aile, WIP, ajans/yayıncı, hediyeler ve yönetim
+publish_to: none
+version: 2.2.0+1
+environment:
+  sdk: '>=3.8.0 <4.0.0'
+  flutter: '>=3.32.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.5.0
+  shared_preferences: ^2.5.3
+  livekit_client: ^2.5.1
+  web_socket_channel: ^3.0.3
+  lottie: ^3.3.1
+  just_audio: ^0.10.4
+  image_picker: ^1.2.0
+  cupertino_icons: ^1.0.8
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/animations/
+    - assets/images/

@@ -1,0 +1,10 @@
+# LiveKit sunucu yapılandırması. Anahtarlar backend/.env ile AYNI olmalıdır.
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: true
+keys:
+  CHANGE_ME: CHANGE_ME_LONG_SECRET   # "API_KEY: API_SECRET"
+# TLS için LiveKit'in önüne ayrı bir alt alan adıyla nginx/caddy koyun (wss://livekit.example.com)
