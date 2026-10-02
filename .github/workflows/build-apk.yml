@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: mobile # Tüm komutları doğrudan mobile klasörünün içinde çalıştırır
     steps:
       - uses: actions/checkout@v4
       
@@ -23,14 +26,10 @@ jobs:
           channel: 'stable'
           
       - name: Bağımlılıkları Yükle
-        run: |
-          cd mobile
-          flutter pub get
+        run: flutter pub get
           
       - name: APK Derle
-        run: |
-          cd mobile
-          flutter build apk --release
+        run: flutter build apk --release
           
       - name: APK'yı Çıktı Olarak Paylaş
         uses: actions/upload-artifact@v4
