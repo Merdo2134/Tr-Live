@@ -2,12 +2,12 @@ name: Flutter APK Derleme
 
 on:
   push:
-    branches: [ main, ana ] 
-  workflow_dispatch: 
+    branches: [ "main", "ana" ]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
@@ -22,19 +22,17 @@ jobs:
         with:
           channel: 'stable'
           
-      - name: Bağımlılıkları Yükle
+      - name: Projeyi Otomatik Bul ve Derle
         run: |
-          cd $GITHUB_WORKSPACE/mobile
+          # Klasör yapısı ne olursa olsun pubspec.yaml dosyasını bulur
+          FLUTTER_PATH=$(find . -name "pubspec.yaml" -exec dirname {} \; | head -n 1)
+          echo "Proje konumu: $FLUTTER_PATH"
+          cd "$FLUTTER_PATH"
           flutter pub get
-          
-      - name: APK Derle
-        run: |
-          cd $GITHUB_WORKSPACE/mobile
           flutter build apk --release
           
       - name: APK'yı Çıktı Olarak Paylaş
         uses: actions/upload-artifact@v4
         with:
           name: tr-canli-apk
-          path: |
-            mobile/build/app/outputs/flutter-apk/app-release.apk
+          path: "**/build/app/outputs/flutter-apk/app-release.apk"
