@@ -1,0 +1,39 @@
+name: Flutter APK Derleme
+
+on:
+  push:
+    branches: [ main, ana ] # Kendi ana branch adınıza göre düzenleyin
+  workflow_dispatch: # Manuel tetiklemek için
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Java Kurulumu
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          
+      - name: Flutter Kurulumu
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          
+      - name: Bağımlılıkları Yükle
+        run: |
+          cd mobil
+          flutter pub get
+          
+      - name: APK Derle
+        run: |
+          cd mobil
+          flutter build apk --release
+          
+      - name: APK'yı Çıktı Olarak Paylaş
+        uses: actions/upload-artifact@v3
+        with:
+          name: tr-canli-apk
+          path: mobil/build/app/outputs/flutter-apk/app-release.apk
