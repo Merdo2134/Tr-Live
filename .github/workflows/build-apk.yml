@@ -8,9 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: mobile # Tüm komutları doğrudan mobile klasörünün içinde çalıştırır
     steps:
       - uses: actions/checkout@v4
       
@@ -26,13 +23,18 @@ jobs:
           channel: 'stable'
           
       - name: Bağımlılıkları Yükle
-        run: flutter pub get
+        run: |
+          cd $GITHUB_WORKSPACE/mobile
+          flutter pub get
           
       - name: APK Derle
-        run: flutter build apk --release
+        run: |
+          cd $GITHUB_WORKSPACE/mobile
+          flutter build apk --release
           
       - name: APK'yı Çıktı Olarak Paylaş
         uses: actions/upload-artifact@v4
         with:
           name: tr-canli-apk
-          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          path: |
+            mobile/build/app/outputs/flutter-apk/app-release.apk
