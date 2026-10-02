@@ -22,16 +22,18 @@ jobs:
         with:
           channel: 'stable'
           
-      - name: Hatalı Yolları Tamir Et ve Derle
+      - name: Gradle ve Dosya Yollarını Zorla Bağla
         run: |
-          # Projenin gerçek yerini bul
+          # Disk üzerinde gerçek pubspec.yaml dosyasının yerini bul
           REAL_PATH=$(find . -name "pubspec.yaml" -exec dirname {} \; | head -n 1)
-          cd "$REAL_PATH"
+          echo "Gerçek Flutter yolu bulundu: $REAL_PATH"
           
-          # Proje içindeki tüm dosyalarda kalmış olabilecek hatalı sabit yolları temizle
-          find . -type f -writable -exec sed -i "s|/home/runner/work/Tr-Live/Tr-Live/|$GITHUB_WORKSPACE/|g" {} + 2>/dev/null || true
+          # Hatalı çift klasör /home/runner/work/Tr-Live/Tr-Live/ hatasını çözmek için sembolik bağ oluştur
+          sudo mkdir -p /home/runner/work/Tr-Live/Tr-Live/
+          sudo ln -s "$GITHUB_WORKSPACE/$REAL_PATH" /home/runner/work/Tr-Live/Tr-Live/mobile
           
-          # Temiz kurulum ve derleme
+          # Çalışma dizinine geç ve derlemeyi başlat
+          cd "$GITHUB_WORKSPACE/$REAL_PATH"
           flutter pub get
           flutter build apk --release
           
