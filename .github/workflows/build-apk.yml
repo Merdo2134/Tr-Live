@@ -1,3 +1,5 @@
+
+
 name: Flutter APK Derleme
 
 on:
@@ -23,18 +25,13 @@ jobs:
           channel: 'stable'
           
       - name: Bağımlılıkları Yükle
-        run: |
-          cd mobil
-          flutter pub get
+        run: flutter pub get
           
       - name: APK Derle
-        run: |
-          cd mobil
-          flutter build apk --release
+        run: flutter build apk --release
           
       - name: APK'yı Çıktı Olarak Paylaş
         uses: actions/upload-artifact@v4
         with:
           name: tr-canli-apk
-          path: mobil/build/app/outputs/flutter-apk/app-release.apk
-
+          path: build/app/outputs/flutter-apk/app-release.apk
