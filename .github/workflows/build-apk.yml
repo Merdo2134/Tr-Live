@@ -22,12 +22,16 @@ jobs:
         with:
           channel: 'stable'
           
-      - name: Projeyi Otomatik Bul ve Derle
+      - name: Hatalı Yolları Tamir Et ve Derle
         run: |
-          # Klasör yapısı ne olursa olsun pubspec.yaml dosyasını bulur
-          FLUTTER_PATH=$(find . -name "pubspec.yaml" -exec dirname {} \; | head -n 1)
-          echo "Proje konumu: $FLUTTER_PATH"
-          cd "$FLUTTER_PATH"
+          # Projenin gerçek yerini bul
+          REAL_PATH=$(find . -name "pubspec.yaml" -exec dirname {} \; | head -n 1)
+          cd "$REAL_PATH"
+          
+          # Proje içindeki tüm dosyalarda kalmış olabilecek hatalı sabit yolları temizle
+          find . -type f -writable -exec sed -i "s|/home/runner/work/Tr-Live/Tr-Live/|$GITHUB_WORKSPACE/|g" {} + 2>/dev/null || true
+          
+          # Temiz kurulum ve derleme
           flutter pub get
           flutter build apk --release
           
