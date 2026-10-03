@@ -90,9 +90,11 @@ class _HomeScreenState extends State<HomeScreen> {
           if (i == 0) _audioKey.currentState?.refresh();
           if (i == 1) _videoKey.currentState?.refresh();
         },
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Sesli'),
-          NavigationDestination(icon: Icon(Icons.videocam_outlined), selectedIcon: Icon(Icons.videocam), label: 'Görüntülü'),
+        // Senior Developer Notu: "const [" ifadesi kaldırıldı.
+        // İçerideki ValueListenableBuilder dinamik olduğu için listenin kendisi const olamaz.
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Sesli'),
+          const NavigationDestination(icon: Icon(Icons.videocam_outlined), selectedIcon: Icon(Icons.videocam), label: 'Görüntülü'),
           NavigationDestination(
             icon: ValueListenableBuilder<int>(
               valueListenable: Inbox.unread,
@@ -101,8 +103,8 @@ class _HomeScreenState extends State<HomeScreen> {
             selectedIcon: const Icon(Icons.chat_bubble),
             label: 'Mesaj',
           ),
-          NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups), label: 'Aile'),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profil'),
+          const NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups), label: 'Aile'),
+          const NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profil'),
         ],
       ),
     );
@@ -171,7 +173,7 @@ class RoomsTabState extends State<RoomsTab> {
               const Spacer(),
               DropdownButton<int>(
                 value: seats,
-                items: [for (final n in const [2, 5, 8, 9, 12, 15, 20]) DropdownMenuItem(value: n, child: Text('$n koltuk'))],
+                items: [for (final n in const) DropdownMenuItem(value: n, child: Text('$n koltuk'))],
                 onChanged: (v) => setS(() => seats = v ?? 8),
               ),
             ]),
