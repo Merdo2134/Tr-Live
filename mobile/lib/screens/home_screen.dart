@@ -90,8 +90,6 @@ class _HomeScreenState extends State<HomeScreen> {
           if (i == 0) _audioKey.currentState?.refresh();
           if (i == 1) _videoKey.currentState?.refresh();
         },
-        // Senior Developer Notu: "const [" ifadesi kaldırıldı.
-        // İçerideki ValueListenableBuilder dinamik olduğu için listenin kendisi const olamaz.
         destinations: [
           const NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Sesli'),
           const NavigationDestination(icon: Icon(Icons.videocam_outlined), selectedIcon: Icon(Icons.videocam), label: 'Görüntülü'),
