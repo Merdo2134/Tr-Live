@@ -1,44 +1,162 @@
-name: Flutter APK Derleme
+name: Build Android APK
 
 on:
-  push:
-    branches: [ "main", "ana" ]
   workflow_dispatch:
+    inputs:
+      api_url:
+        description: "Sunucu adresi (örn. https://siteniz.com)"
+        required: false
+        default: "https://example.com"
+      allow_http:
+        description: "http:// adresine izin ver (yalnızca test için)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/apk_build.yml"
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      INPUT_API_URL: ${{ github.event.inputs.api_url }}
+      INPUT_ALLOW_HTTP: ${{ github.event.inputs.allow_http }}
+      REPO_API_URL: ${{ vars.API_URL }}
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Java Kurulumu
+      - name: Depoyu indir
+        uses: actions/checkout@v4
+
+      - name: Flutter projesini bul (pubspec.yaml taraması)
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PUBSPEC=""
+          while IFS= read -r f; do
+            if grep -q 'sdk: flutter' "$f"; then APP_PUBSPEC="$f"; break; fi
+          done < <(find . -name pubspec.yaml \
+            -not -path '*/.dart_tool/*' -not -path '*/build/*' -not -path '*/.symlinks/*' \
+            -not -path '*/node_modules/*' -not -path './.git/*' | sort)
+          if [ -z "$APP_PUBSPEC" ]; then
+            echo "::error::Depoda geçerli bir Flutter projesi saptanamadı."
+            exit 1
+          fi
+          APP_DIR="$(cd "$(dirname "$APP_PUBSPEC")" && pwd)"
+          APP_NAME="$(grep -m1 -E '^name:' "$APP_PUBSPEC" | sed -E 's/^name:[[:space:]]*//; s/["'"'"']//g' | tr -d '\r ')"
+          if ! printf '%s' "$APP_NAME" | grep -qE '^[a-z][a-z0-9_]*$'; then APP_NAME="tr_live"; fi
+          echo "APP_DIR=$APP_DIR"   >> "$GITHUB_ENV"
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+
+      - name: Java 17 ortamını yükle
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '17'
-          
-      - name: Flutter Kurulumu
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Flutter SDK ortamını kur
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-          
-      - name: Gradle ve Dosya Yollarını Zorla Bağla
+          channel: "stable"
+          cache: true
+
+      - name: Android proje iskeletini doğrula / üret
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
         run: |
-          # Disk üzerinde gerçek pubspec.yaml dosyasının yerini bul
-          REAL_PATH=$(find . -name "pubspec.yaml" -exec dirname {} \; | head -n 1)
-          echo "Gerçek Flutter yolu bulundu: $REAL_PATH"
+          set -euo pipefail
+          HAS_GRADLE=false
+          if [ -f android/app/build.gradle ] || [ -f android/app/build.gradle.kts ]; then HAS_GRADLE=true; fi
+          if [ -f android/app/src/main/AndroidManifest.xml ] && [ "$HAS_GRADLE" = true ]; then
+            echo "Android iskeleti doğrulandı."
+          else
+            rm -rf android
+            flutter create . --platforms=android --project-name "$APP_NAME" --org com.trlive
+            if [ -f test/widget_test.dart ]; then rm -f test/widget_test.dart; fi
+          fi
+
+      - name: Android Mimarisi Parametrelerini Güncelle (Yol Hatalarına Karşı Tam Koruma)
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, pathlib, sys
+
+          base_dir = pathlib.Path(os.environ['APP_DIR']).resolve()
           
-          # Hatalı çift klasör /home/runner/work/Tr-Live/Tr-Live/ hatasını çözmek için sembolik bağ oluştur
-          sudo mkdir -p /home/runner/work/Tr-Live/Tr-Live/
-          sudo ln -s "$GITHUB_WORKSPACE/$REAL_PATH" /home/runner/work/Tr-Live/Tr-Live/mobile
+          gradle_path = None
+          for name in ("android/app/build.gradle.kts", "android/app/build.gradle"):
+              target = base_dir / name
+              if target.exists():
+                  gradle_path = target
+                  break
+                  
+          if gradle_path is None:
+              sys.exit(f"HATA: build.gradle dosyası {base_dir} dizininde bulunamadı.")
           
-          # Çalışma dizinine geç ve derlemeyi başlat
-          cd "$GITHUB_WORKSPACE/$REAL_PATH"
-          flutter pub get
-          flutter build apk --release
-          
-      - name: APK'yı Çıktı Olarak Paylaş
+          src = gradle_path.read_text()
+          new, n = re.subn(r"(minSdk(?:Version)?)(\s*=?\s*)flutter\.minSdkVersion", r"\g<1>\g<2>24", src)
+          if n == 0:
+              m = re.search(r"minSdk(?:Version)?\s*=?\s*(\d+)", src)
+              if m and int(m.group(1)) < 24:
+                  new = re.sub(r"(minSdk(?:Version)?)(\s*=?\s*)\d+", r"\g<1>\g<2>24", src, count=1)
+                  n = 1
+          if n:
+              gradle_path.write_text(new)
+              print(f"Başarılı: {gradle_path.name} minSdk 24 olarak set edildi.")
+
+          manifest_path = base_dir / "android/app/src/main/AndroidManifest.xml"
+          if manifest_path.exists():
+              s = manifest_path.read_text()
+              perms = ["INTERNET", "RECORD_AUDIO", "CAMERA", "MODIFY_AUDIO_SETTINGS", "ACCESS_NETWORK_STATE", "BLUETOOTH_CONNECT"]
+              add = "".join(f'    <uses-permission android:name="android.permission.{p}"/>\n' for p in perms if f'android.permission.{p}"' not in s)
+              if add:
+                  s = s.replace("<application", add + "    <application", 1)
+              if os.environ.get("INPUT_ALLOW_HTTP", "").lower() == "true" and "usesCleartextTraffic" not in s:
+                  s = s.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+              manifest_path.write_text(s)
+              print("Manifest izin matrisi başarıyla uygulandı.")
+          PY
+
+      - name: Sunucu adresini doğrula
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_URL="${INPUT_API_URL:-}"
+          [ -n "$API_URL" ] || API_URL="${REPO_API_URL:-}"
+          [ -n "$API_URL" ] || API_URL="https://example.com"
+          if printf '%s' "$API_URL" | grep -q '^http://' && [ "${INPUT_ALLOW_HTTP:-false}" != "true" ]; then
+            echo "::error::Güvenlik İhlali: Açık HTTP adresi engellendi. HTTPS kullanın."
+            exit 1
+          fi
+          echo "API_URL=$API_URL" >> "$GITHUB_ENV"
+
+      - name: Paketleri Çözümle
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: Statik Kod Analizi (Linter kontrolü)
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee analyze.log || true
+
+      - name: Prodüksiyon APK Paketleme (ARM64 Mimarisi optimize)
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          set -euo pipefail
+          flutter build apk --release --no-shrink --target-platform android-arm64 --dart-define=API_URL="$API_URL"
+
+      - name: Artifact olarak dışa aktar
         uses: actions/upload-artifact@v4
         with:
-          name: tr-canli-apk
-          path: "**/build/app/outputs/flutter-apk/app-release.apk"
+          name: tr-live-release-apk
+          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/*.apk
+          retention-days: 14
