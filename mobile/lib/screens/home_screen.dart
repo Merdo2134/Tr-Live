@@ -171,7 +171,16 @@ class RoomsTabState extends State<RoomsTab> {
               const Spacer(),
               DropdownButton<int>(
                 value: seats,
-                items: [for (final n in const) DropdownMenuItem(value: n, child: Text('$n koltuk'))],
+                // SENIOR ÇÖZÜM: Kırpılma ihtimali olan döngü silindi, düz statik liste mimarisine geçildi.
+                items: const [
+                  DropdownMenuItem(value: 2, child: Text('2 koltuk')),
+                  DropdownMenuItem(value: 5, child: Text('5 koltuk')),
+                  DropdownMenuItem(value: 8, child: Text('8 koltuk')),
+                  DropdownMenuItem(value: 9, child: Text('9 koltuk')),
+                  DropdownMenuItem(value: 12, child: Text('12 koltuk')),
+                  DropdownMenuItem(value: 15, child: Text('15 koltuk')),
+                  DropdownMenuItem(value: 20, child: Text('20 koltuk')),
+                ],
                 onChanged: (v) => setS(() => seats = v ?? 8),
               ),
             ]),
