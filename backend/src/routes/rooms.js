@@ -13,6 +13,7 @@ import { loadPublicRow, activeEntranceEffect } from '../services/users.js';
 import { leaveRoom, closeRoom, SUPPORTED_SEATS } from '../services/rooms.js';
 import { openMicSession, closeMicSessions } from '../services/mic.js';
 import { scoreboardOf } from '../services/scoreboard.js';
+import { cleanPublic } from '../safe_text.js';
 import crypto from 'node:crypto';
 
 export const router = Router();
@@ -73,7 +74,7 @@ router.get('/', optionalAuth, async (req, res) => {
 });
 
 router.post('/', requireAuth, userLimit('room_create', 10, 3600e3), async (req, res) => {
-  const name = text(req.body?.name || 'TR Live Odası', 'Oda adı', { min: 2, max: 60 });
+  const name = cleanPublic(text(req.body?.name || 'TR Live Odası', 'Oda adı', { min: 2, max: 60 }), 'Oda adı');
   const tags = cleanTags(req.body?.tags);
   const password = text(req.body?.password, 'Oda şifresi', { min: 4, max: 12 });
   const passwordHash = password ? await hashPassword(password) : null;
@@ -191,7 +192,7 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   const sets = []; const values = [];
   const set = (col, v) => { values.push(v); sets.push(`${col} = $${values.length}`); };
   const b = req.body ?? {};
-  if (b.name !== undefined) set('name', text(b.name, 'Oda adı', { min: 2, max: 60, required: true }));
+  if (b.name !== undefined) set('name', cleanPublic(text(b.name, 'Oda adı', { min: 2, max: 60, required: true }), 'Oda adı'));
   if (b.tags !== undefined) set('tags', cleanTags(b.tags));
   if (b.chatEnabled !== undefined) { if (typeof b.chatEnabled !== 'boolean') throw fail('chatEnabled true/false olmalı.'); set('chat_enabled', b.chatEnabled); }
   if (b.theme !== undefined) set('theme', oneOf(b.theme, THEMES, 'Tema'));

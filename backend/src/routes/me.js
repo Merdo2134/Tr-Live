@@ -10,6 +10,7 @@ import { loadProfile } from '../services/profile.js';
 import { activeWip } from '../services/wip.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 import { config } from '../config.js';
+import { cleanPublic } from '../safe_text.js';
 import { hub } from '../realtime.js';
 
 export const router = Router();
@@ -30,8 +31,8 @@ router.patch('/', async (req, res) => {
   const values = [];
   const set = (column, value) => { values.push(value); sets.push(`${column} = $${values.length}`); };
 
-  if (b.displayName !== undefined) set('display_name', text(b.displayName, 'Ad', { min: 1, max: 60, required: true }));
-  if (b.bio !== undefined) set('bio', text(b.bio, 'Biyografi', { max: 300 }));
+  if (b.displayName !== undefined) set('display_name', cleanPublic(text(b.displayName, 'Ad', { min: 1, max: 60, required: true }), 'Ad'));
+  if (b.bio !== undefined) set('bio', cleanPublic(text(b.bio, 'Biyografi', { max: 300 }), 'Biyografi'));
   if (b.language !== undefined) {
     if (typeof b.language !== 'string' || !LANG_RE.test(b.language)) throw fail('Dil geçersiz.');
     set('language', b.language);

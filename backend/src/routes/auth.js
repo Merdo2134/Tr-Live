@@ -1,3 +1,4 @@
+import { cleanPublic } from '../safe_text.js';
 import { Router } from 'express';
 import { query } from '../database.js';
 import { hashPassword, checkPassword, signToken, passwordRules } from '../auth.js';
@@ -16,7 +17,7 @@ router.post('/register', ipLimit('register', 5, 3600e3), async (req, res) => {
   }
   const password = String(req.body?.password ?? '');
   passwordRules(password);
-  const displayName = text(req.body?.displayName || username, 'Ad', { min: 1, max: 60 });
+  const displayName = cleanPublic(text(req.body?.displayName || username, 'Ad', { min: 1, max: 60 }), 'Ad');cleanPublic(username, 'Kullanıcı adı');
   const passwordHash = await hashPassword(password);
   try {
     const r = await query(

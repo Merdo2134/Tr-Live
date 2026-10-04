@@ -1,3 +1,4 @@
+import { cleanPublic } from '../safe_text.js';
 import { Router } from 'express';
 import { query, tx } from '../database.js';
 import { requireAuth } from '../auth.js';
@@ -52,7 +53,7 @@ router.get('/:familyId', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const name = text(req.body?.name, 'Aile adı', { min: 2, max: 40, required: true });
+  const name = cleanPublic(text(req.body?.name, 'Aile adı', { min: 2, max: 40, required: true }), 'Aile adı');
   const description = text(req.body?.description, 'Açıklama', { max: 300 });
   const logoUrl = httpsUrl(req.body?.logoUrl, 'Logo adresi');
   try {
@@ -83,7 +84,7 @@ router.patch('/:familyId', async (req, res) => {
   if (req.body?.logoUrl !== undefined) { values.push(httpsUrl(req.body.logoUrl, 'Logo adresi')); sets.push(`logo_url = $${values.length}`); }
   if (req.body?.name !== undefined) {
     if (role !== 'owner') throw fail('Aile adını yalnızca sahibi değiştirebilir.', 403);
-    values.push(text(req.body.name, 'Aile adı', { min: 2, max: 40, required: true })); sets.push(`name = $${values.length}`);
+    values.push(cleanPublic(text(req.body.name, 'Aile adı', { min: 2, max: 40, required: true }), 'Aile adı')); sets.push(`name = $${values.length}`);
   }
   if (!sets.length) throw fail('Değiştirilecek alan yok.');
   values.push(id);

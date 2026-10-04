@@ -1,3 +1,4 @@
+import { cleanPublic } from '../safe_text.js';
 import { Router } from 'express';
 import { query, tx } from '../database.js';
 import { requireAuth } from '../auth.js';
@@ -65,7 +66,7 @@ router.get('/agencies', async (req, res) => {
 });
 
 router.post('/agencies', async (req, res) => {
-  const name = text(req.body?.name, 'Ajans adı', { min: 3, max: 60, required: true });
+  const name = cleanPublic(text(req.body?.name, 'Ajans adı', { min: 3, max: 60, required: true }), 'Ajans adı');
   const description = text(req.body?.description, 'Açıklama', { max: 500 });
   const logoUrl = httpsUrl(req.body?.logoUrl, 'Logo adresi');
   try {
