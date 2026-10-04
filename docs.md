@@ -60,6 +60,11 @@ Gönderici odada olmalı. Kendine hediye serbesttir (bkz. README kuralları).
 | Moderatör (oda rolü) | Oda sahibi: `POST /rooms/:id/members/:uid/role` | sohbet silme, `chat-mute`, `mic-invite`, `seats/:i/lock`, `mic-off` (koltuktan kaldır), `kick`, `block` |
 Yardımcı admin başka bir admin uç noktasına gidince 403 alır. Olay: `mic_invite`, `room_seats_locked`.
 
+## Oda gezinme ve sıra (v2.4)
+`GET /api/rooms?q=` arama · `GET /api/rooms/favorites` · `GET /api/rooms/recent` · `POST|DELETE|GET /api/rooms/hosts/:userId/favorite` ·
+`GET|POST|DELETE /api/rooms/:id/mic/queue` · olaylar: `room_mic_queue`, `mic_invite` (sıra gelince `fromName: "Sıra sizde"`).
+Mobil: `RoomDock` (açık oda tek yerde yaşar, küçültülünce Offstage), `DiscoverScreen`.
+
 ## Oda özellikleri (v2.3)
 - **Gizli oda:** `hidden:true` ile 6 karakterlik davet kodu (0/O/1/I yok); listede görünmez; `POST /api/rooms/by-code`, `join {code}`. Kod yalnızca sahip/yardımcı sahibe görünür; tahmin denemeleri sınırlı.
 - **Tema:** default, neon, galaxy, sunset, forest, royal, ocean, rose; özel görsel `themeImageUrl` için WIP 4+ (`customRoomTheme`).

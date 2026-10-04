@@ -49,3 +49,17 @@ test('moderatör yetkileri oda sahibine dokunamaz, normal kullanıcıya uygulan�
   assert.equal(canManage('owner', 'user', 'role', 'moderator'), true);
   assert.equal(canManage('user', 'user', 'moderate'), false);
 });
+
+import { pickNext, hasFreeSeat } from '../src/mic_queue_logic.js';
+test('mikrofon sırası: ilk uygun kişi seçilir, uygun olmayanlar düşer', () => {
+  const q = [{ user_id: 'a' }, { user_id: 'b' }, { user_id: 'c' }];
+  assert.deepEqual(pickNext(q, new Set(['b', 'c'])), { next: 'b', drop: ['a'] });
+  assert.deepEqual(pickNext(q, new Set()), { next: null, drop: ['a', 'b', 'c'] });
+  assert.deepEqual(pickNext([], new Set(['a'])), { next: null, drop: [] });
+});
+test('boş koltuk hesabı (0. koltuk sahibin, kilitliler sayılmaz)', () => {
+  assert.equal(hasFreeSeat(4, [], [0, 1, 2, 3]), false);
+  assert.equal(hasFreeSeat(4, [3], [0, 1, 2]), false);
+  assert.equal(hasFreeSeat(4, [], [0, 1, 2]), true);
+  assert.equal(hasFreeSeat(2, [], [0]), true);
+});

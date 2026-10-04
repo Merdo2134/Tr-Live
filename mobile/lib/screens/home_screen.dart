@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../widgets/room_theme.dart';
 import '../services/api.dart';
 import '../services/inbox_service.dart';
 import '../services/session.dart';
+import '../services/room_dock.dart';
+import 'discover_screen.dart';
 import '../widgets/common.dart';
 import '../widgets/gift_ribbon.dart';
 import 'family_screen.dart';
@@ -35,11 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (code == null || !mounted) return;
     final r = await guard(context, () => Api.post('/api/rooms/by-code', {'code': code}));
     if (r == null || !mounted) return;
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => RoomScreen(roomId: r['roomId'].toString(), initialName: (r['name'] ?? 'Oda').toString(), code: code.trim().toUpperCase())));
-    if (mounted) {
-      _audioKey.currentState?.refresh();
-      _videoKey.currentState?.refresh();
-    }
+    await openRoom(context, RoomRequest(roomId: r['roomId'].toString(), name: (r['name'] ?? 'Oda').toString(), code: code.trim().toUpperCase()));
   }
 
   @override
@@ -50,10 +49,64 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return Stack(children: [
+      Positioned.fill(child: _scaffold(context)),
+      // Açık oda: küçültülünce Offstage ile arka planda yaşamaya devam eder (ses kesilmez).
+      ValueListenableBuilder<RoomRequest?>(
+        valueListenable: RoomDock.request,
+        builder: (context, req, _) {
+          if (req == null) return const SizedBox.shrink();
+          return ValueListenableBuilder<bool>(
+            valueListenable: RoomDock.minimized,
+            builder: (context, min, _) => Stack(children: [
+              Positioned.fill(
+                child: Offstage(
+                  offstage: min,
+                  child: TickerMode(
+                    enabled: !min,
+                    child: RoomScreen(key: ValueKey(RoomDock.serial), roomId: req.roomId, initialName: req.name, locked: req.locked, code: req.code),
+                  ),
+                ),
+              ),
+              if (min) _miniBar(req),
+            ]),
+          );
+        },
+      ),
+    ]);
+  }
+
+  Widget _miniBar(RoomRequest req) {
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 88,
+      child: Material(
+        elevation: 6,
+        borderRadius: BorderRadius.circular(16),
+        color: Theme.of(context).colorScheme.primaryContainer,
+        child: ListTile(
+          dense: true,
+          leading: const Icon(Icons.graphic_eq),
+          title: Text(req.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: const Text('Oda açık · dokunarak büyüt'),
+          onTap: RoomDock.expand,
+          trailing: IconButton(tooltip: 'Odadan ayrıl', icon: const Icon(Icons.close), onPressed: () => RoomDock.exitHandler?.call()),
+        ),
+      ),
+    );
+  }
+
+  Widget _scaffold(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('TR Live'),
         actions: [
+          IconButton(
+            tooltip: 'Favoriler ve son girilenler',
+            icon: const Icon(Icons.star_border),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen())),
+          ),
           IconButton(
             tooltip: 'Liderlik tablosu',
             icon: const Icon(Icons.emoji_events_outlined),
@@ -127,6 +180,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// Odayı dock'ta açar. Oda sahibi başka odaya geçerse kendi odası kapanacağı için önce sorulur.
+Future<void> openRoom(BuildContext context, RoomRequest req) async {
+  if (RoomDock.isOpen && RoomDock.request.value?.roomId != req.roomId && RoomDock.myRole == 'owner') {
+    final ok = await confirm(context, 'Başka odaya geçerseniz kendi odanız kapanır. Devam edilsin mi?', action: 'Geç');
+    if (!ok) return;
+  }
+  RoomDock.open(req);
+}
+
 class RoomsTab extends StatefulWidget {
   final String type;
   const RoomsTab({super.key, required this.type});
@@ -139,16 +201,32 @@ class RoomsTabState extends State<RoomsTab> {
   List<Map<String, dynamic>> _rooms = [];
   bool _loading = true;
   String? _error;
+  String _q = '';
+  Timer? _debounce;
+
+  void _dockChanged() {
+    if (mounted && (!RoomDock.isOpen || RoomDock.minimized.value)) refresh();
+  }
 
   @override
   void initState() {
     super.initState();
+    RoomDock.request.addListener(_dockChanged);
+    RoomDock.minimized.addListener(_dockChanged);
     refresh();
+  }
+
+  @override
+  void dispose() {
+    RoomDock.request.removeListener(_dockChanged);
+    RoomDock.minimized.removeListener(_dockChanged);
+    _debounce?.cancel();
+    super.dispose();
   }
 
   Future<void> refresh() async {
     try {
-      final r = await Api.get('/api/rooms', query: {'type': widget.type});
+      final r = await Api.get('/api/rooms', query: {'type': widget.type, if (_q.isNotEmpty) 'q': _q});
       if (!mounted) return;
       setState(() {
         _rooms = listOf(r['rooms']);
@@ -164,10 +242,7 @@ class RoomsTabState extends State<RoomsTab> {
     }
   }
 
-  Future<void> _open(String id, String name, {bool locked = false}) async {
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => RoomScreen(roomId: id, initialName: name, locked: locked)));
-    if (mounted) refresh();
-  }
+  Future<void> _open(String id, String name, {bool locked = false}) => openRoom(context, RoomRequest(roomId: id, name: name, locked: locked));
 
   Future<void> createRoom() async {
     final nameCtl = TextEditingController();
@@ -242,10 +317,10 @@ class RoomsTabState extends State<RoomsTab> {
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null && _rooms.isEmpty) return LoadError(message: _error!, onRetry: refresh);
-    return RefreshIndicator(
+    final list = RefreshIndicator(
       onRefresh: refresh,
       child: _rooms.isEmpty
-          ? ListView(children: const [SizedBox(height: 160), Center(child: Text('Şu an açık oda yok. İlk odayı sen aç!'))])
+          ? ListView(children: [const SizedBox(height: 120), Center(child: Text(_q.isEmpty ? 'Şu an açık oda yok. İlk odayı sen aç!' : 'Aramanıza uyan oda yok.'))])
           : ListView.builder(
               padding: const EdgeInsets.only(bottom: 88),
               itemCount: _rooms.length,
@@ -266,5 +341,21 @@ class RoomsTabState extends State<RoomsTab> {
               },
             ),
     );
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: TextField(
+          decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Oda, yayıncı veya etiket ara', isDense: true, border: OutlineInputBorder()),
+          onChanged: (v) {
+            _debounce?.cancel();
+            _debounce = Timer(const Duration(milliseconds: 400), () {
+              _q = v.trim();
+              refresh();
+            });
+          },
+        ),
+      ),
+      Expanded(child: list),
+    ]);
   }
 }

@@ -34,6 +34,7 @@ export async function leaveRoom(userId, roomId) {
   const r = await query(`DELETE FROM room_members WHERE room_id = $1 AND user_id = $2 RETURNING role`, [roomId, userId]);
   if (!r.rowCount) return false;
   await closeMicSessions(userId, roomId);
+  await query(`DELETE FROM room_mic_queue WHERE room_id = $1 AND user_id = $2`, [roomId, userId]);
   await forfeitUserInRoom(userId, roomId).catch((e) => console.error('Oyundan çıkarma hatası:', e.message));
   if (r.rows[0].role === 'owner') {
     await closeRoom(roomId);

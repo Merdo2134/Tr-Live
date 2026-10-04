@@ -13,6 +13,7 @@ import { loadPublicRow, activeEntranceEffect } from '../services/users.js';
 import { leaveRoom, closeRoom, SUPPORTED_SEATS } from '../services/rooms.js';
 import { openMicSession, closeMicSessions } from '../services/mic.js';
 import { scoreboardOf } from '../services/scoreboard.js';
+import { queueOf, broadcastQueue, removeFromQueue, notifyNext } from '../services/micqueue.js';
 import { cleanPublic } from '../safe_text.js';
 import crypto from 'node:crypto';
 
@@ -53,6 +54,8 @@ async function memberOf(roomId, userId) {
 router.get('/', optionalAuth, async (req, res) => {
   const type = req.query.type === 'video' ? 'video' : req.query.type === 'audio' ? 'audio' : null;
   const tag = req.query.tag ? String(req.query.tag).trim().toLocaleLowerCase('tr').slice(0, 20) : null;
+  const q = String(req.query.q ?? '').trim().toLowerCase().slice(0, 40);
+  const like = q ? `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
   const r = await query(
     `SELECT r.id AS room_id, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
        (r.password_hash IS NOT NULL) AS locked, r.theme, ${USER_PUBLIC_COLUMNS},
@@ -61,8 +64,10 @@ router.get('/', optionalAuth, async (req, res) => {
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS}
      WHERE r.is_active = TRUE AND ($1::text IS NULL OR r.room_type = $1) AND ($2::text IS NULL OR $2 = ANY(r.tags))
        AND (r.is_hidden = FALSE OR r.owner_id = $3::uuid OR EXISTS (SELECT 1 FROM room_members hm WHERE hm.room_id = r.id AND hm.user_id = $3::uuid))
+       AND ($4::text IS NULL OR lower(r.name) LIKE $4 ESCAPE '\\' OR lower(u.display_name) LIKE $4 ESCAPE '\\' OR lower(u.username) LIKE $4 ESCAPE '\\'
+            OR EXISTS (SELECT 1 FROM unnest(r.tags) t WHERE lower(t) LIKE $4 ESCAPE '\\'))
      ORDER BY member_count DESC, r.created_at DESC LIMIT 100`,
-    [type, tag, req.user?.id ?? null],
+    [type, tag, req.user?.id ?? null, like],
   );
   // Kullanıcı sütunlarındaki "id" (= sahip kimliği) oda kimliğiyle karışmasın diye oda alanları takma adla alınır.
   res.json({
@@ -105,6 +110,59 @@ router.post('/', requireAuth, userLimit('room_create', 10, 3600e3), async (req, 
     return r;
   });
   res.status(201).json({ room: roomJson(room, { showCode: true }) });
+});
+
+// ---------- Favori yayıncılar ve son girilen odalar ----------
+// Oda kapanınca silindiği için favori "oda" değil "yayıncı"dır; yayıncı yeni oda açınca listede açık görünür.
+const ACTIVE_ROOM_BY_HOST = `
+  (SELECT json_build_object('id', r.id, 'name', r.name, 'roomType', r.room_type, 'seatCount', r.seat_count, 'locked', (r.password_hash IS NOT NULL),
+      'memberCount', (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id))
+   FROM rooms r WHERE r.owner_id = h.host_id AND r.is_active = TRUE AND r.is_hidden = FALSE ORDER BY r.created_at DESC LIMIT 1)`;
+
+router.get('/favorites', requireAuth, async (req, res) => {
+  const r = await query(
+    `SELECT ${USER_PUBLIC_COLUMNS}, ${ACTIVE_ROOM_BY_HOST} AS room, f.created_at AS fav_at
+     FROM favorite_hosts f JOIN users u ON u.id = f.host_id ${USER_PUBLIC_JOINS}
+     CROSS JOIN LATERAL (SELECT f.host_id) h
+     WHERE f.user_id = $1 AND u.account_status = 'active'
+     ORDER BY (SELECT 1 FROM rooms r WHERE r.owner_id = f.host_id AND r.is_active = TRUE AND r.is_hidden = FALSE LIMIT 1) NULLS LAST, f.created_at DESC LIMIT 200`,
+    [req.user.id],
+  );
+  res.json({ hosts: r.rows.map((x) => ({ user: publicUser(x, req.user.id), room: x.room })) });
+});
+
+router.get('/recent', requireAuth, async (req, res) => {
+  const r = await query(
+    `SELECT ${USER_PUBLIC_COLUMNS}, rr.room_name, rr.room_type, rr.visited_at, ${ACTIVE_ROOM_BY_HOST} AS room
+     FROM recent_rooms rr JOIN users u ON u.id = rr.host_id ${USER_PUBLIC_JOINS}
+     CROSS JOIN LATERAL (SELECT rr.host_id) h
+     WHERE rr.user_id = $1 AND u.account_status = 'active' ORDER BY rr.visited_at DESC LIMIT 30`,
+    [req.user.id],
+  );
+  res.json({ recent: r.rows.map((x) => ({ user: publicUser(x, req.user.id), roomName: x.room_name, roomType: x.room_type, visitedAt: x.visited_at, room: x.room })) });
+});
+
+router.post('/hosts/:userId/favorite', requireAuth, userLimit('favorite', 60, 60e3), async (req, res) => {
+  const hostId = uuid(req.params.userId, 'Yayıncı');
+  if (hostId === req.user.id) throw fail('Kendinizi favorilere ekleyemezsiniz.');
+  const h = (await query(`SELECT 1 FROM users WHERE id = $1 AND account_status = 'active'`, [hostId])).rowCount;
+  if (!h) throw fail('Kullanıcı bulunamadı.', 404);
+  const n = (await query(`SELECT COUNT(*)::int AS n FROM favorite_hosts WHERE user_id = $1`, [req.user.id])).rows[0].n;
+  if (n >= 200) throw fail('En fazla 200 favori ekleyebilirsiniz.', 409);
+  await query(`INSERT INTO favorite_hosts(user_id, host_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [req.user.id, hostId]);
+  res.json({ ok: true, favorite: true });
+});
+
+router.delete('/hosts/:userId/favorite', requireAuth, async (req, res) => {
+  const hostId = uuid(req.params.userId, 'Yayıncı');
+  await query(`DELETE FROM favorite_hosts WHERE user_id = $1 AND host_id = $2`, [req.user.id, hostId]);
+  res.json({ ok: true, favorite: false });
+});
+
+router.get('/hosts/:userId/favorite', requireAuth, async (req, res) => {
+  const hostId = uuid(req.params.userId, 'Yayıncı');
+  const r = await query(`SELECT 1 FROM favorite_hosts WHERE user_id = $1 AND host_id = $2`, [req.user.id, hostId]);
+  res.json({ favorite: r.rowCount > 0 });
 });
 
 router.get('/:roomId', requireAuth, async (req, res) => {
@@ -175,6 +233,17 @@ router.post('/:roomId/join', requireAuth, userLimit('room_join', 40, 60e3), asyn
     // Gizli kullanıcı odaya giriş efektiyle duyurulmaz.
     const effect = row.is_hidden ? null : await activeEntranceEffect(userId);
     hub.broadcastRoom(roomId, { type: 'room_member_joined', roomId, user: publicUser(row, null), entranceEffect: effect });
+  }
+  if (room.owner_id !== userId && !room.is_hidden) {
+    await query(
+      `INSERT INTO recent_rooms(user_id, host_id, room_name, room_type) VALUES($1,$2,$3,$4)
+       ON CONFLICT (user_id, host_id) DO UPDATE SET room_name = EXCLUDED.room_name, room_type = EXCLUDED.room_type, visited_at = NOW()`,
+      [userId, room.owner_id, room.name, room.room_type],
+    );
+    await query(
+      `DELETE FROM recent_rooms WHERE user_id = $1 AND host_id NOT IN (SELECT host_id FROM recent_rooms WHERE user_id = $1 ORDER BY visited_at DESC LIMIT 30)`,
+      [userId],
+    );
   }
   const me = await memberOf(roomId, userId);
   res.json({
@@ -296,6 +365,7 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
     return target;
   });
   await setCanPublish(roomId, userId, true);
+  await removeFromQueue(roomId, userId);
   hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId, seatIndex, microphone: true });
   res.json({ ok: true, seatIndex });
 });
@@ -305,7 +375,36 @@ async function releaseSeat(roomId, userId) {
   await closeMicSessions(userId, roomId);
   await setCanPublish(roomId, userId, false);
   hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId, seatIndex: null, microphone: false });
+  await notifyNext(roomId).catch((e) => console.error('Mikrofon sırası hatası:', e.message));
 }
+
+// ---------- Mikrofon sırası ----------
+router.get('/:roomId/mic/queue', requireAuth, async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  await activeRoom(roomId);
+  if (!(await memberOf(roomId, req.user.id))) throw fail('Önce odaya girin.', 403);
+  res.json({ queue: await queueOf(roomId) });
+});
+
+router.post('/:roomId/mic/queue', requireAuth, userLimit('mic_queue', 30, 60e3), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  await activeRoom(roomId);
+  const me = await memberOf(roomId, req.user.id);
+  if (!me) throw fail('Önce odaya girin.', 403);
+  if (me.seat_index !== null) throw fail('Zaten mikrofondasınız.', 409);
+  const n = (await query(`SELECT COUNT(*)::int AS n FROM room_mic_queue WHERE room_id = $1`, [roomId])).rows[0].n;
+  if (n >= 50) throw fail('Sıra dolu.', 409);
+  await query(`INSERT INTO room_mic_queue(room_id, user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [roomId, req.user.id]);
+  await broadcastQueue(roomId);
+  await notifyNext(roomId).catch(() => {}); // boş koltuk zaten varsa hemen davet edilir
+  res.json({ ok: true, queue: await queueOf(roomId) });
+});
+
+router.delete('/:roomId/mic/queue', requireAuth, async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  await removeFromQueue(roomId, req.user.id);
+  res.json({ ok: true, queue: await queueOf(roomId) });
+});
 
 router.post('/:roomId/mic/leave', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');

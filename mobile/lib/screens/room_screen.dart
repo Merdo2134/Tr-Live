@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import '../services/api.dart';
 import '../services/music_service.dart';
+import '../services/room_dock.dart';
 import '../services/session.dart';
 import '../services/socket_service.dart';
 import '../widgets/common.dart';
@@ -71,11 +72,13 @@ class _RoomScreenState extends State<RoomScreen> {
   void initState() {
     super.initState();
     _sub = SocketService.instance.events.listen(_onEvent);
+    RoomDock.exitHandler = _onBack;
     _enter();
   }
 
   @override
   void dispose() {
+    if (RoomDock.exitHandler == _onBack) RoomDock.exitHandler = null;
     _sub?.cancel();
     _chatCtl.dispose();
     _chatScroll.dispose();
@@ -101,7 +104,7 @@ class _RoomScreenState extends State<RoomScreen> {
       if (widget.locked) {
         password = await askText(context, 'Oda şifresi', obscure: true);
         if (password == null) {
-          if (mounted) Navigator.pop(context);
+          if (mounted) RoomDock.close();
           return;
         }
       }
@@ -124,7 +127,7 @@ class _RoomScreenState extends State<RoomScreen> {
     } catch (e) {
       if (!mounted) return;
       toast(context, errorText(e), error: true);
-      Navigator.pop(context);
+      RoomDock.close();
     }
   }
 
@@ -140,6 +143,82 @@ class _RoomScreenState extends State<RoomScreen> {
         _pk = mapOf(pk['pk']);
       });
     } catch (_) {/* ek özellikler yüklenemese de oda çalışır */}
+    try {
+      final q = await Api.get('/api/rooms/${widget.roomId}/mic/queue');
+      final ownerId = _room?['ownerId']?.toString();
+      final f = ownerId != null && ownerId != Session.id ? await Api.get('/api/rooms/hosts/$ownerId/favorite') : null;
+      if (!mounted) return;
+      setState(() {
+        _queue = ((q['queue'] as List?) ?? const []).map((x) => x.toString()).toList();
+        _fav = f?['favorite'] == true;
+      });
+    } catch (_) {}
+  }
+
+  // ---------- Sıra, favori, oda değiştirme ----------
+  List<String> _queue = [];
+  bool _fav = false;
+  double _overscroll = 0;
+  bool _switching = false;
+
+  bool get _inQueue => _queue.contains(Session.id);
+  bool get _noFreeSeat {
+    final taken = <int>{for (final m in _members) if (m['seatIndex'] != null) (m['seatIndex'] as num).toInt()};
+    for (var i = 1; i < _seatCount; i++) {
+      if (!taken.contains(i) && !_lockedSeats.contains(i)) return false;
+    }
+    return true;
+  }
+
+  Future<void> _toggleQueue() async {
+    final r = await guard(context, () => _inQueue ? Api.delete('/api/rooms/${widget.roomId}/mic/queue') : Api.post('/api/rooms/${widget.roomId}/mic/queue'));
+    if (r == null || !mounted) return;
+    setState(() => _queue = ((r['queue'] as List?) ?? const []).map((x) => x.toString()).toList());
+    if (_inQueue) toast(context, 'Sıraya girdiniz. Sıra size gelince haber verilir.');
+  }
+
+  Future<void> _toggleFavorite() async {
+    final ownerId = _room?['ownerId']?.toString();
+    if (ownerId == null) return;
+    final r = await guard(context, () => _fav ? Api.delete('/api/rooms/hosts/$ownerId/favorite') : Api.post('/api/rooms/hosts/$ownerId/favorite'));
+    if (r == null || !mounted) return;
+    setState(() => _fav = r['favorite'] == true);
+    toast(context, _fav ? 'Yayıncı favorilere eklendi.' : 'Favorilerden çıkarıldı.');
+  }
+
+  /// Yukarı kaydır → sonraki oda, aşağı kaydır → önceki oda (sahip kendi odasından ayrılamaz).
+  Future<void> _switchRoom(int dir) async {
+    if (_switching || _myRole == 'owner') return;
+    _switching = true;
+    try {
+      final r = await Api.get('/api/rooms', query: {'type': (_room?['roomType'] ?? 'audio').toString()});
+      final list = listOf(r['rooms']).where((x) => x['locked'] != true && x['ownerId']?.toString() != Session.id).toList();
+      if (!mounted) return;
+      final cur = list.indexWhere((x) => x['id'] == widget.roomId);
+      final others = list.where((x) => x['id'] != widget.roomId).toList();
+      if (others.isEmpty) return toast(context, 'Geçilecek başka oda yok.');
+      final all = list;
+      final i = cur < 0 ? (dir > 0 ? 0 : all.length - 1) : (cur + dir + all.length) % all.length;
+      final t = all[i];
+      if (t['id'] == widget.roomId) return;
+      RoomDock.open(RoomRequest(roomId: t['id'].toString(), name: (t['name'] ?? 'Oda').toString()));
+    } catch (e) {
+      if (mounted) toast(context, errorText(e), error: true);
+    } finally {
+      _switching = false;
+    }
+  }
+
+  bool _onScrollNote(ScrollNotification n) {
+    if (n is ScrollStartNotification) _overscroll = 0;
+    if (n is OverscrollNotification) _overscroll += n.overscroll;
+    if (n is ScrollEndNotification) {
+      final o = _overscroll;
+      _overscroll = 0;
+      if (o > 90) _switchRoom(1);
+      if (o < -90) _switchRoom(-1);
+    }
+    return false;
   }
 
   Future<void> _loadMembers() async {
@@ -198,7 +277,7 @@ class _RoomScreenState extends State<RoomScreen> {
     _closing = true;
     _joined = false; // sunucu tarafında zaten çıkarıldık
     toast(context, message);
-    Navigator.of(context).pop();
+    RoomDock.close();
   }
 
   Future<void> _onBack() async {
@@ -214,7 +293,7 @@ class _RoomScreenState extends State<RoomScreen> {
         await Api.post('/api/rooms/${widget.roomId}/leave');
       } catch (_) {/* sunucu temizler */}
     }
-    if (mounted) Navigator.of(context).pop();
+    RoomDock.close();
   }
 
   bool _micInviteOpen = false;
@@ -309,6 +388,9 @@ class _RoomScreenState extends State<RoomScreen> {
         break;
       case 'room_seat_changed':
         setState(() => _applySeat(e['userId'].toString(), (e['seatIndex'] as num?)?.toInt(), e['microphone'] == true));
+        break;
+      case 'room_mic_queue':
+        setState(() => _queue = ((e['queue'] as List?) ?? const []).map((x) => x.toString()).toList());
         break;
       case 'room_seats_locked':
         setState(() => _room = {...?_room, 'lockedSeats': e['lockedSeats']});
@@ -931,7 +1013,13 @@ class _RoomScreenState extends State<RoomScreen> {
             ],
             const SizedBox(width: 8),
             OutlinedButton(onPressed: _leaveMic, child: const Text('Mikrofondan in')),
-          ] else
+          ] else if (_noFreeSeat && !_isManager)
+            FilledButton.tonalIcon(
+              onPressed: _toggleQueue,
+              icon: Icon(_inQueue ? Icons.hourglass_bottom : Icons.queue),
+              label: Text(_inQueue ? 'Sıradan çık (${_queue.indexOf(Session.id) + 1}.)' : 'Sıraya gir${_queue.isEmpty ? '' : ' (${_queue.length})'}'),
+            )
+          else
             FilledButton.icon(onPressed: () => _takeMic(), icon: const Icon(Icons.mic), label: const Text('Mikrofona çık')),
           const Spacer(),
           if (_myRole == 'owner' && (_pk == null || !['pending', 'active'].contains(_pk!['status'])))
@@ -946,10 +1034,13 @@ class _RoomScreenState extends State<RoomScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
+    RoomDock.myRole = _myRole;
+    return ValueListenableBuilder<bool>(
+      valueListenable: RoomDock.minimized,
+      builder: (context, minimized, _) => PopScope(
+      canPop: minimized, // küçültülmüşken geri tuşu ana ekrana aittir; açıkken odayı küçültür
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _onBack();
+        if (!didPop) RoomDock.minimize();
       },
       child: Scaffold(
         appBar: AppBar(
@@ -957,8 +1048,11 @@ class _RoomScreenState extends State<RoomScreen> {
             if (_room?['hidden'] == true) const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.visibility_off, size: 18)),
             Flexible(child: Text((_room?['name'] ?? widget.initialName).toString(), overflow: TextOverflow.ellipsis)),
           ]),
-          leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: _onBack),
+          leading: IconButton(tooltip: 'Odayı küçült', icon: const Icon(Icons.keyboard_arrow_down), onPressed: RoomDock.minimize),
           actions: [
+            if (_room?['ownerId']?.toString() != Session.id)
+              IconButton(tooltip: _fav ? 'Favorilerden çıkar' : 'Favorilere ekle', icon: Icon(_fav ? Icons.star : Icons.star_border, color: _fav ? Colors.amber : null), onPressed: _toggleFavorite),
+            IconButton(tooltip: 'Odadan ayrıl', icon: const Icon(Icons.logout), onPressed: _onBack),
             TextButton.icon(onPressed: _membersSheet, icon: const Icon(Icons.people_outline), label: Text('${_members.length}')),
             if (_myRole == 'owner' || _myRole == 'cohost') IconButton(tooltip: 'Oda ayarları', icon: const Icon(Icons.settings), onPressed: _roomSettings),
             if (_myRole == 'owner') IconButton(tooltip: 'Odayı kapat', icon: const Icon(Icons.power_settings_new), onPressed: _closeRoom),
@@ -989,12 +1083,19 @@ class _RoomScreenState extends State<RoomScreen> {
                       roomId: widget.roomId,
                       onCancel: _myRole == 'owner' ? () => guard(context, () => Api.post('/api/pk/${_pk!['id']}/cancel')) : null,
                     ),
-                  Expanded(flex: 5, child: ListView(children: [_seatGrid(), _audience()])),
+                  Expanded(
+                    flex: 5,
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: _onScrollNote,
+                      child: ListView(physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()), children: [_seatGrid(), _audience()]),
+                    ),
+                  ),
                   const Divider(height: 1),
                   Expanded(flex: 3, child: _chatPanel()),
                   _bottomBar(),
                 ]),
               )),
+      ),
       ),
     );
   }

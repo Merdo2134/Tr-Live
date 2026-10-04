@@ -697,6 +697,51 @@ test('roller: yardımcı admin (dar yetki, süreli ban) ve oda moderatörü', { 
   ok(await api('POST', `/api/rooms/${room.id}/leave`, { token: own.token }));
 });
 
+test('favori yayıncı, son girilen odalar, oda arama, mikrofon sırası', { skip, timeout: 90000 }, async () => {
+  const host = await register('fh'); const fan = await register('fan'); const w1 = await register('w1'); const w2 = await register('w2');
+  const room = (await api('POST', '/api/rooms', { token: host.token, body: { name: 'Karaoke Gecesi', seatCount: 2, tags: ['karaoke'] } })).body.room;
+  // arama: ad, etiket, yayıncı adı; LIKE joker karakteri etkisiz
+  for (const q of ['karaoke', 'GECESI', 'Kişi fh']) {
+    const r = await api('GET', `/api/rooms?q=${encodeURIComponent(q)}`, { token: fan.token });
+    ok(r, q);
+    assert.ok(r.body.rooms.some((x) => x.id === room.id), `arama bulmalı: ${q}`);
+  }
+  const wild = await api('GET', `/api/rooms?q=${encodeURIComponent('%')}`, { token: fan.token });
+  assert.ok(!wild.body.rooms.some((x) => x.id === room.id), '% joker değil');
+  assert.ok(!(await api('GET', '/api/rooms?q=yokboylebiroda', { token: fan.token })).body.rooms.length);
+  // favori
+  status(await api('POST', `/api/rooms/hosts/${fan.id}/favorite`, { token: fan.token }), 400, 'kendini ekleyemez');
+  ok(await api('POST', `/api/rooms/hosts/${host.id}/favorite`, { token: fan.token }));
+  ok(await api('POST', `/api/rooms/hosts/${host.id}/favorite`, { token: fan.token }), 'tekrar ekleme zararsız');
+  assert.equal((await api('GET', `/api/rooms/hosts/${host.id}/favorite`, { token: fan.token })).body.favorite, true);
+  const fav = await api('GET', '/api/rooms/favorites', { token: fan.token });
+  ok(fav);
+  assert.equal(fav.body.hosts.length, 1);
+  assert.equal(fav.body.hosts[0].room.id, room.id, 'yayıncı açıkken oda görünür');
+  // son girilen
+  ok(await api('POST', `/api/rooms/${room.id}/join`, { token: fan.token, body: {} }));
+  const rec = await api('GET', '/api/rooms/recent', { token: fan.token });
+  assert.equal(rec.body.recent[0].user.id, host.id);
+  // mikrofon sırası: 2 koltuklu odada 0. koltuk sahibin, tek boş koltuk 1
+  for (const x of [w1, w2]) ok(await api('POST', `/api/rooms/${room.id}/join`, { token: x.token, body: {} }));
+  ok(await api('POST', `/api/rooms/${room.id}/mic/take`, { token: fan.token, body: {} }));
+  status(await api('POST', `/api/rooms/${room.id}/mic/take`, { token: w1.token, body: {} }), 409, 'koltuk dolu');
+  ok(await api('POST', `/api/rooms/${room.id}/mic/queue`, { token: w1.token }));
+  const qr = await api('POST', `/api/rooms/${room.id}/mic/queue`, { token: w2.token });
+  assert.deepEqual(qr.body.queue, [w1.id, w2.id], 'sıra eskiden yeniye');
+  ok(await api('POST', `/api/rooms/${room.id}/mic/queue`, { token: w1.token }), 'çift kayıt olmaz');
+  assert.equal((await api('GET', `/api/rooms/${room.id}/mic/queue`, { token: w1.token })).body.queue.length, 2);
+  // koltuk boşalınca ilk kişi sıradan düşer (davet gider), diğeri kalır
+  ok(await api('POST', `/api/rooms/${room.id}/mic/leave`, { token: fan.token }));
+  assert.deepEqual((await api('GET', `/api/rooms/${room.id}/mic/queue`, { token: w2.token })).body.queue, [w2.id]);
+  ok(await api('POST', `/api/rooms/${room.id}/mic/take`, { token: w1.token, body: {} }));
+  ok(await api('DELETE', `/api/rooms/${room.id}/mic/queue`, { token: w2.token }));
+  assert.equal((await api('GET', `/api/rooms/${room.id}/mic/queue`, { token: w2.token })).body.queue.length, 0);
+  ok(await api('DELETE', `/api/rooms/hosts/${host.id}/favorite`, { token: fan.token }));
+  assert.equal((await api('GET', '/api/rooms/favorites', { token: fan.token })).body.hosts.length, 0);
+  ok(await api('POST', `/api/rooms/${room.id}/leave`, { token: host.token }));
+});
+
 test('liderlik tablosu, cüzdan geçmişi ve hesap silme', { skip, timeout: 60000 }, async () => {
   const lb = await api('GET', '/api/leaderboards?type=senders&period=weekly', { token: U.b.token });
   ok(lb);
