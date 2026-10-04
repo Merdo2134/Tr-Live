@@ -46,7 +46,7 @@ async function ownedAgency(userId) {
 async function assertAgencyOwner(agencyId, user) {
   const a = (await query(`SELECT * FROM agencies WHERE id = $1`, [agencyId])).rows[0];
   if (!a) throw fail('Ajans bulunamadı.', 404);
-  if (a.owner_id !== user.id && !['admin', 'support'].includes(user.system_role)) throw fail('Bu ajansı yönetme yetkiniz yok.', 403);
+  if (a.owner_id !== user.id && user.system_role !== 'admin') throw fail('Bu ajansı yönetme yetkiniz yok.', 403);
   return a;
 }
 

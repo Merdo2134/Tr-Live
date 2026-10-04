@@ -217,11 +217,40 @@ class _RoomScreenState extends State<RoomScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  bool _micInviteOpen = false;
+  List<int> get _lockedSeats => ((_room?['lockedSeats'] as List?) ?? const []).map((x) => (x as num).toInt()).toList();
+  bool get _canSeatManage => ['owner', 'cohost', 'moderator'].contains(_myRole);
+
+  Future<void> _lockSeat(int index, bool locked) async {
+    await guard(context, () => Api.post('/api/rooms/${widget.roomId}/seats/$index/lock', {'locked': locked}));
+  }
+
   // ---------- Gerçek zamanlı olaylar ----------
   void _onEvent(Map<String, dynamic> e) {
     final type = e['type'];
     if (type == 'error' && e['code'] == 'not_member' && e['roomId'] == widget.roomId) {
       _rejoin();
+      return;
+    }
+    if (type == 'mic_invite' && e['roomId'] == widget.roomId) {
+      if (mounted && !_micInviteOpen && _members.every((m) => m['userId'] != Session.id || m['seatIndex'] == null)) {
+        _micInviteOpen = true;
+        final seat = (e['seatIndex'] as num?)?.toInt();
+        showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Mikrofon daveti'),
+            content: Text('${e['fromName'] ?? 'Oda yetkilisi'} sizi mikrofona davet ediyor${seat != null ? ' (${seat + 1}. koltuk)' : ''}.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Reddet')),
+              FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Mikrofona çık')),
+            ],
+          ),
+        ).then((ok) {
+          _micInviteOpen = false;
+          if (ok == true && mounted) _takeMic(seat);
+        });
+      }
       return;
     }
     if (type == 'pk_invite') {
@@ -280,6 +309,9 @@ class _RoomScreenState extends State<RoomScreen> {
         break;
       case 'room_seat_changed':
         setState(() => _applySeat(e['userId'].toString(), (e['seatIndex'] as num?)?.toInt(), e['microphone'] == true));
+        break;
+      case 'room_seats_locked':
+        setState(() => _room = {...?_room, 'lockedSeats': e['lockedSeats']});
         break;
       case 'room_role_changed':
         setState(() {
@@ -695,7 +727,9 @@ class _RoomScreenState extends State<RoomScreen> {
               ),
               if (!isSelf && _canModerate(role)) ...[
                 if (m['seatIndex'] != null)
-                  ListTile(leading: const Icon(Icons.mic_off), title: const Text('Mikrofonunu kapat'), onTap: () { close(); _moderate(userId, 'mic-off'); }),
+                  ListTile(leading: const Icon(Icons.mic_off), title: const Text('Koltuktan kaldır'), onTap: () { close(); _moderate(userId, 'mic-off'); })
+                else
+                  ListTile(leading: const Icon(Icons.mic_none), title: const Text('Mikrofona davet et'), onTap: () { close(); _moderate(userId, 'mic-invite', body: {}); }),
                 ListTile(leading: const Icon(Icons.comments_disabled), title: const Text('Sohbette sustur (10 dk)'), onTap: () { close(); _moderate(userId, 'chat-mute', body: {'minutes': 10}); }),
                 ListTile(leading: const Icon(Icons.exit_to_app), title: const Text('Odadan at'), onTap: () { close(); _moderate(userId, 'kick'); }),
                 ListTile(leading: const Icon(Icons.block), title: const Text('Engelle'), onTap: () { close(); _moderate(userId, 'block'); }),
@@ -763,11 +797,39 @@ class _RoomScreenState extends State<RoomScreen> {
   Widget _seatTile(int index, Map<String, dynamic>? m) {
     if (m == null) {
       final reserved = index == 0;
+      final locked = _lockedSeats.contains(index);
       return InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: reserved ? null : () => _takeMic(index),
+        onTap: reserved
+            ? null
+            : () {
+                if (_canSeatManage) {
+                  showModalBottomSheet<void>(
+                    context: context,
+                    showDragHandle: true,
+                    builder: (c) => SafeArea(
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        ListTile(leading: const Icon(Icons.mic), title: const Text('Bu koltuğa otur'), onTap: () { Navigator.pop(c); _takeMic(index); }),
+                        ListTile(
+                          leading: Icon(locked ? Icons.lock_open : Icons.lock),
+                          title: Text(locked ? 'Koltuğun kilidini aç' : 'Koltuğu kilitle'),
+                          onTap: () { Navigator.pop(c); _lockSeat(index, !locked); },
+                        ),
+                      ]),
+                    ),
+                  );
+                } else if (locked) {
+                  toast(context, 'Bu koltuk kilitli.', error: true);
+                } else {
+                  _takeMic(index);
+                }
+              },
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          CircleAvatar(radius: 26, backgroundColor: Colors.white12, child: Icon(reserved ? Icons.star_border : Icons.add, color: Colors.white54)),
+          CircleAvatar(
+            radius: 26,
+            backgroundColor: Colors.white12,
+            child: Icon(reserved ? Icons.star_border : (locked ? Icons.lock : Icons.add), color: locked ? Colors.orangeAccent : Colors.white54),
+          ),
           const SizedBox(height: 4),
           Text('${index + 1}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
         ]),

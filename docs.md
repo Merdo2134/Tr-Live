@@ -51,6 +51,15 @@ Gönderici odada olmalı. Kendine hediye serbesttir (bkz. README kuralları).
 - Yayıncı: `GET /api/broadcaster/me` (canlı ilerleme), `GET /api/broadcaster/statements`. Ajans: `GET /api/agencies/:id/dashboard`, `/statements`.
 - Resmi etkinlikler: `POST|GET /api/admin/events`, `POST /api/admin/events/:id/attendance`. KYC: `POST /api/me/kyc/request`, `GET /api/admin/kyc`, `POST /api/admin/users/:id/kyc`.
 
+## Roller (v2.4)
+| Rol | Kim atar | Yapabildikleri |
+|---|---|---|
+| Admin | — (uygulama sahibi) | Admin panelindeki her şey |
+| Yardımcı admin (`system_role=support`) | Yalnızca admin: `POST /api/admin/users/:id/staff-role` | `GET /admin/users`, `POST /admin/users/:id/ban` (`hours` boşsa süresiz), `/unban`, `/display-name`, `/avatar` |
+| Oda sahibi | Odayı açan | Oda üzerindeki her şey |
+| Moderatör (oda rolü) | Oda sahibi: `POST /rooms/:id/members/:uid/role` | sohbet silme, `chat-mute`, `mic-invite`, `seats/:i/lock`, `mic-off` (koltuktan kaldır), `kick`, `block` |
+Yardımcı admin başka bir admin uç noktasına gidince 403 alır. Olay: `mic_invite`, `room_seats_locked`.
+
 ## Oda özellikleri (v2.3)
 - **Gizli oda:** `hidden:true` ile 6 karakterlik davet kodu (0/O/1/I yok); listede görünmez; `POST /api/rooms/by-code`, `join {code}`. Kod yalnızca sahip/yardımcı sahibe görünür; tahmin denemeleri sınırlı.
 - **Tema:** default, neon, galaxy, sunset, forest, royal, ocean, rose; özel görsel `themeImageUrl` için WIP 4+ (`customRoomTheme`).

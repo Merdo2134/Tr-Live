@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 
 export const router = Router();
 
+const SEAT_MANAGERS = ['owner', 'cohost', 'moderator'];
 export const THEMES = ['default', 'neon', 'galaxy', 'sunset', 'forest', 'royal', 'ocean', 'rose'];
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 0/O/1/I yok
 const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
@@ -26,7 +27,7 @@ const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_ALPHABET[b %
 const roomJson = (r, { showCode = false } = {}) => ({
   id: r.id, name: r.name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.created_at,
   tags: r.tags ?? [], locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled !== false,
-  hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false,
+  hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false, lockedSeats: r.locked_seats ?? [],
   ...(showCode && r.join_code ? { joinCode: r.join_code } : {}),
 });
 
@@ -110,7 +111,7 @@ router.get('/:roomId', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const r = (await query(
     `SELECT r.id AS room_id, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags, r.chat_enabled,
-       r.is_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled,
+       r.is_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats,
        (r.password_hash IS NOT NULL) AS locked, ${USER_PUBLIC_COLUMNS}
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS} WHERE r.id = $1 AND r.is_active = TRUE`,
     [roomId],
@@ -123,7 +124,7 @@ router.get('/:roomId', requireAuth, async (req, res) => {
     room: {
       id: r.room_id, name: r.room_name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.room_created_at,
       tags: r.tags ?? [], locked: r.locked, chatEnabled: r.chat_enabled !== false,
-      hidden: r.is_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled,
+      hidden: r.is_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [],
       ...(canSeeCode && r.join_code ? { joinCode: r.join_code } : {}),
       owner: publicUser(r, req.user.id),
     },
@@ -280,13 +281,15 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
       if (member.seat_index !== null) return member.seat_index;
       const first = member.role === 'owner' ? 0 : 1;
       target = undefined;
-      for (let i = first; i < room.seat_count; i += 1) if (!taken.has(i)) { target = i; break; }
+      const lockedNow = SEAT_MANAGERS.includes(member.role) ? [] : (room.locked_seats ?? []);
+      for (let i = first; i < room.seat_count; i += 1) if (!taken.has(i) && !lockedNow.includes(i)) { target = i; break; }
       if (target === undefined) throw fail('Boş mikrofon yok.', 409);
     } else {
       target = Number(target);
       if (!Number.isInteger(target) || target < 0 || target >= room.seat_count) throw fail('Geçersiz koltuk.');
       if (target === 0 && member.role !== 'owner') throw fail('Bu koltuk oda sahibine ayrılmıştır.', 403);
       if (taken.has(target)) throw fail('Koltuk dolu.', 409);
+      if ((room.locked_seats ?? []).includes(target) && !SEAT_MANAGERS.includes(member.role)) throw fail('Bu koltuk kilitli.', 403);
     }
     await c.query(`UPDATE room_members SET seat_index = $3, microphone = TRUE WHERE room_id = $1 AND user_id = $2`, [roomId, userId, target]);
     await openMicSession(userId, roomId, (t, p) => c.query(t, p));
@@ -380,6 +383,47 @@ router.delete('/:roomId/blocks/:userId', requireAuth, async (req, res) => {
   const me = await memberOf(roomId, req.user.id);
   if (!me || !['owner', 'cohost', 'moderator'].includes(me.role)) throw fail('Bu işlem için yetkiniz yok.', 403);
   await query(`DELETE FROM room_blocks WHERE room_id = $1 AND blocked_user_id = $2`, [roomId, targetId]);
+  res.json({ ok: true });
+});
+
+// Koltuk kilitle / aç (oda sahibi ve moderatörler). Dolu koltuk kilitlenirse oturan kişi koltuktan indirilir (yetki yeterliyse).
+router.post('/:roomId/seats/:index/lock', requireAuth, userLimit('moderate', 60, 60e3), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const room = await activeRoom(roomId);
+  const idx = Number(req.params.index);
+  if (!Number.isInteger(idx) || idx < 1 || idx >= room.seat_count) throw fail('Bu koltuk kilitlenemez.');
+  const me = await memberOf(roomId, req.user.id);
+  if (!me || !SEAT_MANAGERS.includes(me.role)) throw fail('Koltukları yalnızca oda sahibi ve moderatörler kilitleyebilir.', 403);
+  const locked = req.body?.locked !== false;
+  const occupant = (await query(`SELECT user_id, role FROM room_members WHERE room_id = $1 AND seat_index = $2`, [roomId, idx])).rows[0];
+  if (locked && occupant && occupant.user_id !== req.user.id && !canManage(me.role, occupant.role, 'moderate')) throw fail('Koltuktaki kişiyi indirme yetkiniz yok.', 403);
+  const r = await query(
+    locked
+      ? `UPDATE rooms SET locked_seats = (SELECT ARRAY(SELECT DISTINCT x FROM unnest(locked_seats || $2::int) x ORDER BY x)) WHERE id = $1 RETURNING locked_seats`
+      : `UPDATE rooms SET locked_seats = array_remove(locked_seats, $2::int) WHERE id = $1 RETURNING locked_seats`,
+    [roomId, idx],
+  );
+  if (locked && occupant && occupant.user_id !== req.user.id) await releaseSeat(roomId, occupant.user_id);
+  hub.broadcastRoom(roomId, { type: 'room_seats_locked', roomId, lockedSeats: r.rows[0].locked_seats });
+  res.json({ ok: true, lockedSeats: r.rows[0].locked_seats });
+});
+
+// Mikrofona davet: davet edilen kişi kabul ederse mic/take ile oturur.
+router.post('/:roomId/members/:userId/mic-invite', requireAuth, userLimit('mic_invite', 30, 60e3), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const targetId = uuid(req.params.userId, 'Kullanıcı');
+  const room = await activeRoom(roomId);
+  const { actor, target } = await moderationContext(roomId, req.user.id, targetId);
+  if (!SEAT_MANAGERS.includes(actor.role)) throw fail('Mikrofona yalnızca oda sahibi ve moderatörler davet edebilir.', 403);
+  if (!target) throw fail('Kullanıcı odada değil.', 404);
+  const t = (await query(`SELECT seat_index FROM room_members WHERE room_id = $1 AND user_id = $2`, [roomId, targetId])).rows[0];
+  if (t.seat_index !== null) throw fail('Kullanıcı zaten mikrofonda.', 409);
+  let seatIndex = req.body?.seatIndex ?? null;
+  if (seatIndex !== null) {
+    seatIndex = Number(seatIndex);
+    if (!Number.isInteger(seatIndex) || seatIndex < 1 || seatIndex >= room.seat_count) throw fail('Geçersiz koltuk.');
+  }
+  hub.sendToUser(targetId, { type: 'mic_invite', roomId, seatIndex, fromUserId: req.user.id, fromName: req.user.display_name });
   res.json({ ok: true });
 });
 

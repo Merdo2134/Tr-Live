@@ -115,7 +115,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onTap: () => _open(const AgencyScreen()),
             ),
             if (isDealer) ListTile(leading: const Icon(Icons.storefront), title: const Text('Bayi paneli'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const DealerScreen())),
-            if (Session.isStaff) ListTile(leading: const Icon(Icons.admin_panel_settings), title: const Text('Yönetim paneli'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const AdminScreen())),
+            if (Session.isStaff) ListTile(leading: const Icon(Icons.admin_panel_settings), title: Text(Session.isAdmin ? 'Yönetim paneli' : 'Yardımcı admin paneli'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const AdminScreen())),
             SwitchListTile(
               secondary: const Icon(Icons.visibility_off),
               title: const Text('Gizli kullanıcı modu'),

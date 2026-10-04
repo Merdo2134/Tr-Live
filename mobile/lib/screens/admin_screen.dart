@@ -34,30 +34,108 @@ class AdminScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Yönetici: tüm paneller. Yardımcı admin: yalnızca kullanıcı (nick, fotoğraf, ban).
+    final admin = Session.isAdmin;
     final tabs = <Tab>[
       const Tab(text: 'Kullanıcı'),
-      const Tab(text: 'Ajans/Yayıncı'),
-      const Tab(text: 'Maaş/Dönem'),
-      const Tab(text: 'Şikâyetler'),
-      if (Session.isAdmin) const Tab(text: 'Güvenlik'),
-      if (Session.isAdmin) const Tab(text: 'Bayi'),
-      if (Session.isAdmin) const Tab(text: 'Katalog'),
+      if (admin) const Tab(text: 'Yetkililer'),
+      if (admin) const Tab(text: 'Ajans/Yayıncı'),
+      if (admin) const Tab(text: 'Maaş/Dönem'),
+      if (admin) const Tab(text: 'Şikâyetler'),
+      if (admin) const Tab(text: 'Güvenlik'),
+      if (admin) const Tab(text: 'Bayi'),
+      if (admin) const Tab(text: 'Katalog'),
     ];
     return DefaultTabController(
       length: tabs.length,
       child: Scaffold(
-        appBar: AppBar(title: Text(Session.isAdmin ? 'Yönetim paneli' : 'Destek paneli'), bottom: TabBar(isScrollable: true, tabs: tabs)),
+        appBar: AppBar(
+          title: Text(admin ? 'Yönetim paneli' : 'Yardımcı admin paneli'),
+          bottom: admin ? TabBar(isScrollable: true, tabs: tabs) : null,
+        ),
         body: TabBarView(children: [
           const _UsersTab(),
-          const _AgenciesTab(),
-          const PayoutsTab(),
-          const _ReportsTab(),
-          if (Session.isAdmin) const _SecurityTab(),
-          if (Session.isAdmin) const _DealersTab(),
-          if (Session.isAdmin) const _CatalogTab(),
+          if (admin) const _StaffTab(),
+          if (admin) const _AgenciesTab(),
+          if (admin) const PayoutsTab(),
+          if (admin) const _ReportsTab(),
+          if (admin) const _SecurityTab(),
+          if (admin) const _DealersTab(),
+          if (admin) const _CatalogTab(),
         ]),
       ),
     );
+  }
+}
+
+// ------------------------------------------------------------------ Yetkililer (yalnızca yönetici)
+class _StaffTab extends StatefulWidget {
+  const _StaffTab();
+
+  @override
+  State<_StaffTab> createState() => _StaffTabState();
+}
+
+class _StaffTabState extends State<_StaffTab> {
+  List<Map<String, dynamic>> _staff = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final r = await guard(context, () => Api.get('/api/admin/staff'));
+    if (!mounted) return;
+    setState(() {
+      _staff = listOf(r?['staff']);
+      _loading = false;
+    });
+  }
+
+  Future<void> _set(String userId, String role, String done) async {
+    final r = await guard(context, () => Api.post('/api/admin/users/$userId/staff-role', {'role': role}));
+    if (r == null || !mounted) return;
+    toast(context, done);
+    await _load();
+  }
+
+  Future<void> _add() async {
+    final u = await pickUser(context, admin: true);
+    if (u == null || !mounted) return;
+    if (u['systemRole'] == 'admin') return toast(context, 'Bu kişi zaten yönetici.', error: true);
+    await _set(u['id'].toString(), 'support', 'Yardımcı admin yetkisi verildi.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      const Text(
+        'Yardımcı admin yalnızca: kullanıcının adını ve profil fotoğrafını değiştirebilir, süreli veya süresiz ban atabilir. '
+        'Para, WIP, ajans, maaş, katalog ve güvenlik ayarlarına erişemez.',
+      ),
+      const SizedBox(height: 12),
+      FilledButton.icon(onPressed: _add, icon: const Icon(Icons.person_add), label: const Text('Yardımcı admin ekle')),
+      const SizedBox(height: 8),
+      for (final u in _staff)
+        Card(
+          child: ListTile(
+            leading: Icon(u['systemRole'] == 'admin' ? Icons.shield : Icons.support_agent),
+            title: Text((u['displayName'] ?? '').toString()),
+            subtitle: Text('@${u['username']} · ${u['systemRole'] == 'admin' ? 'Yönetici' : 'Yardımcı admin'}'),
+            trailing: u['systemRole'] == 'support'
+                ? TextButton(onPressed: () async {
+                    if (await confirm(context, '@${u['username']} yetkisi alınsın mı?', action: 'Yetkiyi al') && mounted) {
+                      await _set(u['id'].toString(), 'user', 'Yetki alındı.');
+                    }
+                  }, child: const Text('Yetkiyi al'))
+                : null,
+          ),
+        ),
+    ]);
   }
 }
 
@@ -124,9 +202,34 @@ class _UsersTabState extends State<_UsersTab> {
     );
   }
 
+  Future<void> _ban() async {
+    final f = await formDialog(context, 'Ban', ['Süre (saat; boş bırakırsanız süresiz)', 'Neden'], initial: {'Süre (saat; boş bırakırsanız süresiz)': ''});
+    if (f == null || !mounted) return;
+    final raw = f['Süre (saat; boş bırakırsanız süresiz)'] ?? '';
+    final hours = raw.isEmpty ? null : num.tryParse(raw.replaceAll(',', '.'));
+    if (raw.isNotEmpty && (hours == null || hours <= 0)) return toast(context, 'Süre geçerli bir sayı olmalı.', error: true);
+    await _run(() => Api.post('/api/admin/users/${_user!['id']}/ban', {if (hours != null) 'hours': hours, 'reason': f['Neden']}),
+        hours == null ? 'Süresiz banlandı.' : 'Banlandı.');
+  }
+
+  Future<void> _rename() async {
+    final f = await formDialog(context, 'Görünen adı değiştir', ['Yeni ad'], initial: {'Yeni ad': (_user?['displayName'] ?? '').toString()});
+    if (f == null || !mounted) return;
+    await _run(() => Api.post('/api/admin/users/${_user!['id']}/display-name', {'displayName': f['Yeni ad']}), 'Ad değiştirildi.');
+  }
+
+  String _banLine(Map<String, dynamic> u) {
+    if (u['accountStatus'] != 'banned') return '';
+    final until = u['bannedUntil'];
+    final when = until == null ? 'süresiz' : 'bitiş: ${DateTime.parse(until.toString()).toLocal().toString().substring(0, 16)}';
+    final why = (u['banReason'] ?? '').toString();
+    return '\nBan ($when)${why.isEmpty ? '' : ' · $why'}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final u = _user;
+    final admin = Session.isAdmin;
     return ListView(padding: const EdgeInsets.all(16), children: [
       FilledButton.icon(onPressed: _pick, icon: const Icon(Icons.search), label: const Text('Kullanıcı bul')),
       if (u != null) ...[
@@ -135,29 +238,33 @@ class _UsersTabState extends State<_UsersTab> {
           child: ListTile(
             leading: UserAvatar(user: u),
             title: Text((u['displayName'] ?? '').toString()),
-            subtitle: Text('@${u['username']} · ${u['systemRole']} · ${u['accountStatus']}\nCoin: ${fmtNumber(u['coins'])} · Diamond: ${fmtNumber(u['diamonds'])}'),
+            subtitle: Text('@${u['username']} · ${u['systemRole']} · ${u['accountStatus']}'
+                '${admin ? '\nCoin: ${fmtNumber(u['coins'])} · Diamond: ${fmtNumber(u['diamonds'])}' : ''}${_banLine(u)}'),
             isThreeLine: true,
           ),
         ),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          if (Session.isAdmin) OutlinedButton.icon(onPressed: _coins, icon: const Icon(Icons.monetization_on), label: const Text('Coin düzenle')),
-          OutlinedButton.icon(onPressed: _wip, icon: const Icon(Icons.workspace_premium), label: const Text('WIP ver')),
-          OutlinedButton.icon(onPressed: () => _run(() => Api.delete('/api/admin/users/${u['id']}/wip'), 'WIP kaldırıldı.'), icon: const Icon(Icons.remove_circle_outline), label: const Text('WIP al')),
-          OutlinedButton.icon(onPressed: _inventory, icon: const Icon(Icons.inventory_2), label: const Text('Envanter ver')),
+          // Yardımcı admin + yönetici
+          OutlinedButton.icon(onPressed: _rename, icon: const Icon(Icons.edit), label: const Text('Nick değiştir')),
+          OutlinedButton.icon(
+            onPressed: () async {
+              if (await confirm(context, 'Profil fotoğrafı kaldırılsın mı?', action: 'Kaldır') && mounted) {
+                await _run(() => Api.post('/api/admin/users/${u['id']}/avatar', {'avatarUrl': null}), 'Fotoğraf kaldırıldı.');
+              }
+            },
+            icon: const Icon(Icons.hide_image_outlined),
+            label: const Text('Fotoğrafı kaldır'),
+          ),
           if (u['accountStatus'] == 'active')
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
-              onPressed: () async {
-                if (await confirm(context, '@${u['username']} hesabı yasaklansın mı?', action: 'Yasakla') && mounted) {
-                  await _run(() => Api.post('/api/admin/users/${u['id']}/status', {'status': 'banned'}), 'Hesap yasaklandı.');
-                }
-              },
-              icon: const Icon(Icons.gavel),
-              label: const Text('Yasakla'),
-            )
+            OutlinedButton.icon(style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent), onPressed: _ban, icon: const Icon(Icons.gavel), label: const Text('Banla'))
           else if (u['accountStatus'] == 'banned')
-            OutlinedButton.icon(onPressed: () => _run(() => Api.post('/api/admin/users/${u['id']}/status', {'status': 'active'}), 'Yasak kaldırıldı.'), icon: const Icon(Icons.lock_open), label: const Text('Yasağı kaldır')),
+            OutlinedButton.icon(onPressed: () => _run(() => Api.post('/api/admin/users/${u['id']}/unban', {}), 'Ban kaldırıldı.'), icon: const Icon(Icons.lock_open), label: const Text('Banı kaldır')),
+          // Yalnızca yönetici
+          if (admin) OutlinedButton.icon(onPressed: _coins, icon: const Icon(Icons.monetization_on), label: const Text('Coin düzenle')),
+          if (admin) OutlinedButton.icon(onPressed: _wip, icon: const Icon(Icons.workspace_premium), label: const Text('WIP ver')),
+          if (admin) OutlinedButton.icon(onPressed: () => _run(() => Api.delete('/api/admin/users/${u['id']}/wip'), 'WIP kaldırıldı.'), icon: const Icon(Icons.remove_circle_outline), label: const Text('WIP al')),
+          if (admin) OutlinedButton.icon(onPressed: _inventory, icon: const Icon(Icons.inventory_2), label: const Text('Envanter ver')),
         ]),
       ],
     ]);

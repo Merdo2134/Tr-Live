@@ -613,7 +613,7 @@ test('şikâyet ve yönetim', { skip, timeout: 60000 }, async () => {
   assert.equal(rep.body.reports.length, 1);
   ok(await api('POST', `/api/admin/reports/${rep.body.reports[0].id}/resolve`, { token: U.d.token, body: { status: 'resolved', note: 'ok' } }));
   // yasaklama oturumu anında geçersiz kılar
-  ok(await api('POST', `/api/admin/users/${U.g.id}/status`, { token: U.d.token, body: { status: 'banned' } }));
+  ok(await api('POST', `/api/admin/users/${U.g.id}/ban`, { token: U.d.token, body: { reason: 'e2e' } }));
   status(await api('GET', '/api/me', { token: U.g.token }), 401, 'yasaklı token geçersiz');
   // coin düzenleme yalnızca admin; negatif bakiye olmaz
   const c0 = await coins(U.b);
@@ -630,6 +630,71 @@ test('şikâyet ve yönetim', { skip, timeout: 60000 }, async () => {
   status(await api('POST', '/api/admin/security/blocks', { token: U.d.token, body: { ip: 'abc' } }), 400);
   const row = await sql(`SELECT 1 FROM firewall_blocks WHERE ip = '203.0.113.9'`);
   assert.equal(row.rowCount, 0, 'kalıcı yasak kaydı silinmeli');
+});
+
+test('roller: yardımcı admin (dar yetki, süreli ban) ve oda moderatörü', { skip, timeout: 90000 }, async () => {
+  const sup = await register('sup'); const v = await register('victim'); const v2 = await register('victim2');
+  // yardımcı admini yalnızca yönetici atar
+  status(await api('POST', `/api/admin/users/${sup.id}/staff-role`, { token: U.a.token, body: { role: 'support' } }), 403, 'normal kullanıcı atayamaz');
+  ok(await api('POST', `/api/admin/users/${sup.id}/staff-role`, { token: U.d.token, body: { role: 'support' } }));
+  // dar yetki: nick, fotoğraf, ban serbest
+  ok(await api('GET', `/api/admin/users?q=${v.username}`, { token: sup.token }), 'arama');
+  ok(await api('POST', `/api/admin/users/${v.id}/display-name`, { token: sup.token, body: { displayName: 'Yeni Nick' } }));
+  assert.equal((await sql('SELECT display_name FROM users WHERE id=$1', [v.id])).rows[0].display_name, 'Yeni Nick');
+  await sql(`UPDATE users SET avatar_url = 'https://x.test/a.png' WHERE id = $1`, [v.id]);
+  ok(await api('POST', `/api/admin/users/${v.id}/avatar`, { token: sup.token, body: { avatarUrl: null } }));
+  assert.equal((await sql('SELECT avatar_url FROM users WHERE id=$1', [v.id])).rows[0].avatar_url, null);
+  // yasak alanlar
+  status(await api('POST', `/api/admin/users/${v.id}/coins`, { token: sup.token, body: { amount: 100 } }), 403, 'coin');
+  status(await api('POST', `/api/admin/users/${v.id}/wip`, { token: sup.token, body: { level: 1, days: 1 } }), 403, 'wip');
+  status(await api('POST', `/api/admin/users/${v.id}/staff-role`, { token: sup.token, body: { role: 'support' } }), 403, 'yetki dağıtamaz');
+  status(await api('GET', '/api/admin/staff', { token: sup.token }), 403);
+  status(await api('GET', '/api/admin/reports', { token: sup.token }), 403);
+  status(await api('POST', `/api/admin/users/${U.d.id}/ban`, { token: sup.token, body: {} }), 403, 'yöneticiyi banlayamaz');
+  // süreli ban: giriş reddedilir, süre dolunca otomatik açılır
+  ok(await api('POST', `/api/admin/users/${v.id}/ban`, { token: sup.token, body: { hours: 2, reason: 'spam' } }));
+  const lg = await api('POST', '/api/auth/login', { body: { username: v.username, password: 'sifre123' } });
+  status(lg, 403, 'banlı giriş');
+  assert.match(lg.body.error || lg.body.message || '', /spam/);
+  status(await api('GET', '/api/me', { token: v.token }), 401, 'banlı token');
+  await sql(`UPDATE users SET banned_until = NOW() - INTERVAL '1 minute' WHERE id = $1`, [v.id]);
+  const lg2 = await api('POST', '/api/auth/login', { body: { username: v.username, password: 'sifre123' } });
+  ok(lg2, 'süre dolunca giriş açılır');
+  assert.equal((await sql('SELECT account_status FROM users WHERE id=$1', [v.id])).rows[0].account_status, 'active');
+  // süresiz ban + kaldırma
+  ok(await api('POST', `/api/admin/users/${v2.id}/ban`, { token: sup.token, body: {} }));
+  assert.equal((await sql('SELECT banned_until FROM users WHERE id=$1', [v2.id])).rows[0].banned_until, null);
+  ok(await api('POST', `/api/admin/users/${v2.id}/unban`, { token: sup.token, body: {} }));
+  status(await api('POST', `/api/admin/users/${v2.id}/ban`, { token: sup.token, body: { hours: -5 } }), 400);
+  // yetkiyi geri alınca panel kapanır
+  ok(await api('POST', `/api/admin/users/${sup.id}/staff-role`, { token: U.d.token, body: { role: 'user' } }));
+  status(await api('GET', `/api/admin/users?q=${v.username}`, { token: sup.token }), 403);
+
+  // ---- Oda moderatörü ----
+  const own = await register('own'); const mod = await register('mod'); const u1 = await register('u1'); const u2 = await register('u2');
+  const room = (await api('POST', '/api/rooms', { token: own.token, body: { name: 'Rol Odası', seatCount: 8 } })).body.room;
+  for (const x of [mod, u1, u2]) ok(await api('POST', `/api/rooms/${room.id}/join`, { token: x.token, body: {} }));
+  status(await api('POST', `/api/rooms/${room.id}/members/${mod.id}/role`, { token: u1.token, body: { role: 'moderator' } }), 403, 'normal üye moderatör atayamaz');
+  ok(await api('POST', `/api/rooms/${room.id}/members/${mod.id}/role`, { token: own.token, body: { role: 'moderator' } }));
+  status(await api('POST', `/api/rooms/${room.id}/members/${u1.id}/role`, { token: mod.token, body: { role: 'moderator' } }), 403, 'moderatör yetki dağıtamaz');
+  // koltuk kilidi
+  status(await api('POST', `/api/rooms/${room.id}/seats/3/lock`, { token: u1.token, body: { locked: true } }), 403, 'normal üye kilitleyemez');
+  ok(await api('POST', `/api/rooms/${room.id}/seats/3/lock`, { token: mod.token, body: { locked: true } }));
+  status(await api('POST', `/api/rooms/${room.id}/mic/take`, { token: u1.token, body: { seatIndex: 3 } }), 403, 'kilitli koltuk');
+  status(await api('POST', `/api/rooms/${room.id}/seats/0/lock`, { token: mod.token, body: { locked: true } }), 400, 'sahip koltuğu kilitlenmez');
+  ok(await api('POST', `/api/rooms/${room.id}/seats/3/lock`, { token: mod.token, body: { locked: false } }));
+  // davet, indirme, susturma, atma
+  status(await api('POST', `/api/rooms/${room.id}/members/${u1.id}/mic-invite`, { token: u2.token, body: {} }), 403, 'üye davet edemez');
+  ok(await api('POST', `/api/rooms/${room.id}/members/${u1.id}/mic-invite`, { token: mod.token, body: { seatIndex: 2 } }));
+  ok(await api('POST', `/api/rooms/${room.id}/mic/take`, { token: u1.token, body: { seatIndex: 2 } }));
+  status(await api('POST', `/api/rooms/${room.id}/members/${u1.id}/mic-invite`, { token: mod.token, body: {} }), 409, 'zaten mikrofonda');
+  ok(await api('POST', `/api/rooms/${room.id}/members/${u1.id}/mic-off`, { token: mod.token }), 'koltuktan kaldır');
+  ok(await api('POST', `/api/rooms/${room.id}/members/${u2.id}/chat-mute`, { token: mod.token, body: { minutes: 5 } }), 'sustur');
+  ok(await api('DELETE', `/api/rooms/${room.id}/messages`, { token: mod.token }), 'sohbet temizle');
+  status(await api('POST', `/api/rooms/${room.id}/members/${own.id}/kick`, { token: mod.token }), 403, 'sahibi atamaz');
+  ok(await api('POST', `/api/rooms/${room.id}/members/${u2.id}/kick`, { token: mod.token }), 'normal üyeyi at');
+  status(await api('POST', `/api/rooms/${room.id}/leave`, { token: u1.token }), 200);
+  ok(await api('POST', `/api/rooms/${room.id}/leave`, { token: own.token }));
 });
 
 test('liderlik tablosu, cüzdan geçmişi ve hesap silme', { skip, timeout: 60000 }, async () => {

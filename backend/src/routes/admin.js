@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, tx } from '../database.js';
-import { requireAuth, requireAdmin, requireSuperAdmin } from '../auth.js';
+import { requireAuth, requireStaff, requireSuperAdmin } from '../auth.js';
+import { supportMayCall, banEnd, mayActOnUser } from '../staff_logic.js';
 import { fail, uuid, bigAmount, positiveInt, text, oneOf, httpsUrl } from '../http.js';
 import { validateAgencyConfig } from '../agency_config.js';
 import { loadConfig, configJson, closePeriod, hostStatementJson, agencyStatementJson } from '../services/payouts.js';
@@ -13,7 +14,18 @@ import { banIpPersist, unbanIp, listBans, securityStats } from '../firewall.js';
 import net from 'node:net';
 
 export const router = Router();
-router.use(requireAuth, requireAdmin); // admin + support; para/katalog işlemleri ayrıca requireSuperAdmin ister
+router.use(requireAuth, requireStaff);
+// Yardımcı admin ('support') yalnızca dar yetkilere sahiptir (nick, profil fotoğrafı, ban). Diğer her şey yöneticiye aittir.
+router.use((req, res, next) => {
+  if (req.user.system_role === 'admin') return next();
+  if (supportMayCall(req.method, req.path)) return next();
+  next(fail('Bu işlem yalnızca yöneticiye aittir.', 403));
+});
+
+router.get('/me/permissions', (req, res) => {
+  const admin = req.user.system_role === 'admin';
+  res.json({ role: req.user.system_role, full: admin, can: admin ? ['all'] : ['search_users', 'ban', 'unban', 'change_display_name', 'change_avatar'] });
+});
 
 const INVENTORY_TYPES = ['frame', 'entrance_effect', 'badge', 'profile_effect'];
 const wipLevel = (v) => {
@@ -33,7 +45,7 @@ router.get('/users', async (req, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase();
   if (q.length < 2) throw fail('Arama için en az 2 karakter girin.');
   const r = await query(
-    `SELECT id, username, display_name, coins, diamonds, system_role, account_status
+    `SELECT id, username, display_name, avatar_url, coins, diamonds, system_role, account_status, banned_until, ban_reason
      FROM users WHERE lower(username) LIKE $1 ESCAPE '\\' OR lower(display_name) LIKE $1 ESCAPE '\\' OR id::text = $2
      ORDER BY username LIMIT 20`,
     [`%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`, q],
@@ -41,27 +53,99 @@ router.get('/users', async (req, res) => {
   res.json({
     users: r.rows.map((u) => ({
       id: u.id, username: u.username, displayName: u.display_name, coins: String(u.coins), diamonds: String(u.diamonds),
-      systemRole: u.system_role, accountStatus: u.account_status,
+      systemRole: u.system_role, accountStatus: u.account_status, avatarUrl: u.avatar_url, bannedUntil: u.banned_until, banReason: u.ban_reason,
+      ...(req.user.system_role === 'admin' ? {} : { coins: undefined, diamonds: undefined }),
     })),
   });
 });
 
-router.post('/users/:userId/status', async (req, res) => {
+async function auditStaff(c, adminId, userId, action, meta) {
+  await c.query(
+    `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, metadata) VALUES($1,$2,$3,'user',$4)`,
+    [adminId, userId, action, JSON.stringify(meta)],
+  );
+}
+
+// Süreli veya süresiz ban. hours yoksa/0 ise süresiz.
+router.post('/users/:userId/ban', async (req, res) => {
   const userId = uuid(req.params.userId, 'Kullanıcı');
-  const status = oneOf(req.body?.status, ['active', 'banned'], 'Durum');
-  if (userId === req.user.id) throw fail('Kendi hesabınızın durumunu değiştiremezsiniz.');
+  if (userId === req.user.id) throw fail('Kendinizi banlayamazsınız.');
   const target = await assertUser(userId);
   if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
-  if (target.system_role === 'admin' && req.user.system_role !== 'admin') throw fail('Yöneticiler yalnızca yöneticiler tarafından değiştirilebilir.', 403);
+  if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  const until = banEnd(req.body?.hours);
+  if (until === undefined) throw fail('Süre 1 saat ile 1 yıl arasında olmalı (süresiz için boş bırakın).');
+  const reason = text(req.body?.reason, 'Neden', { max: 300 });
   await tx(async (c) => {
-    await c.query(`UPDATE users SET account_status = $2, token_version = token_version + 1, updated_at = NOW() WHERE id = $1`, [userId, status]);
     await c.query(
-      `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, metadata) VALUES($1,$2,'account_status','user',$3)`,
-      [req.user.id, userId, JSON.stringify({ status, reason: text(req.body?.reason, 'Neden', { max: 300 }) })],
+      `UPDATE users SET account_status = 'banned', banned_until = $2, ban_reason = $3, banned_by = $4, token_version = token_version + 1, updated_at = NOW() WHERE id = $1`,
+      [userId, until, reason, req.user.id],
     );
+    await auditStaff(c, req.user.id, userId, 'account_ban', { until, reason, by: req.user.system_role });
   });
-  if (status === 'banned') hub.disconnectUser(userId, 'banned');
-  res.json({ ok: true, status });
+  hub.disconnectUser(userId, 'banned');
+  res.json({ ok: true, status: 'banned', bannedUntil: until });
+});
+
+router.post('/users/:userId/unban', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const target = await assertUser(userId);
+  if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  if (target.account_status !== 'banned') throw fail('Hesap banlı değil.', 409);
+  await tx(async (c) => {
+    await c.query(`UPDATE users SET account_status = 'active', banned_until = NULL, ban_reason = NULL, banned_by = NULL, updated_at = NOW() WHERE id = $1`, [userId]);
+    await auditStaff(c, req.user.id, userId, 'account_unban', { by: req.user.system_role });
+  });
+  res.json({ ok: true, status: 'active' });
+});
+
+// Kullanıcının görünen adını (nick) değiştirir. Yasaklı kelime denetimi uygulanmaz (yetkili işlemi) ama uzunluk denetlenir.
+router.post('/users/:userId/display-name', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const name = text(req.body?.displayName, 'Görünen ad', { min: 2, max: 40, required: true });
+  const target = await assertUser(userId);
+  if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
+  if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  await tx(async (c) => {
+    const before = (await c.query(`SELECT display_name FROM users WHERE id = $1`, [userId])).rows[0]?.display_name;
+    await c.query(`UPDATE users SET display_name = $2, updated_at = NOW() WHERE id = $1`, [userId, name]);
+    await auditStaff(c, req.user.id, userId, 'profile_display_name', { before, after: name, by: req.user.system_role });
+  });
+  res.json({ ok: true, displayName: name });
+});
+
+// Profil fotoğrafını kaldırır (avatarUrl boş) veya https adresiyle değiştirir.
+router.post('/users/:userId/avatar', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const url = httpsUrl(req.body?.avatarUrl, 'Fotoğraf adresi');
+  const target = await assertUser(userId);
+  if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
+  if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  await tx(async (c) => {
+    await c.query(`UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1`, [userId, url]);
+    await auditStaff(c, req.user.id, userId, 'profile_avatar', { removed: !url, by: req.user.system_role });
+  });
+  res.json({ ok: true, avatarUrl: url });
+});
+
+// Yardımcı admin atama/alma: yalnızca yönetici, admin panelinden.
+router.post('/users/:userId/staff-role', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const role = oneOf(req.body?.role, ['user', 'support'], 'Rol');
+  if (userId === req.user.id) throw fail('Kendi rolünüzü değiştiremezsiniz.');
+  const target = await assertUser(userId);
+  if (target.system_role === 'admin') throw fail('Yönetici rolü buradan değiştirilemez.', 403);
+  if (target.account_status !== 'active') throw fail('Yalnızca aktif hesaplara yetki verilebilir.', 409);
+  await tx(async (c) => {
+    await c.query(`UPDATE users SET system_role = $2, updated_at = NOW() WHERE id = $1`, [userId, role]);
+    await auditStaff(c, req.user.id, userId, 'staff_role', { role });
+  });
+  res.json({ ok: true, role });
+});
+
+router.get('/staff', requireSuperAdmin, async (req, res) => {
+  const r = await query(`SELECT id, username, display_name, system_role FROM users WHERE system_role IN ('support','admin') ORDER BY system_role, username`);
+  res.json({ staff: r.rows.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name, systemRole: u.system_role })) });
 });
 
 // ---------------- Coin (yalnızca yönetici) ----------------

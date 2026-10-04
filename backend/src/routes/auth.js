@@ -1,7 +1,8 @@
 import { cleanPublic } from '../safe_text.js';
 import { Router } from 'express';
 import { query } from '../database.js';
-import { hashPassword, checkPassword, signToken, passwordRules } from '../auth.js';
+import { hashPassword, checkPassword, signToken, passwordRules, liftBan } from '../auth.js';
+import { banExpired, banMessage } from '../staff_logic.js';
 import { fail, text } from '../http.js';
 import { selfUser } from '../views.js';
 import { ipLimit, loginGuard, clientIp } from '../firewall.js';
@@ -42,6 +43,9 @@ router.post('/login', ipLimit('login', 30, 15 * 60e3), async (req, res) => {
   const ok = await checkPassword(password, user?.password_hash || dummyHash);
   if (!user || !user.password_hash || !ok) { guard.failed(); throw fail('Giriş bilgileri hatalı.', 401); }
   guard.succeeded();
-  if (user.account_status !== 'active') throw fail('Hesap askıya alınmış veya silinmiş.', 403);
-  res.json({ token: signToken(user), user: selfUser(user) });
+  let acct = user;
+  if (banExpired(acct)) acct = await liftBan(acct);
+  if (acct.account_status === 'banned') throw fail(banMessage(acct), 403);
+  if (acct.account_status !== 'active') throw fail('Hesap askıya alınmış veya silinmiş.', 403);
+  res.json({ token: signToken(acct), user: selfUser(acct) });
 });
