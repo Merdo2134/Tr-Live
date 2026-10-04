@@ -52,6 +52,7 @@ export function selfUser(row) {
     isHidden: Boolean(row.is_hidden),
     whoCanDm: row.who_can_dm ?? 'everyone',
     systemRole: row.system_role,
+    kycStatus: row.kyc_status ?? 'none',
     createdAt: row.created_at,
   };
 }

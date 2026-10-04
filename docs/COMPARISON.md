@@ -19,7 +19,7 @@ Bu uygulamaların iç mimarisini bilmiyorum; aşağıdaki karşılaştırma **ö
 | Liderlik tabloları | ✅ | günlük/haftalık/aylık/tümü; gönderen, alan, aile |
 | Aile | ✅ | seviye, rol, puan. Aile görevleri/savaşları yok |
 | WIP (5 kademe) | ✅ | |
-| Ajans / yayıncı | ✅ | panel, komisyon. **Maaş/hedef/ödeme otomasyonu yok** |
+| Ajans / yayıncı | ✅ | kod, panel, hedefli maaş kademeleri, kademeli komisyon, dönem kapatma. **Ödeme platform dışında; KYC manuel; oranlar örnek** |
 | Profil (takip, ziyaretçi, çerçeve, kapak) | ✅ | |
 | Oda etiketleri, şifreli oda | ✅ | |
 | Şikâyet, engelleme, gizlilik | ✅ | manuel inceleme; otomatik görsel/ses moderasyonu yok |
@@ -28,8 +28,8 @@ Bu uygulamaların iç mimarisini bilmiyorum; aşağıdaki karşılaştırma **ö
 | Uygulama içi satın alma (Play/App Store) | ❌ | **Coin satışının ana yolu; makbuz doğrulama gerekir** |
 | Telefon/Google/Apple girişi, şifre sıfırlama, e-posta doğrulama | ❌ | |
 | Push bildirim (FCM/APNs) | ❌ | |
-| PK savaşları | ❌ | |
-| Oyunlar (Ludo, Uno, şans çarkı…) | ❌ | kumar/loot-box mağaza kuralları dikkat ister |
+| PK savaşları | ✅ | iki oda, süreli, skor + destekçi listesi |
+| Oyunlar (Ludo, Uno, şans çarkı…) | 🟡 | yalnızca Ludo (bahissiz); Okey/Uno yok |
 | Görevler, günlük ödül, onur madalyaları | ❌ | **Bedava Coin = para basma riski; Diamond çekimiyle birlikte tasarlanmalı** |
 | Diamond çekimi (payout), vergi/KYC | ❌ | hukuki danışmanlık gerekir |
 | Yaş doğrulama / 18+ politikası, gizlilik politikası, KVKK | ❌ | mağaza ve yasal zorunluluk |

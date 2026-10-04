@@ -38,9 +38,26 @@ Sunucu → istemci: `connected`, `room_subscribed`, `room_member_joined|left`, `
 Tek PostgreSQL transaction. İlgili tüm kullanıcı satırları tek sorguda `ORDER BY id FOR UPDATE` ile kilitlenir (deadlock önlemi).
 Gönderici odada olmalı. Kendine hediye serbesttir (bkz. README kuralları).
 
-## Ajans komisyonu
-`agency_commissions(diamond_amount)` = hediye Coin değeri × `commission_bps` / 10000 (aşağı yuvarlanır). Dönemler Türkiye saatine (UTC+3) göredir.
-`POST /api/admin/agencies/:id/settle {period}` o dönemin `accrued` kayıtlarını `paid` yapar ve denetim kaydı yazar.
+## Ajans / yayıncı maaş sistemi (v2.3, Yoho tarzı)
+**Rakamlar ÖRNEKTİR** (Yoho'nun gerçek oranları açıklanmıyor); yönetici panelindeki "Maaş/Dönem" sekmesinden veya `PUT /api/admin/agency-config` ile değiştirilir.
+- **Dönem:** haftalık (Pzt–Paz) veya aylık, Türkiye saati (UTC+3). Anahtar: `2026-10` veya `W2026-09-28`.
+- **Yayıncı saati:** `mic_sessions` (mikrofon koltuğunda geçen süre; bir kullanıcı aynı anda tek odada sayılır).
+- **Yayıncı maaşı (`host_salary_tiers`):** Diamond hedefine göre kademe bulunur; o kademenin saat hedefi tutmadıysa (veya zorunlu resmi etkinlik sayısı tamamlanmadıysa) maaş `penalty_bps` (varsayılan %50) kadar kesilir — tek sefer. Hiçbir kademenin Diamond hedefi tutmazsa maaş 0.
+- **Ajans komisyonu (`agency_commission_tiers`):** ekip Diamond toplamına göre kademeli oran; ajansa özel sabit oran (`commission_override_bps`) tanımlanabilir.
+- **Sayılanlar:** yalnızca onaylı yayıncıya ve aktif ajansa gelen, KENDİNE GÖNDERİLMEYEN hediyeler (`gift_transactions.receiver_agency_id` hediye anında etiketlenir).
+- **Dönem kapatma:** `POST /api/admin/payouts/close {period?, force?}` her yayıncı ve ajans için `host_statements` / `agency_statements` üretir. Kapatılan dönem değiştirilemez; ayarlar o anki hâliyle `payout_periods.config` içinde saklanır.
+- **Ödeme:** platform dışında yapılır; `POST /api/admin/statements/{host|agency}/:id/pay` yalnızca "ödendi" işaretler. Yayıncı maaşı için KYC (`users.kyc_status = approved`) şarttır (manuel durum bayrağı).
+- **Ajans kodu:** 8 haneli; `GET /api/agencies/by-code/:code`, `POST /api/agencies/apply-by-code`.
+- Yayıncı: `GET /api/broadcaster/me` (canlı ilerleme), `GET /api/broadcaster/statements`. Ajans: `GET /api/agencies/:id/dashboard`, `/statements`.
+- Resmi etkinlikler: `POST|GET /api/admin/events`, `POST /api/admin/events/:id/attendance`. KYC: `POST /api/me/kyc/request`, `GET /api/admin/kyc`, `POST /api/admin/users/:id/kyc`.
+
+## Oda özellikleri (v2.3)
+- **Gizli oda:** `hidden:true` ile 6 karakterlik davet kodu (0/O/1/I yok); listede görünmez; `POST /api/rooms/by-code`, `join {code}`. Kod yalnızca sahip/yardımcı sahibe görünür; tahmin denemeleri sınırlı.
+- **Tema:** default, neon, galaxy, sunset, forest, royal, ocean, rose; özel görsel `themeImageUrl` için WIP 4+ (`customRoomTheme`).
+- **Koltuk hediye sayacı:** `room_gift_totals`; `GET /api/rooms/:id/scoreboard`, `POST .../scoreboard/reset`; olay `room_scoreboard`.
+- **Sohbet temizleme:** `DELETE /api/rooms/:id/messages` (sahip, yardımcı sahip, moderatör); olay `room_chat_cleared`.
+- **PK:** `POST /api/pk/challenge`, `/pk/:id/respond`, `/pk/:id/cancel`, `GET /api/rooms/:id/pk`, `/api/pk/rooms`. Skor: odanın sahibine gelen, kendine gönderilmeyen hediyeler. Olaylar: `pk_invite`, `pk_state`, `pk_tick`.
+- **Oyun (Ludo):** `GET /api/rooms/:id/game`, `POST /api/rooms/:id/games`, `/api/games/:id/{join,leave,start,cancel,roll,move}`. Sunucu-otoriter (`ludo.js`), 30 sn tur süresi, AFK'da otomatik oynama (3 kez sonra elenme). **Bahis yoktur.** Olay: `room_game_state`.
 
 ## Giriş efekti
 Önce **seçili** (equipped) `entrance_effect`, yoksa en yeni öğe kullanılır. Gizli kullanıcı efektle duyurulmaz.

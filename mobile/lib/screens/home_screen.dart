@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/room_theme.dart';
 import '../services/api.dart';
 import '../services/inbox_service.dart';
 import '../services/session.dart';
@@ -29,6 +30,18 @@ class _HomeScreenState extends State<HomeScreen> {
     Inbox.start();
   }
 
+  Future<void> _joinByCode() async {
+    final code = await askText(context, 'Gizli oda davet kodu', hint: '6 karakter');
+    if (code == null || !mounted) return;
+    final r = await guard(context, () => Api.post('/api/rooms/by-code', {'code': code}));
+    if (r == null || !mounted) return;
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => RoomScreen(roomId: r['roomId'].toString(), initialName: (r['name'] ?? 'Oda').toString(), code: code.trim().toUpperCase())));
+    if (mounted) {
+      _audioKey.currentState?.refresh();
+      _videoKey.currentState?.refresh();
+    }
+  }
+
   @override
   void dispose() {
     Inbox.stop();
@@ -45,6 +58,11 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: 'Liderlik tablosu',
             icon: const Icon(Icons.emoji_events_outlined),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+          ),
+          IconButton(
+            tooltip: 'Gizli odaya kodla gir',
+            icon: const Icon(Icons.vpn_key_outlined),
+            onPressed: _joinByCode,
           ),
           IconButton(
             tooltip: 'Kullanıcı ara',
@@ -156,15 +174,20 @@ class RoomsTabState extends State<RoomsTab> {
     final tagsCtl = TextEditingController();
     final pwCtl = TextEditingController();
     var seats = 8;
+    var hidden = false;
+    var theme = 'default';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, setS) => AlertDialog(
           title: Text(widget.type == 'video' ? 'Görüntülü oda aç' : 'Sesli oda aç'),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(controller: nameCtl, maxLength: 60, decoration: const InputDecoration(labelText: 'Oda adı')),
             TextField(controller: tagsCtl, decoration: const InputDecoration(labelText: 'Etiketler (en fazla 3, virgülle)', hintText: 'müzik, sohbet, karaoke')),
             TextField(controller: pwCtl, obscureText: true, maxLength: 12, decoration: const InputDecoration(labelText: 'Oda şifresi (isteğe bağlı, 4-12)')),
+            SwitchListTile(dense: true, contentPadding: EdgeInsets.zero, title: const Text('Gizli oda (kodla girilir)'), value: hidden, onChanged: (v) => setS(() => hidden = v)),
+            const SizedBox(height: 4),
+            ThemePicker(value: theme, onChanged: (v) => setS(() => theme = v)),
             const SizedBox(height: 8),
             Row(children: [
               const Text('Koltuk sayısı'),
@@ -175,7 +198,7 @@ class RoomsTabState extends State<RoomsTab> {
                 onChanged: (v) => setS(() => seats = v ?? 8),
               ),
             ]),
-          ]),
+          ])),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
             FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Aç')),
@@ -196,9 +219,23 @@ class RoomsTabState extends State<RoomsTab> {
           'seatCount': seats,
           if (tags.isNotEmpty) 'tags': tags,
           if (pw.isNotEmpty) 'password': pw,
+          'hidden': hidden,
+          'theme': theme,
         }));
     final room = mapOf(r?['room']);
-    if (room != null && mounted) await _open(room['id'] as String, room['name'] as String);
+    if (room != null && mounted) {
+      if (room['joinCode'] != null) {
+        await showDialog<void>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Gizli oda hazır'),
+            content: Text('Davet kodu: ${room['joinCode']}\nBu kodu yalnızca girmesini istediklerinize verin. Kodu oda ayarlarından da görebilirsiniz.'),
+            actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('Tamam'))],
+          ),
+        );
+      }
+      if (mounted) await _open(room['id'] as String, room['name'] as String);
+    }
   }
 
   @override

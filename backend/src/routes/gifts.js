@@ -7,8 +7,9 @@ import { publicUser } from '../views.js';
 import { hub } from '../realtime.js';
 import { config } from '../config.js';
 import { distributeGift } from '../gifts_logic.js';
-import { levelFor, COIN_LEVEL_STEPS, GIFT_LEVEL_STEPS, familyLevelFor, commissionOf, giftDisplayLevel } from '../levels.js';
-import { currentPeriod } from '../periods.js';
+import { levelFor, COIN_LEVEL_STEPS, GIFT_LEVEL_STEPS, familyLevelFor, giftDisplayLevel } from '../levels.js';
+import { scorePk, pkView } from '../services/pk.js';
+import { scoreboardOf } from '../services/scoreboard.js';
 import { loadPublicRows } from '../services/users.js';
 
 export const router = Router();
@@ -48,7 +49,7 @@ router.get('/gifts/global/recent', async (req, res) => {
 
 // Hediye gönderimi: tek PostgreSQL işlemi. Kendine hediye serbesttir (gönderen alıcı olabilir):
 //  - Coin düşer, Diamond artar (muhasebe kaydı tutulur).
-//  - Ajans komisyonu KENDİNE gönderilen hediyelerde oluşmaz (suistimali önlemek için).
+//  - Kendine hediye; ajans/maaş hesabına, PK puanına ve liderlik tablolarına SAYILMAZ (suistimali önlemek için).
 router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const giftId = uuid(req.body?.giftId, 'Hediye');
@@ -93,7 +94,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
     )).rows[0];
     await c.query(`UPDATE users SET coin_level = $1 WHERE id = $2`, [levelFor(sent.total_sent_coins, COIN_LEVEL_STEPS), senderId]);
 
-    const period = currentPeriod();
+    const pkIds = new Set();
     const transactions = [];
     const qualifying = [];
     for (const item of allocation) {
@@ -106,10 +107,20 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
       await c.query(`UPDATE users SET gift_level = $1 WHERE id = $2`, [levelFor(recv.total_received_diamonds, GIFT_LEVEL_STEPS), item.userId]);
 
       const gt = (await c.query(
-        `INSERT INTO gift_transactions(room_id, sender_id, receiver_id, gift_id, quantity, coin_amount)
-         VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+        `INSERT INTO gift_transactions(room_id, sender_id, receiver_id, gift_id, quantity, coin_amount, receiver_agency_id)
+         VALUES($1,$2,$3,$4,$5,$6,(SELECT b.agency_id FROM broadcasters b JOIN agencies a ON a.id = b.agency_id
+                                   WHERE b.user_id = $3 AND b.status = 'approved' AND a.status = 'active')) RETURNING id`,
         [roomId, senderId, item.userId, gift.id, item.quantity, coinAmount.toString()],
       )).rows[0];
+      // Oda içi sayı tahtası (mikrofon koltuğu başına toplam). Kendine hediye de tahtada görünür.
+      await c.query(
+        `INSERT INTO room_gift_totals(room_id, user_id, total_coins, total_count) VALUES($1,$2,$3,$4)
+         ON CONFLICT (room_id, user_id) DO UPDATE SET total_coins = room_gift_totals.total_coins + EXCLUDED.total_coins,
+           total_count = room_gift_totals.total_count + EXCLUDED.total_count, updated_at = NOW()`,
+        [roomId, item.userId, coinAmount.toString(), item.quantity],
+      );
+      const pkId = await scorePk(c, roomId, item.userId, senderId, coinAmount);
+      if (pkId) pkIds.add(pkId);
       await c.query(
         `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'gift_sent',$2,$3,$4)`,
         [senderId, (-coinAmount).toString(), gt.id, `Hediye: ${gift.name} x${item.quantity}`],
@@ -127,24 +138,6 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
       )).rows[0];
       if (fam) await c.query(`UPDATE families SET level = $1 WHERE id = $2`, [familyLevelFor(fam.total_points), fam.id]);
 
-      // Ajans komisyonu (onaylı yayıncı + aktif ajans), kendine hediyede yok.
-      if (item.userId !== senderId) {
-        const ag = (await c.query(
-          `SELECT a.id, a.commission_bps FROM broadcasters b JOIN agencies a ON a.id = b.agency_id
-           WHERE b.user_id = $1 AND b.status = 'approved' AND a.status = 'active' AND a.commission_bps > 0`,
-          [item.userId],
-        )).rows[0];
-        if (ag) {
-          const cut = commissionOf(coinAmount, ag.commission_bps);
-          if (cut > 0n) {
-            await c.query(
-              `INSERT INTO agency_commissions(agency_id, broadcaster_id, gift_transaction_id, diamond_amount, period) VALUES($1,$2,$3,$4,$5)`,
-              [ag.id, item.userId, gt.id, cut.toString(), period],
-            );
-          }
-        }
-      }
-
       if (coinAmount >= config.globalGiftMinCoins) {
         await c.query(
           `INSERT INTO global_gift_events(gift_transaction_id, room_id, sender_id, receiver_id, coin_amount, display_level)
@@ -155,7 +148,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
       }
       transactions.push({ id: gt.id, receiverId: item.userId, quantity: item.quantity, coinAmount: coinAmount.toString() });
     }
-    return { gift, quantity, totalCoins, balance: sent.coins, transactions, qualifying, allocation };
+    return { gift, quantity, totalCoins, balance: sent.coins, transactions, qualifying, allocation, pkIds: [...pkIds] };
   });
 
   // ---- Olaylar (işlem başarıyla bittikten sonra) ----
@@ -170,6 +163,15 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
   hub.broadcastRoom(roomId, {
     type: 'room_gift', roomId, gift: giftInfo, quantity: result.quantity, totalCoins: result.totalCoins.toString(), sender, receivers,
   });
+
+  scoreboardOf(roomId).then((scoreboard) => hub.broadcastRoom(roomId, { type: 'room_scoreboard', roomId, scoreboard })).catch(() => {});
+  for (const id of result.pkIds) {
+    pkView(id).then((pk) => {
+      if (!pk) return;
+      hub.broadcastRoom(pk.a.roomId, { type: 'pk_state', pk });
+      hub.broadcastRoom(pk.b.roomId, { type: 'pk_state', pk });
+    }).catch(() => {});
+  }
 
   let ribbon = null;
   if (result.qualifying.length) {

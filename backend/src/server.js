@@ -23,7 +23,12 @@ import { router as chatRouter } from './routes/chat.js';
 import { router as messagesRouter } from './routes/messages.js';
 import { router as safetyRouter } from './routes/safety.js';
 import { router as leaderboardsRouter } from './routes/leaderboards.js';
+import { router as pkRouter } from './routes/pk.js';
+import { router as gamesRouter } from './routes/games.js';
 import { startMusicTicker } from './services/music.js';
+import { startPkTicker } from './services/pk.js';
+import { startGameTicker } from './services/games.js';
+import { closeStaleMicSessions } from './services/mic.js';
 import { firewall, bodyGuard, ipLimit, loadBans, startFirewallJanitor, wsClientIp, isBanned, noteViolation } from './firewall.js';
 
 validateConfig();
@@ -74,6 +79,8 @@ app.use('/api/admin', adminRouter);
 app.use('/api', giftsRouter);
 app.use('/api', agenciesRouter);
 app.use('/api', musicRouter);
+app.use('/api', pkRouter);
+app.use('/api', gamesRouter);
 app.use('/api', safetyRouter);
 
 app.use('/api', (req, res) => res.status(404).json({ message: 'Adres bulunamadı.' }));
@@ -111,6 +118,9 @@ attachRealtime(server, {
 });
 const sweeper = startRoomSweeper();
 const musicTicker = startMusicTicker();
+const pkTicker = startPkTicker();
+const gameTicker = startGameTicker();
+closeStaleMicSessions().catch((e) => console.error('Mikrofon oturumları temizlenemedi:', e.message));
 const janitor = startFirewallJanitor();
 loadBans().then((n) => n && console.log(`${n} aktif IP yasağı yüklendi.`)).catch((e) => console.error('IP yasakları yüklenemedi:', e.message));
 
@@ -123,6 +133,8 @@ async function shutdown(signal) {
   console.log(`${signal} alındı, kapatılıyor...`);
   clearInterval(sweeper);
   clearInterval(musicTicker);
+  clearInterval(pkTicker);
+  clearInterval(gameTicker);
   clearInterval(janitor);
   const force = setTimeout(() => process.exit(1), 10000);
   force.unref();

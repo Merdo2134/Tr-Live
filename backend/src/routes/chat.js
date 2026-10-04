@@ -58,6 +58,16 @@ router.get('/:roomId/messages', async (req, res) => {
   });
 });
 
+// Sohbeti temizle: yalnızca oda sahibi, yardımcı sahip ve moderatör.
+router.delete('/:roomId/messages', userLimit('chat_clear', 10, 60e3), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const { member } = await roomAndMember(roomId, req.user.id);
+  if (!MANAGERS.includes(member.role)) throw fail('Sohbeti yalnızca oda yetkilileri temizleyebilir.', 403);
+  const r = await query(`UPDATE room_messages SET deleted = TRUE WHERE room_id = $1 AND deleted = FALSE`, [roomId]);
+  hub.broadcastRoom(roomId, { type: 'room_chat_cleared', roomId, by: req.user.id });
+  res.json({ ok: true, cleared: r.rowCount });
+});
+
 router.delete('/:roomId/messages/:messageId', async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const messageId = uuid(req.params.messageId, 'Mesaj');

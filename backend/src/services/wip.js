@@ -1,7 +1,7 @@
 import { query } from '../database.js';
 
 export const BASE_FEATURES = Object.freeze({
-  nameColor: null, badge: null, maxRooms: 1, viewVisitors: false, kickImmunity: false, profileEffect: false,
+  nameColor: null, badge: null, maxRooms: 1, viewVisitors: false, kickImmunity: false, profileEffect: false, customRoomTheme: false,
 });
 
 // run: (text, params) => Promise<{rows}>  (transaction içinde client.query kullanılabilir)

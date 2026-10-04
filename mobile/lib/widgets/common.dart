@@ -78,6 +78,14 @@ String fmtNumber(dynamic v) {
   return '${neg ? '-' : ''}$buf';
 }
 
+/// Kuruş cinsinden tutarı "12,50 USD" biçiminde gösterir.
+String fmtMoney(dynamic cents, [String currency = 'USD']) {
+  final v = BigInt.tryParse((cents ?? 0).toString()) ?? BigInt.zero;
+  final whole = v ~/ BigInt.from(100);
+  final frac = (v % BigInt.from(100)).toInt().toString().padLeft(2, '0');
+  return '${fmtNumber(whole.toString())},$frac $currency';
+}
+
 String fmtDuration(num seconds) {
   final s = seconds.toInt();
   final h = s ~/ 3600;

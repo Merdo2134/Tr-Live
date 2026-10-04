@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { query, tx } from '../database.js';
 import { requireAuth, requireAdmin, requireSuperAdmin } from '../auth.js';
 import { fail, uuid, bigAmount, positiveInt, text, oneOf, httpsUrl } from '../http.js';
-import { isPeriod } from '../periods.js';
+import { validateAgencyConfig } from '../agency_config.js';
+import { loadConfig, configJson, closePeriod, hostStatementJson, agencyStatementJson } from '../services/payouts.js';
+import { parsePeriodKey, previousPeriod } from '../settlement.js';
+import { ensureAgencyCode } from './agencies.js';
 import { WIP_MIN_LEVEL, WIP_MAX_LEVEL } from '../levels.js';
 import { dealerSell } from '../services/dealers.js';
 import { hub } from '../realtime.js';
@@ -114,7 +117,7 @@ router.delete('/users/:userId/wip', async (req, res) => {
   res.json({ ok: true });
 });
 
-const FEATURE_TYPES = { nameColor: 'color', badge: 'string', maxRooms: 'int', viewVisitors: 'bool', kickImmunity: 'bool', profileEffect: 'bool' };
+const FEATURE_TYPES = { nameColor: 'color', badge: 'string', maxRooms: 'int', viewVisitors: 'bool', kickImmunity: 'bool', profileEffect: 'bool', customRoomTheme: 'bool' };
 function cleanFeatures(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('Özellikler nesne olmalı.');
   const out = {};
@@ -277,7 +280,7 @@ router.get('/agencies', async (req, res) => {
   );
   res.json({ agencies: r.rows.map((a) => ({
     id: a.id, name: a.name, ownerId: a.owner_id, ownerUsername: a.owner_username, status: a.status,
-    commissionBps: a.commission_bps, broadcasterCount: a.broadcaster_count, createdAt: a.created_at,
+    commissionBps: a.commission_bps, overrideBps: a.commission_override_bps, agencyCode: a.agency_code, broadcasterCount: a.broadcaster_count, createdAt: a.created_at,
   })) });
 });
 
@@ -298,6 +301,7 @@ router.post('/agencies/:agencyId/status', requireSuperAdmin, async (req, res) =>
     [agencyId, status, bps, req.user.id],
   );
   if (!r.rowCount) throw fail('Ajans bulunamadı.', 404);
+  if (status === 'active') await ensureAgencyCode(agencyId);
   await query(
     `INSERT INTO financial_audit_logs(admin_id, action, reference_type, reference_id, metadata) VALUES($1,'agency_status','agency',$2,$3)`,
     [req.user.id, agencyId, JSON.stringify({ status, commissionBps: r.rows[0].commission_bps })],
@@ -338,27 +342,170 @@ router.post('/broadcasters/:userId/status', async (req, res) => {
   res.json({ broadcaster: r.rows[0] });
 });
 
-// Bir ajansın belirli dönemdeki tahakkuk eden komisyonlarını "ödendi" işaretler (ödeme platform dışında yapılır).
-router.post('/agencies/:agencyId/settle', requireSuperAdmin, async (req, res) => {
-  const agencyId = uuid(req.params.agencyId, 'Ajans');
-  const period = String(req.body?.period ?? '');
-  if (!isPeriod(period)) throw fail('Dönem YYYY-AA biçiminde olmalı.');
-  const total = await tx(async (c) => {
-    const r = await c.query(
-      `UPDATE agency_commissions SET status = 'paid', paid_at = NOW(), paid_by = $3
-       WHERE agency_id = $1 AND period = $2 AND status = 'accrued' RETURNING diamond_amount`,
-      [agencyId, period, req.user.id],
-    );
-    if (!r.rowCount) throw fail('Bu dönem için ödenecek komisyon yok.', 404);
-    const sum = r.rows.reduce((s, x) => s + BigInt(x.diamond_amount), 0n);
-    await c.query(
-      `INSERT INTO financial_audit_logs(admin_id, action, reference_type, reference_id, amount_diamonds, metadata)
-       VALUES($1,'agency_commission_settlement','agency',$2,$3,$4)`,
-      [req.user.id, agencyId, sum.toString(), JSON.stringify({ period, records: r.rowCount })],
-    );
-    return sum;
+// ---------------- Ajans ayarları, etkinlikler, dönem kapatma, KYC ----------------
+router.get('/agency-config', async (req, res) => {
+  res.json({ config: configJson(await loadConfig()) });
+});
+
+router.put('/agency-config', requireSuperAdmin, async (req, res) => {
+  const v = validateAgencyConfig(req.body);
+  await tx(async (c) => {
+    if (v.settings) {
+      const m = { cycle: 'cycle', penaltyBps: 'penalty_bps', requireOfficialEvents: 'require_official_events', minEventCount: 'min_event_count', currency: 'currency' };
+      for (const [k, col] of Object.entries(m)) {
+        if (v.settings[k] !== undefined) await c.query(`UPDATE agency_settings SET ${col} = $1, updated_at = NOW() WHERE id = 1`, [v.settings[k]]);
+      }
+    }
+    if (v.salaryTiers) {
+      await c.query(`DELETE FROM host_salary_tiers`);
+      for (const t of v.salaryTiers) {
+        await c.query(`INSERT INTO host_salary_tiers(level, required_hours, required_diamonds, salary_cents) VALUES($1,$2,$3,$4)`, [t.level, t.hours, t.diamonds.toString(), t.salaryCents.toString()]);
+      }
+    }
+    if (v.commissionTiers) {
+      await c.query(`DELETE FROM agency_commission_tiers`);
+      for (const t of v.commissionTiers) {
+        await c.query(`INSERT INTO agency_commission_tiers(level, min_team_diamonds, commission_bps) VALUES($1,$2,$3)`, [t.level, t.minDiamonds.toString(), t.bps]);
+      }
+    }
+    await c.query(`INSERT INTO financial_audit_logs(admin_id, action, reference_type, metadata) VALUES($1,'agency_config_update','agency_config',$2)`, [req.user.id, JSON.stringify(Object.keys(v))]);
   });
-  res.json({ ok: true, period, paidDiamonds: total.toString() });
+  res.json({ config: configJson(await loadConfig()) });
+});
+
+router.post('/agencies/:agencyId/commission-override', requireSuperAdmin, async (req, res) => {
+  const agencyId = uuid(req.params.agencyId, 'Ajans');
+  let bps = req.body?.bps;
+  if (bps !== null) {
+    if (!Number.isInteger(bps) || bps < 0 || bps > 10000) throw fail('Oran 0-10000 (baz puan) olmalı veya null.');
+  }
+  const r = await query(`UPDATE agencies SET commission_override_bps = $2 WHERE id = $1 RETURNING id, commission_override_bps`, [agencyId, bps]);
+  if (!r.rowCount) throw fail('Ajans bulunamadı.', 404);
+  await query(`INSERT INTO financial_audit_logs(admin_id, action, reference_type, reference_id, metadata) VALUES($1,'agency_commission_override','agency',$2,$3)`, [req.user.id, agencyId, JSON.stringify({ bps })]);
+  res.json({ ok: true, overrideBps: r.rows[0].commission_override_bps });
+});
+
+router.post('/broadcasters/:userId/contract', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const tier = req.body?.tier === null ? null : positiveInt(req.body?.tier, 'Kademe', 10);
+  const r = await query(`UPDATE broadcasters SET contract_tier = $2 WHERE user_id = $1 RETURNING user_id`, [userId, tier]);
+  if (!r.rowCount) throw fail('Yayıncı bulunamadı.', 404);
+  res.json({ ok: true, tier });
+});
+
+router.post('/events', async (req, res) => {
+  const title = text(req.body?.title, 'Başlık', { min: 3, max: 120, required: true });
+  const startsAt = new Date(req.body?.startsAt);
+  if (Number.isNaN(startsAt.getTime())) throw fail('Başlangıç zamanı geçersiz.');
+  const r = await query(`INSERT INTO official_events(title, starts_at, created_by) VALUES($1,$2,$3) RETURNING id, title, starts_at`, [title, startsAt.toISOString(), req.user.id]);
+  res.status(201).json({ event: r.rows[0] });
+});
+
+router.get('/events', async (req, res) => {
+  const r = await query(
+    `SELECT e.id, e.title, e.starts_at, (SELECT COUNT(*)::int FROM official_event_attendance a WHERE a.event_id = e.id) AS attendees
+     FROM official_events e ORDER BY e.starts_at DESC LIMIT 100`,
+  );
+  res.json({ events: r.rows.map((e) => ({ id: e.id, title: e.title, startsAt: e.starts_at, attendees: e.attendees })) });
+});
+
+router.post('/events/:id/attendance', async (req, res) => {
+  const eventId = uuid(req.params.id, 'Etkinlik');
+  const userIds = (Array.isArray(req.body?.userIds) ? req.body.userIds : []).slice(0, 200).map((x) => uuid(x, 'Kullanıcı'));
+  if (!userIds.length) throw fail('En az bir kullanıcı gerekli.');
+  if (!(await query(`SELECT 1 FROM official_events WHERE id = $1`, [eventId])).rowCount) throw fail('Etkinlik bulunamadı.', 404);
+  const r = await query(
+    `INSERT INTO official_event_attendance(event_id, user_id, marked_by)
+     SELECT $1, b.user_id, $3 FROM broadcasters b WHERE b.user_id = ANY($2::uuid[]) ON CONFLICT DO NOTHING`, [eventId, userIds, req.user.id],
+  );
+  res.json({ ok: true, added: r.rowCount });
+});
+
+// Dönemi kapat (hesap özetleri üretir). period boş ise bir önceki dönem.
+router.post('/payouts/close', requireSuperAdmin, async (req, res) => {
+  const cfg = await loadConfig();
+  let key = req.body?.period;
+  if (!key) key = previousPeriod(cfg.settings.cycle).key;
+  try { parsePeriodKey(key); } catch (e) { throw fail(e.message); }
+  const out = await closePeriod({ adminId: req.user.id, periodKey: key, force: req.body?.force === true });
+  res.status(201).json(out);
+});
+
+router.get('/payouts', async (req, res) => {
+  const r = await query(
+    `SELECT p.id, p.period_key, p.cycle, p.starts_at, p.ends_at, p.closed_at,
+       (SELECT COUNT(*)::int FROM host_statements h WHERE h.period_id = p.id) AS hosts,
+       (SELECT COUNT(*)::int FROM host_statements h WHERE h.period_id = p.id AND h.status = 'pending') AS pending_hosts,
+       (SELECT COALESCE(SUM(salary_cents),0) FROM host_statements h WHERE h.period_id = p.id) AS total_salary_cents,
+       (SELECT COUNT(*)::int FROM agency_statements a WHERE a.period_id = p.id) AS agencies,
+       (SELECT COUNT(*)::int FROM agency_statements a WHERE a.period_id = p.id AND a.status = 'pending') AS pending_agencies
+     FROM payout_periods p ORDER BY p.starts_at DESC LIMIT 52`,
+  );
+  res.json({ periods: r.rows.map((p) => ({
+    id: p.id, periodKey: p.period_key, cycle: p.cycle, startsAt: p.starts_at, endsAt: p.ends_at, closedAt: p.closed_at,
+    hosts: p.hosts, pendingHosts: p.pending_hosts, totalSalaryCents: String(p.total_salary_cents), agencies: p.agencies, pendingAgencies: p.pending_agencies,
+  })) });
+});
+
+router.get('/payouts/:id', async (req, res) => {
+  const id = uuid(req.params.id, 'Dönem');
+  const p = (await query(`SELECT * FROM payout_periods WHERE id = $1`, [id])).rows[0];
+  if (!p) throw fail('Dönem bulunamadı.', 404);
+  const hosts = (await query(
+    `SELECT h.*, $2::text AS period_key, $3::timestamptz AS starts_at, $4::timestamptz AS ends_at, u.username, u.kyc_status
+     FROM host_statements h JOIN users u ON u.id = h.user_id WHERE h.period_id = $1 ORDER BY h.salary_cents DESC`,
+    [id, p.period_key, p.starts_at, p.ends_at],
+  )).rows;
+  const agencies = (await query(
+    `SELECT s.*, $2::text AS period_key, $3::timestamptz AS starts_at, $4::timestamptz AS ends_at, a.name AS agency_name
+     FROM agency_statements s JOIN agencies a ON a.id = s.agency_id WHERE s.period_id = $1 ORDER BY s.commission_diamonds DESC`,
+    [id, p.period_key, p.starts_at, p.ends_at],
+  )).rows;
+  res.json({
+    period: { id: p.id, periodKey: p.period_key, cycle: p.cycle, startsAt: p.starts_at, endsAt: p.ends_at, closedAt: p.closed_at },
+    hostStatements: hosts.map((h) => ({ ...hostStatementJson(h), kycStatus: h.kyc_status })),
+    agencyStatements: agencies.map(agencyStatementJson),
+  });
+});
+
+// Ödeme platform dışında yapılır; burada yalnızca "ödendi" işaretlenir. Yayıncı için KYC onayı şarttır.
+router.post('/statements/:kind/:id/pay', requireSuperAdmin, async (req, res) => {
+  const kind = oneOf(req.params.kind, ['host', 'agency'], 'Tür');
+  const id = uuid(req.params.id, 'Özet');
+  await tx(async (c) => {
+    if (kind === 'host') {
+      const h = (await c.query(`SELECT h.*, u.kyc_status FROM host_statements h JOIN users u ON u.id = h.user_id WHERE h.id = $1 FOR UPDATE OF h`, [id])).rows[0];
+      if (!h) throw fail('Özet bulunamadı.', 404);
+      if (h.status !== 'pending') throw fail('Bu özet zaten işlenmiş.', 409);
+      if (BigInt(h.salary_cents) > 0n && h.kyc_status !== 'approved') throw fail('Yayıncının kimlik doğrulaması (KYC) onaylı değil.', 409);
+      await c.query(`UPDATE host_statements SET status = 'paid', paid_at = NOW(), paid_by = $2 WHERE id = $1`, [id, req.user.id]);
+      await c.query(`INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, reference_id, metadata) VALUES($1,$2,'host_salary_paid','host_statement',$3,$4)`,
+        [req.user.id, h.user_id, id, JSON.stringify({ salaryCents: String(h.salary_cents) })]);
+    } else {
+      const a = (await c.query(`SELECT * FROM agency_statements WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+      if (!a) throw fail('Özet bulunamadı.', 404);
+      if (a.status !== 'pending') throw fail('Bu özet zaten işlenmiş.', 409);
+      await c.query(`UPDATE agency_statements SET status = 'paid', paid_at = NOW(), paid_by = $2 WHERE id = $1`, [id, req.user.id]);
+      await c.query(`INSERT INTO financial_audit_logs(admin_id, action, reference_type, reference_id, amount_diamonds, metadata) VALUES($1,'agency_commission_paid','agency_statement',$2,$3,$4)`,
+        [req.user.id, id, a.commission_diamonds, JSON.stringify({ agencyId: a.agency_id })]);
+    }
+  });
+  res.json({ ok: true });
+});
+
+router.get('/kyc', async (req, res) => {
+  const status = oneOf(String(req.query.status ?? 'pending'), ['pending', 'approved', 'rejected'], 'Durum');
+  const r = await query(`SELECT id, username, display_name, kyc_status FROM users WHERE kyc_status = $1 ORDER BY username LIMIT 200`, [status]);
+  res.json({ users: r.rows.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name, kycStatus: u.kyc_status })) });
+});
+
+router.post('/users/:userId/kyc', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const status = oneOf(req.body?.status, ['approved', 'rejected', 'none'], 'Durum');
+  const r = await query(`UPDATE users SET kyc_status = $2 WHERE id = $1 RETURNING id`, [userId, status]);
+  if (!r.rowCount) throw fail('Kullanıcı bulunamadı.', 404);
+  await query(`INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, metadata) VALUES($1,$2,'kyc_status','user',$3)`, [req.user.id, userId, JSON.stringify({ status })]);
+  res.json({ ok: true, status });
 });
 
 router.get('/finance/audit', requireSuperAdmin, async (req, res) => {

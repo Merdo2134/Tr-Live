@@ -23,3 +23,10 @@ git push -u origin main
    burada çıkan hatalar gerçek SQL/mantık hatalarıdır; çıktıyı bana yapıştırırsanız birlikte düzeltiriz.
 2. **Settings → Secrets** içine üretim anahtarlarını koyun; depoya `.env` **koymayın**.
 3. Depoyu **private** tutmanızı öneririm (yönetim ve para mantığı içerir).
+
+## APK üretmek (bilgisayarsız, yalnızca telefon)
+1. `.github/workflows/apk_build.yml` dosyası depoda olmalı (bu pakette hazır).
+2. GitHub'da depoyu açın → **Actions** sekmesi → soldan **APK Derle** → **Run workflow**.
+3. `api_url` alanına sunucunuzun `https://...` adresini yazın (boş bırakırsanız örnek adres kullanılır; uygulama o zaman sunucuya bağlanamaz).
+4. İş bitince (yeşil tik) çalışmanın sayfasında en altta **Artifacts → tr-live-apk** dosyasını indirin, zip'ten çıkan `.apk` dosyasını telefona kurun.
+Not: APK debug anahtarıyla imzalanır; yalnızca test/yan yükleme içindir, Play Store için ayrı imza gerekir.

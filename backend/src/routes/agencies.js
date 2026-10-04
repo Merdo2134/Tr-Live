@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { query, tx } from '../database.js';
 import { requireAuth } from '../auth.js';
 import { fail, uuid, text, httpsUrl } from '../http.js';
-import { currentPeriod, isPeriod, periodRange } from '../periods.js';
-import { USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS, publicUser } from '../views.js';
+import crypto from 'node:crypto';
+import { periodBounds, parsePeriodKey, commissionFor, nextCommissionTier, evaluateHost } from '../settlement.js';
+import { loadConfig, configJson, hostMetrics, teamDiamonds, eventsOk, hostProgress, hostStatementJson, agencyStatementJson } from '../services/payouts.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -11,17 +12,31 @@ router.use(requireAuth);
 const agencyJson = (a) => ({
   id: a.id, name: a.name, logoUrl: a.logo_url, description: a.description, status: a.status,
   commissionBps: a.commission_bps, ownerId: a.owner_id, createdAt: a.created_at,
-  broadcasterCount: a.broadcaster_count ?? undefined,
+  broadcasterCount: a.broadcaster_count ?? undefined, agencyCode: a.agency_code ?? undefined,
 });
 const AGENCY_SELECT = `SELECT a.*, (SELECT COUNT(*)::int FROM broadcasters b WHERE b.agency_id = a.id AND b.status = 'approved') AS broadcaster_count FROM agencies a`;
+
+const publicAgencyJson = (a) => { const j = agencyJson(a); delete j.agencyCode; return j; };
 
 // Yönetim ekranlarında (ajans sahibi/yönetici) gerçek kimlik gösterilir; "gizli kullanıcı" maskesi uygulanmaz.
 const memberJson = (x) => ({ id: x.id, username: x.username, displayName: x.display_name, avatarUrl: x.avatar_url });
 
-const SEC_EXPR = `COALESCE((SELECT SUM(EXTRACT(EPOCH FROM (LEAST(COALESCE(s.ended_at, NOW()), $3::timestamptz) - GREATEST(s.started_at, $2::timestamptz))))
-  FROM broadcast_sessions s WHERE s.user_id = b.user_id AND s.started_at < $3::timestamptz AND COALESCE(s.ended_at, NOW()) > $2::timestamptz), 0)::bigint`;
-const DIA_EXPR = `COALESCE((SELECT SUM(gt.coin_amount) FROM gift_transactions gt WHERE gt.receiver_id = b.user_id AND gt.sender_id <> b.user_id
-  AND gt.created_at >= $2::timestamptz AND gt.created_at < $3::timestamptz), 0)`;
+// 8 haneli ajans kodu (ilk hane 0 olmaz).
+export async function ensureAgencyCode(agencyId, run = query) {
+  const cur = (await run(`SELECT agency_code FROM agencies WHERE id = $1`, [agencyId])).rows[0];
+  if (!cur) return null;
+  if (cur.agency_code) return cur.agency_code;
+  for (let i = 0; i < 10; i += 1) {
+    const code = String(10000000 + crypto.randomInt(0, 90000000));
+    try {
+      const r = await run(`UPDATE agencies SET agency_code = $2 WHERE id = $1 AND agency_code IS NULL RETURNING agency_code`, [agencyId, code]);
+      return r.rows[0]?.agency_code ?? (await run(`SELECT agency_code FROM agencies WHERE id = $1`, [agencyId])).rows[0].agency_code;
+    } catch (error) {
+      if (error.code !== '23505') throw error;
+    }
+  }
+  throw fail('Ajans kodu üretilemedi.', 503);
+}
 
 async function ownedAgency(userId) {
   return (await query(`SELECT * FROM agencies WHERE owner_id = $1 AND status <> 'rejected'`, [userId])).rows[0] || null;
@@ -34,10 +49,9 @@ async function assertAgencyOwner(agencyId, user) {
   return a;
 }
 
-function periodFrom(req) {
-  const p = req.query.period ? String(req.query.period) : currentPeriod();
-  if (!isPeriod(p)) throw fail('Dönem YYYY-AA biçiminde olmalı.');
-  return { period: p, ...periodRange(p) };
+function boundsFrom(req, cycle) {
+  try { return req.query.period ? parsePeriodKey(String(req.query.period)) : periodBounds(cycle); }
+  catch { throw fail('Dönem anahtarı geçersiz (örn. 2026-10 veya W2026-09-28).'); }
 }
 
 // ---------------- Ajans ----------------
@@ -47,7 +61,7 @@ router.get('/agencies', async (req, res) => {
     `${AGENCY_SELECT} WHERE a.status = 'active' AND ($1 = '' OR lower(a.name) LIKE $2 ESCAPE '\\') ORDER BY a.name LIMIT 100`,
     [q, `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`],
   );
-  res.json({ agencies: r.rows.map(agencyJson) });
+  res.json({ agencies: r.rows.map(publicAgencyJson) });
 });
 
 router.post('/agencies', async (req, res) => {
@@ -67,7 +81,7 @@ router.post('/agencies', async (req, res) => {
         [name, req.user.id, logoUrl, description],
       )).rows[0];
     });
-    res.status(201).json({ agency: agencyJson(agency), message: 'Ajans başvurunuz alındı; yönetici onayı bekleniyor.' });
+    res.status(201).json({ agency: publicAgencyJson(agency), message: 'Ajans başvurunuz alındı; yönetici onayı bekleniyor.' });
   } catch (error) {
     if (error.code === '23505') throw fail('Bu ajans adı kullanılıyor veya zaten bir ajansınız var.', 409);
     throw error;
@@ -75,7 +89,8 @@ router.post('/agencies', async (req, res) => {
 });
 
 router.get('/agencies/mine', async (req, res) => {
-  const owned = await ownedAgency(req.user.id);
+  let owned = await ownedAgency(req.user.id);
+  if (owned && owned.status === 'active' && !owned.agency_code) { await ensureAgencyCode(owned.id); owned = await ownedAgency(req.user.id); }
   const membership = (await query(
     `SELECT b.status, b.joined_agency_at, a.id, a.name, a.logo_url, a.description, a.status AS agency_status
      FROM broadcasters b LEFT JOIN agencies a ON a.id = b.agency_id WHERE b.user_id = $1`,
@@ -102,34 +117,81 @@ router.patch('/agencies/:agencyId', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Ajans paneli: yayıncılar, aylık Diamond ve yayın süresi, komisyon özeti.
+// Ajans paneli: canlı dönem verileri, komisyon kademesi, bir sonraki kademeye kalan, yayıncı bazında ilerleme.
 router.get('/agencies/:agencyId/dashboard', async (req, res) => {
   const a = await assertAgencyOwner(uuid(req.params.agencyId, 'Ajans'), req.user);
-  const { period, start, end } = periodFrom(req);
-  const rows = (await query(
-    `SELECT u.id, u.username, u.display_name, u.avatar_url, b.status, b.joined_agency_at,
-            ${DIA_EXPR} AS diamonds, ${SEC_EXPR} AS seconds
-     FROM broadcasters b JOIN users u ON u.id = b.user_id
-     WHERE b.agency_id = $1 ORDER BY diamonds DESC, u.username`,
-    [a.id, start, end],
+  const cfg = await loadConfig();
+  const b = boundsFrom(req, cfg.settings.cycle);
+  const hosts = (await query(
+    `SELECT u.id, u.username, u.display_name, u.avatar_url, br.status, br.joined_agency_at
+     FROM broadcasters br JOIN users u ON u.id = br.user_id WHERE br.agency_id = $1 ORDER BY u.username`, [a.id],
   )).rows;
-  const commissions = (await query(
-    `SELECT status, COALESCE(SUM(diamond_amount), 0) AS total FROM agency_commissions WHERE agency_id = $1 AND period = $2 GROUP BY status`,
-    [a.id, period],
-  )).rows;
-  const unpaid = (await query(
-    `SELECT COALESCE(SUM(diamond_amount), 0) AS total FROM agency_commissions WHERE agency_id = $1 AND status = 'accrued'`, [a.id],
-  )).rows[0].total;
-  const sum = (status) => String(commissions.find((x) => x.status === status)?.total ?? 0);
+  const rows = [];
+  for (const h of hosts) {
+    const m = await hostMetrics(h.id, b.start, b.end);
+    const ok = await eventsOk(h.id, cfg, b.start, b.end);
+    const ev = evaluateHost({ tiers: cfg.salaryTiers, seconds: m.seconds, diamonds: m.diamonds, penaltyBps: cfg.settings.penaltyBps, eventsRequired: cfg.settings.requireOfficialEvents, eventsOk: ok });
+    rows.push({
+      ...memberJson(h), status: h.status, joinedAt: h.joined_agency_at, seconds: m.seconds, diamonds: String(m.diamonds),
+      tier: ev.tier?.level ?? null, estimatedCents: String(ev.salaryCents), atRisk: ev.penalty && ev.tier !== null, eventsOk: ok,
+    });
+  }
+  rows.sort((x, y) => (BigInt(y.diamonds) > BigInt(x.diamonds) ? 1 : BigInt(y.diamonds) < BigInt(x.diamonds) ? -1 : 0));
+  const team = await teamDiamonds(a.id, b.start, b.end);
+  const com = commissionFor(cfg.commissionTiers, team, a.commission_override_bps);
+  const next = a.commission_override_bps === null ? nextCommissionTier(cfg.commissionTiers, team) : null;
   res.json({
-    agency: agencyJson(a), period,
-    broadcasters: rows.map((x) => ({ ...memberJson(x), status: x.status, joinedAt: x.joined_agency_at, diamonds: String(x.diamonds), seconds: Number(x.seconds) })),
+    agency: agencyJson(a), periodKey: b.key, cycle: b.cycle, startsAt: b.start, endsAt: b.end, currency: cfg.settings.currency,
+    broadcasters: rows,
     totals: {
-      diamonds: rows.reduce((s, x) => s + BigInt(x.diamonds), 0n).toString(),
-      seconds: rows.reduce((s, x) => s + Number(x.seconds), 0),
-      commissionAccrued: sum('accrued'), commissionPaid: sum('paid'), commissionUnpaidAllTime: String(unpaid),
+      teamDiamonds: String(team), seconds: rows.reduce((t, x) => t + x.seconds, 0),
+      commissionBps: com.bps, commissionTier: com.level, estimatedCommissionDiamonds: String(com.amount),
+      overrideBps: a.commission_override_bps,
+      estimatedSalaryCents: String(rows.reduce((t, x) => t + BigInt(x.estimatedCents), 0n)),
+      next: next ? { level: next.level, minDiamonds: String(next.minDiamonds), bps: next.bps, remaining: String(next.remaining) } : null,
     },
+    config: configJson(cfg),
   });
+});
+
+router.get('/agencies/:agencyId/statements', async (req, res) => {
+  const a = await assertAgencyOwner(uuid(req.params.agencyId, 'Ajans'), req.user);
+  const mine = (await query(
+    `SELECT s.*, p.period_key, p.starts_at, p.ends_at, $2::text AS agency_name FROM agency_statements s JOIN payout_periods p ON p.id = s.period_id
+     WHERE s.agency_id = $1 ORDER BY p.starts_at DESC LIMIT 24`, [a.id, a.name],
+  )).rows;
+  const hosts = (await query(
+    `SELECT h.*, p.period_key, p.starts_at, p.ends_at, u.username FROM host_statements h
+     JOIN payout_periods p ON p.id = h.period_id JOIN users u ON u.id = h.user_id
+     WHERE h.agency_id = $1 ORDER BY p.starts_at DESC, h.salary_cents DESC LIMIT 200`, [a.id],
+  )).rows;
+  res.json({ agencyStatements: mine.map(agencyStatementJson), hostStatements: hosts.map(hostStatementJson) });
+});
+
+// Ajans koduyla ajans bilgisi ve başvuru.
+router.get('/agencies/by-code/:code', async (req, res) => {
+  const code = String(req.params.code ?? '');
+  if (!/^\d{8}$/.test(code)) throw fail('Ajans kodu 8 haneli olmalı.');
+  const a = (await query(`${AGENCY_SELECT} WHERE a.agency_code = $1 AND a.status = 'active'`, [code])).rows[0];
+  if (!a) throw fail('Bu koda ait ajans bulunamadı.', 404);
+  res.json({ agency: publicAgencyJson(a) });
+});
+
+router.post('/agencies/apply-by-code', async (req, res) => {
+  const code = String(req.body?.code ?? '').trim();
+  if (!/^\d{8}$/.test(code)) throw fail('Ajans kodu 8 haneli olmalı.');
+  const a = (await query(`SELECT id FROM agencies WHERE agency_code = $1 AND status = 'active'`, [code])).rows[0];
+  if (!a) throw fail('Bu koda ait ajans bulunamadı.', 404);
+  const b = (await query(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1`, [req.user.id])).rows[0];
+  if (!b || b.status === 'rejected' || b.status === 'suspended') throw fail('Önce yayıncı başvurusu yapmalısınız.', 409);
+  if (b.agency_id) throw fail('Zaten bir ajansa bağlısınız.', 409);
+  try {
+    const r = await query(`INSERT INTO agency_requests(agency_id, user_id, direction) VALUES($1,$2,'apply') RETURNING id`, [a.id, req.user.id]);
+    res.status(201).json({ ok: true, requestId: r.rows[0].id });
+  } catch (error) {
+    if (error.code === '23505') throw fail('Bu ajansa zaten bekleyen bir isteğiniz var.', 409);
+    throw error;
+  }
 });
 
 router.get('/agencies/:agencyId/requests', async (req, res) => {
@@ -228,23 +290,29 @@ router.get('/broadcaster/me', async (req, res) => {
     [req.user.id],
   )).rows[0];
   if (!b) return res.json({ broadcaster: null });
-  const { period, start, end } = periodFrom(req);
-  // $1 = kullanıcı; DIA_EXPR/SEC_EXPR "b.user_id" kullandığı için broadcasters tablosundan sorgulanır.
-  const stats = (await query(
-    `SELECT ${DIA_EXPR} AS diamonds, ${SEC_EXPR} AS seconds FROM broadcasters b WHERE b.user_id = $1`,
-    [req.user.id, start, end],
-  )).rows[0];
+  const cfg = await loadConfig();
+  const progress = await hostProgress(req.user.id, cfg);
   const total = (await query(
     `SELECT COALESCE(SUM(coin_amount), 0) AS diamonds FROM gift_transactions WHERE receiver_id = $1 AND sender_id <> $1`, [req.user.id],
   )).rows[0];
+  const kyc = (await query(`SELECT kyc_status FROM users WHERE id = $1`, [req.user.id])).rows[0].kyc_status;
   res.json({
     broadcaster: {
       status: b.status,
       agency: b.agency_id ? { id: b.agency_id, name: b.agency_name, logoUrl: b.agency_logo } : null,
-      joinedAgencyAt: b.joined_agency_at,
-      period, periodDiamonds: String(stats.diamonds), periodSeconds: Number(stats.seconds), totalDiamonds: String(total.diamonds),
+      joinedAgencyAt: b.joined_agency_at, totalDiamonds: String(total.diamonds), kycStatus: kyc,
+      progress, config: configJson(cfg),
     },
   });
+});
+
+router.get('/broadcaster/statements', async (req, res) => {
+  const r = await query(
+    `SELECT h.*, p.period_key, p.starts_at, p.ends_at, u.username FROM host_statements h
+     JOIN payout_periods p ON p.id = h.period_id JOIN users u ON u.id = h.user_id
+     WHERE h.user_id = $1 ORDER BY p.starts_at DESC LIMIT 24`, [req.user.id],
+  );
+  res.json({ statements: r.rows.map(hostStatementJson) });
 });
 
 router.get('/broadcaster/requests', async (req, res) => {

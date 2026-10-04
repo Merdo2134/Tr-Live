@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
 import '../widgets/common.dart';
-import 'agency_screen.dart' show recentPeriods;
+import 'admin_payouts.dart';
 
 /// Birden fazla alanlı basit form penceresi; {etiket: değer} döner.
 Future<Map<String, String>?> formDialog(BuildContext context, String title, List<String> labels, {Map<String, String> initial = const {}}) async {
@@ -37,6 +37,7 @@ class AdminScreen extends StatelessWidget {
     final tabs = <Tab>[
       const Tab(text: 'Kullanıcı'),
       const Tab(text: 'Ajans/Yayıncı'),
+      const Tab(text: 'Maaş/Dönem'),
       const Tab(text: 'Şikâyetler'),
       if (Session.isAdmin) const Tab(text: 'Güvenlik'),
       if (Session.isAdmin) const Tab(text: 'Bayi'),
@@ -49,6 +50,7 @@ class AdminScreen extends StatelessWidget {
         body: TabBarView(children: [
           const _UsersTab(),
           const _AgenciesTab(),
+          const PayoutsTab(),
           const _ReportsTab(),
           if (Session.isAdmin) const _SecurityTab(),
           if (Session.isAdmin) const _DealersTab(),
@@ -186,23 +188,18 @@ class _AgenciesTabState extends State<_AgenciesTab> {
     setState(() => _v++);
   }
 
-  Future<void> _approveAgency(Map<String, dynamic> a) async {
-    final f = await formDialog(context, 'Ajansı onayla', ['Komisyon (% olarak, örn 10)'], initial: {'Komisyon (% olarak, örn 10)': '${((a['commissionBps'] as num?) ?? 0) / 100}'});
+  Future<void> _overrideCommission(Map<String, dynamic> a) async {
+    final f = await formDialog(context, 'Ajansa özel komisyon', ['Komisyon % (boş = genel kademe tablosu)'],
+        initial: {'Komisyon % (boş = genel kademe tablosu)': a['overrideBps'] == null ? '' : '${(a['overrideBps'] as num) / 100}'});
     if (f == null || !mounted) return;
-    final pct = double.tryParse((f['Komisyon (% olarak, örn 10)'] ?? '').replaceAll(',', '.'));
-    if (pct == null || pct < 0 || pct > 100) return toast(context, '0 ile 100 arasında bir oran girin.', error: true);
-    await _run(() => Api.post('/api/admin/agencies/${a['id']}/status', {'status': 'active', 'commissionBps': (pct * 100).round()}), done: 'Ajans aktif.');
-  }
-
-  Future<void> _settle(Map<String, dynamic> a) async {
-    final periods = recentPeriods();
-    final f = await formDialog(context, 'Komisyonu ödendi işaretle', ['Dönem (YYYY-AA)'], initial: {'Dönem (YYYY-AA)': periods.length > 1 ? periods[1] : periods.first});
-    if (f == null || !mounted) return;
-    final period = f['Dönem (YYYY-AA)'] ?? '';
-    if (!await confirm(context, '${a['name']} ajansının $period dönemi tahakkuk eden komisyonları "ödendi" yapılacak. Ödeme platform dışında yapılmış olmalıdır.', action: 'Onayla')) return;
-    if (!mounted) return;
-    final r = await guard(context, () => Api.post('/api/admin/agencies/${a['id']}/settle', {'period': period}));
-    if (r != null && mounted) toast(context, 'Ödendi işaretlendi: ${fmtNumber(r['paidDiamonds'])} 💎');
+    final raw = (f['Komisyon % (boş = genel kademe tablosu)'] ?? '').replaceAll(',', '.');
+    int? bps;
+    if (raw.isNotEmpty) {
+      final pct = double.tryParse(raw);
+      if (pct == null || pct < 0 || pct > 100) return toast(context, '0 ile 100 arasında bir oran girin.', error: true);
+      bps = (pct * 100).round();
+    }
+    await _run(() => Api.post('/api/admin/agencies/${a['id']}/commission-override', {'bps': bps}), done: 'Güncellendi.');
   }
 
   @override
@@ -221,20 +218,19 @@ class _AgenciesTabState extends State<_AgenciesTab> {
               Card(
                 child: ListTile(
                   title: Text(a['name'].toString()),
-                  subtitle: Text('Sahip: @${a['ownerUsername']} · ${a['status']} · %${((a['commissionBps'] as num) / 100).toStringAsFixed(2)} · ${a['broadcasterCount']} yayıncı'),
+                  subtitle: Text('Sahip: @${a['ownerUsername']} · ${a['status']} · kod: ${a['agencyCode'] ?? '-'} · ${a['overrideBps'] == null ? 'kademeli komisyon' : '%${((a['overrideBps'] as num) / 100).toStringAsFixed(1)} özel'} · ${a['broadcasterCount']} yayıncı'),
                   trailing: !Session.isAdmin
                       ? null
                       : PopupMenuButton<String>(
                           onSelected: (s) {
-                            if (s == 'active') _approveAgency(a);
-                            if (s == 'settle') _settle(a);
-                            if (s == 'suspended' || s == 'rejected') _run(() => Api.post('/api/admin/agencies/${a['id']}/status', {'status': s}), done: 'Güncellendi.');
+                            if (s == 'override') _overrideCommission(a);
+                            if (s == 'active' || s == 'suspended' || s == 'rejected') _run(() => Api.post('/api/admin/agencies/${a['id']}/status', {'status': s}), done: 'Güncellendi.');
                           },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(value: 'active', child: Text('Onayla / komisyonu ayarla')),
-                            const PopupMenuItem(value: 'suspended', child: Text('Askıya al')),
-                            const PopupMenuItem(value: 'rejected', child: Text('Reddet')),
-                            const PopupMenuItem(value: 'settle', child: Text('Komisyonu ödendi işaretle')),
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'active', child: Text('Onayla / aktif et')),
+                            PopupMenuItem(value: 'suspended', child: Text('Askıya al')),
+                            PopupMenuItem(value: 'rejected', child: Text('Reddet')),
+                            PopupMenuItem(value: 'override', child: Text('Ajansa özel komisyon')),
                           ],
                         ),
                 ),

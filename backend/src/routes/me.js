@@ -134,6 +134,12 @@ router.delete('/', async (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/kyc/request', async (req, res) => {
+  const r = await query(`UPDATE users SET kyc_status = 'pending' WHERE id = $1 AND kyc_status IN ('none','rejected') RETURNING kyc_status`, [req.user.id]);
+  if (!r.rowCount) throw fail('Kimlik doğrulama başvurunuz zaten var veya onaylı.', 409);
+  res.json({ ok: true, kycStatus: 'pending' });
+});
+
 router.get('/wallet', async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 50, 100);
   const r = await query(

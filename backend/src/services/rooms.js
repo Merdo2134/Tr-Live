@@ -2,20 +2,26 @@ import { query, tx } from '../database.js';
 import { hub } from '../realtime.js';
 import { removeParticipant, deleteRoom } from '../livekit.js';
 import { clearRoomMusic } from './music.js';
+import { closeMicSessions, closeRoomMicSessions } from './mic.js';
+import { endPkForRoom } from './pk.js';
+import { cancelRoomGame, forfeitUserInRoom } from './games.js';
 
 export const SUPPORTED_SEATS = new Set([2, 5, 8, 9, 12, 15, 20]);
 
 // Odayı kapatır: üyeleri temizler, yayın oturumlarını bitirir, herkese bildirir.
 export async function closeRoom(roomId) {
+  await endPkForRoom(roomId).catch((e) => console.error('PK kapatma hatası:', e.message));
   const closed = await tx(async (c) => {
     const r = await c.query(`UPDATE rooms SET is_active = FALSE, closed_at = NOW() WHERE id = $1 AND is_active = TRUE RETURNING id`, [roomId]);
     if (!r.rowCount) return false;
     await c.query(`UPDATE broadcast_sessions SET ended_at = NOW() WHERE room_id = $1 AND ended_at IS NULL`, [roomId]);
     await c.query(`DELETE FROM room_members WHERE room_id = $1`, [roomId]);
     await clearRoomMusic(roomId, (t, p) => c.query(t, p));
+    await closeRoomMicSessions(roomId, (t, p) => c.query(t, p));
     return true;
   });
   if (closed) {
+    await cancelRoomGame(roomId).catch((e) => console.error('Oyun iptal hatası:', e.message));
     hub.broadcastRoom(roomId, { type: 'room_closed', roomId });
     hub.clearRoom(roomId);
     await deleteRoom(roomId);
@@ -27,6 +33,8 @@ export async function closeRoom(roomId) {
 export async function leaveRoom(userId, roomId) {
   const r = await query(`DELETE FROM room_members WHERE room_id = $1 AND user_id = $2 RETURNING role`, [roomId, userId]);
   if (!r.rowCount) return false;
+  await closeMicSessions(userId, roomId);
+  await forfeitUserInRoom(userId, roomId).catch((e) => console.error('Oyundan çıkarma hatası:', e.message));
   if (r.rows[0].role === 'owner') {
     await closeRoom(roomId);
     return true;

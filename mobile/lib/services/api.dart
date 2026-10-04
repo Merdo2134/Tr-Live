@@ -72,6 +72,9 @@ class Api {
   static Future<Map<String, dynamic>> patch(String path, [Map<String, dynamic>? body]) =>
       _send(() => http.patch(_uri(path), headers: _headers(), body: jsonEncode(body ?? {})));
 
+  static Future<Map<String, dynamic>> put(String path, [Map<String, dynamic>? body]) =>
+      _send(() => http.put(_uri(path), headers: _headers(), body: jsonEncode(body ?? {})));
+
   static Future<Map<String, dynamic>> delete(String path, [Map<String, dynamic>? body]) =>
       _send(() => http.delete(_uri(path), headers: _headers(), body: body == null ? null : jsonEncode(body)));
 

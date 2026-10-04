@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import '../services/api.dart';
 import '../services/music_service.dart';
@@ -8,7 +9,11 @@ import '../services/socket_service.dart';
 import '../widgets/common.dart';
 import '../widgets/gift_ribbon.dart';
 import '../widgets/safety_actions.dart';
+import '../widgets/pk_banner.dart';
+import '../widgets/room_theme.dart';
 import 'gift_sheet.dart';
+import 'ludo_screen.dart';
+import 'pk_sheet.dart';
 import 'music_sheet.dart';
 import 'user_screens.dart';
 
@@ -19,7 +24,8 @@ class RoomScreen extends StatefulWidget {
   final String roomId;
   final String initialName;
   final bool locked;
-  const RoomScreen({super.key, required this.roomId, this.initialName = 'Oda', this.locked = false});
+  final String? code; // gizli oda davet kodu
+  const RoomScreen({super.key, required this.roomId, this.initialName = 'Oda', this.locked = false, this.code});
 
   @override
   State<RoomScreen> createState() => _RoomScreenState();
@@ -47,6 +53,11 @@ class _RoomScreenState extends State<RoomScreen> {
   final _chatScroll = ScrollController();
   bool _sending = false;
   bool _chatMuted = false;
+
+  // Oda içi sayı tahtası (kullanıcı → alınan toplam Coin) ve PK durumu
+  final Map<String, String> _scores = {};
+  Map<String, dynamic>? _pk;
+  bool _inviteOpen = false;
 
   bool get _isManager => _myRole == 'owner' || _myRole == 'cohost' || _myRole == 'moderator';
   bool get _chatOpen => _room?['chatEnabled'] != false || _isManager;
@@ -94,7 +105,7 @@ class _RoomScreenState extends State<RoomScreen> {
           return;
         }
       }
-      final r = await Api.post('/api/rooms/${widget.roomId}/join', {if (password != null) 'password': password});
+      final r = await Api.post('/api/rooms/${widget.roomId}/join', {if (password != null) 'password': password, if (widget.code != null) 'code': widget.code});
       if (!mounted) {
         Api.post('/api/rooms/${widget.roomId}/leave').catchError((_) => <String, dynamic>{});
         return;
@@ -108,12 +119,27 @@ class _RoomScreenState extends State<RoomScreen> {
       setState(() => _loading = false);
       _connectLivekit();
       _loadMessages();
+      _loadExtras();
       MusicService.instance.bind(widget.roomId);
     } catch (e) {
       if (!mounted) return;
       toast(context, errorText(e), error: true);
       Navigator.pop(context);
     }
+  }
+
+  Future<void> _loadExtras() async {
+    try {
+      final s = await Api.get('/api/rooms/${widget.roomId}/scoreboard');
+      final pk = await Api.get('/api/rooms/${widget.roomId}/pk');
+      if (!mounted) return;
+      setState(() {
+        _scores
+          ..clear()
+          ..addEntries(listOf(s['scoreboard']).map((x) => MapEntry(x['userId'].toString(), x['coins'].toString())));
+        _pk = mapOf(pk['pk']);
+      });
+    } catch (_) {/* ek özellikler yüklenemese de oda çalışır */}
   }
 
   Future<void> _loadMembers() async {
@@ -198,8 +224,51 @@ class _RoomScreenState extends State<RoomScreen> {
       _rejoin();
       return;
     }
+    if (type == 'pk_invite') {
+      final pk = mapOf(e['pk']);
+      if (pk != null && mounted && !_inviteOpen && mapOf(pk['b'])?['roomId'] == widget.roomId) {
+        _inviteOpen = true;
+        showPkInviteDialog(context, pk).whenComplete(() => _inviteOpen = false);
+      }
+      return;
+    }
+    if (type == 'room_game_state') return; // Ludo ekranı kendisi dinler
+    if (type == 'pk_tick') {
+      if (_pk != null && _pk!['id'] == e['pkId']) {
+        setState(() {
+          final a = {...?mapOf(_pk!['a']), 'score': e['scoreA']};
+          final b = {...?mapOf(_pk!['b']), 'score': e['scoreB']};
+          _pk = {..._pk!, 'a': a, 'b': b, 'remainingSeconds': e['remainingSeconds']};
+        });
+      }
+      return;
+    }
+    if (type == 'pk_state') {
+      final pk = mapOf(e['pk']);
+      if (pk != null && (mapOf(pk['a'])?['roomId'] == widget.roomId || mapOf(pk['b'])?['roomId'] == widget.roomId)) {
+        final st = pk['status'];
+        setState(() => _pk = pk);
+        if (st == 'finished' || st == 'declined' || st == 'cancelled') {
+          Future.delayed(const Duration(seconds: 8), () {
+            if (mounted && _pk?['id'] == pk['id'] && _pk?['status'] != 'active') setState(() => _pk = null);
+          });
+        }
+      }
+      return;
+    }
     if (e['roomId'] != widget.roomId) return;
     switch (type) {
+      case 'room_scoreboard':
+        setState(() {
+          _scores.clear();
+          for (final x in listOf(e['scoreboard'])) {
+            _scores[x['userId'].toString()] = x['coins'].toString();
+          }
+        });
+        break;
+      case 'room_chat_cleared':
+        setState(() => _messages.clear());
+        break;
       case 'room_member_joined':
         final u = mapOf(e['user']);
         if (u != null && !_members.any((m) => m['userId'] == u['id'])) {
@@ -236,7 +305,11 @@ class _RoomScreenState extends State<RoomScreen> {
         toast(context, _chatMuted ? 'Bu odada sohbette susturuldunuz.' : 'Sohbet yasağınız kaldırıldı.');
         break;
       case 'room_settings':
-        setState(() => _room = {...?_room, 'name': e['name'], 'tags': e['tags'], 'locked': e['locked'], 'chatEnabled': e['chatEnabled']});
+        setState(() => _room = {
+              ...?_room,
+              'name': e['name'], 'tags': e['tags'], 'locked': e['locked'], 'chatEnabled': e['chatEnabled'],
+              'theme': e['theme'], 'themeImageUrl': e['themeImageUrl'], 'scoreboardEnabled': e['scoreboardEnabled'], 'hidden': e['hidden'],
+            });
         break;
       case 'room_music_state':
         final ms = mapOf(e['state']);
@@ -377,22 +450,53 @@ class _RoomScreenState extends State<RoomScreen> {
     final nameCtl = TextEditingController(text: (_room?['name'] ?? '').toString());
     final tagsCtl = TextEditingController(text: ((_room?['tags'] as List?) ?? const []).join(', '));
     final pwCtl = TextEditingController();
+    final imgCtl = TextEditingController(text: (_room?['themeImageUrl'] ?? '').toString());
     var chatEnabled = _room?['chatEnabled'] != false;
+    var scoreboard = _room?['scoreboardEnabled'] != false;
+    var hidden = _room?['hidden'] == true;
+    var theme = (_room?['theme'] ?? 'default').toString();
     var removePw = false;
+    var regen = false;
+    final code = _room?['joinCode']?.toString();
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, setS) => AlertDialog(
           title: const Text('Oda ayarları'),
           content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               TextField(controller: nameCtl, maxLength: 60, decoration: const InputDecoration(labelText: 'Oda adı')),
               TextField(controller: tagsCtl, decoration: const InputDecoration(labelText: 'Etiketler (en fazla 3, virgülle)', hintText: 'müzik, sohbet')),
               if (_myRole == 'owner') ...[
                 TextField(controller: pwCtl, obscureText: true, maxLength: 12, enabled: !removePw, decoration: InputDecoration(labelText: _room?['locked'] == true ? 'Yeni şifre (boş = değişmez)' : 'Oda şifresi (isteğe bağlı)')),
                 if (_room?['locked'] == true) CheckboxListTile(dense: true, value: removePw, title: const Text('Şifreyi kaldır'), onChanged: (v) => setS(() => removePw = v == true)),
+                SwitchListTile(dense: true, title: const Text('Odayı gizle (yalnızca kodla girilir)'), value: hidden, onChanged: (v) => setS(() => hidden = v)),
+                if (hidden && code != null)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('Davet kodu: $code', style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 2)),
+                    trailing: IconButton(icon: const Icon(Icons.copy), onPressed: () { Clipboard.setData(ClipboardData(text: code)); toast(context, 'Kod kopyalandı.'); }),
+                  ),
+                if (hidden && code != null) CheckboxListTile(dense: true, value: regen, title: const Text('Kodu yenile'), onChanged: (v) => setS(() => regen = v == true)),
               ],
               SwitchListTile(dense: true, title: const Text('Yazılı sohbet açık'), value: chatEnabled, onChanged: (v) => setS(() => chatEnabled = v)),
+              SwitchListTile(dense: true, title: const Text('Koltuk hediye sayacı'), value: scoreboard, onChanged: (v) => setS(() => scoreboard = v)),
+              const SizedBox(height: 8),
+              const Text('Oda teması'),
+              const SizedBox(height: 6),
+              ThemePicker(value: theme, onChanged: (v) => setS(() => theme = v)),
+              TextField(controller: imgCtl, decoration: const InputDecoration(labelText: 'Özel arka plan görseli (https, WIP 4+)')),
+              if (scoreboard)
+                TextButton.icon(
+                  onPressed: () async {
+                    if (await confirm(c, 'Tüm koltuk hediye sayaçları sıfırlansın mı?', action: 'Sıfırla') && mounted) {
+                      await guard(context, () => Api.post('/api/rooms/${widget.roomId}/scoreboard/reset'));
+                    }
+                  },
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text('Sayaçları sıfırla'),
+                ),
             ]),
           ),
           actions: [
@@ -405,17 +509,27 @@ class _RoomScreenState extends State<RoomScreen> {
     final name = nameCtl.text.trim();
     final tags = tagsCtl.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
     final pw = pwCtl.text.trim();
+    final img = imgCtl.text.trim();
     nameCtl.dispose();
     tagsCtl.dispose();
     pwCtl.dispose();
+    imgCtl.dispose();
     if (ok != true || !mounted) return;
-    await guard(context, () => Api.patch('/api/rooms/${widget.roomId}', {
+    final prevImg = (_room?['themeImageUrl'] ?? '').toString();
+    final r = await guard(context, () => Api.patch('/api/rooms/${widget.roomId}', {
           'name': name,
           'tags': tags,
           'chatEnabled': chatEnabled,
+          'scoreboardEnabled': scoreboard,
+          'theme': theme,
+          if (img != prevImg) 'themeImageUrl': img.isEmpty ? null : img,
+          if (_myRole == 'owner') 'hidden': hidden,
+          if (_myRole == 'owner' && hidden && regen) 'regenerateCode': true,
           if (_myRole == 'owner' && removePw) 'password': null,
           if (_myRole == 'owner' && !removePw && pw.isNotEmpty) 'password': pw,
         }));
+    final room = mapOf(r?['room']);
+    if (room != null && mounted) setState(() => _room = {...?_room, ...room});
   }
 
   Widget _musicBar() {
@@ -442,8 +556,26 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _openMusic() => showMusicSheet(context, roomId: widget.roomId, canManage: _isManager, canQueue: _onSeat);
 
+  Future<void> _clearChat() async {
+    if (!await confirm(context, 'Odadaki tüm sohbet mesajları herkes için silinsin mi?', action: 'Temizle')) return;
+    if (!mounted) return;
+    await guard(context, () => Api.delete('/api/rooms/${widget.roomId}/messages'));
+  }
+
+  void _openGames() => Navigator.push(context, MaterialPageRoute(builder: (_) => LudoScreen(roomId: widget.roomId, canManage: _isManager)));
+
   Widget _chatPanel() {
     return Column(children: [
+      if (_isManager)
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact, foregroundColor: Colors.white54),
+            onPressed: _clearChat,
+            icon: const Icon(Icons.cleaning_services_outlined, size: 16),
+            label: const Text('Sohbeti temizle', style: TextStyle(fontSize: 12)),
+          ),
+        ),
       Expanded(
         child: _messages.isEmpty
             ? const Center(child: Text('Henüz mesaj yok.', style: TextStyle(color: Colors.white38)))
@@ -657,6 +789,13 @@ class _RoomScreenState extends State<RoomScreen> {
           if (m['role'] == 'owner') const Icon(Icons.star, size: 12, color: Colors.amber),
           Flexible(child: Text((user?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12))),
         ]),
+        if (_room?['scoreboardEnabled'] != false)
+          Container(
+            margin: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(8)),
+            child: Text('💎 ${fmtNumber(_scores[userId] ?? 0)}', style: const TextStyle(fontSize: 10, color: Colors.amberAccent)),
+          ),
       ]),
     );
   }
@@ -733,6 +872,9 @@ class _RoomScreenState extends State<RoomScreen> {
           ] else
             FilledButton.icon(onPressed: () => _takeMic(), icon: const Icon(Icons.mic), label: const Text('Mikrofona çık')),
           const Spacer(),
+          if (_myRole == 'owner' && (_pk == null || !['pending', 'active'].contains(_pk!['status'])))
+            IconButton(tooltip: 'PK başlat', onPressed: () => showPkChallengeSheet(context, roomId: widget.roomId), icon: const Icon(Icons.sports_mma)),
+          IconButton(tooltip: 'Oyunlar (Ludo)', onPressed: _openGames, icon: const Icon(Icons.casino)),
           IconButton(tooltip: 'Müzik', onPressed: _openMusic, icon: const Icon(Icons.library_music)),
           IconButton.filled(tooltip: 'Hediye gönder', onPressed: _members.isEmpty ? null : () => _openGifts(), icon: const Icon(Icons.card_giftcard)),
         ]),
@@ -749,7 +891,10 @@ class _RoomScreenState extends State<RoomScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text((_room?['name'] ?? widget.initialName).toString(), overflow: TextOverflow.ellipsis),
+          title: Row(children: [
+            if (_room?['hidden'] == true) const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.visibility_off, size: 18)),
+            Flexible(child: Text((_room?['name'] ?? widget.initialName).toString(), overflow: TextOverflow.ellipsis)),
+          ]),
           leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: _onBack),
           actions: [
             TextButton.icon(onPressed: _membersSheet, icon: const Icon(Icons.people_outline), label: Text('${_members.length}')),
@@ -759,7 +904,10 @@ class _RoomScreenState extends State<RoomScreen> {
         ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
-            : GiftRibbonOverlay(
+            : RoomThemeBackground(
+                theme: _room?['theme']?.toString(),
+                imageUrl: _room?['themeImageUrl']?.toString(),
+                child: GiftRibbonOverlay(
                 roomId: widget.roomId,
                 child: Column(children: [
                   if (_lkError != null)
@@ -773,12 +921,18 @@ class _RoomScreenState extends State<RoomScreen> {
                       ),
                     ),
                   _musicBar(),
+                  if (_pk != null)
+                    PkBanner(
+                      pk: _pk!,
+                      roomId: widget.roomId,
+                      onCancel: _myRole == 'owner' ? () => guard(context, () => Api.post('/api/pk/${_pk!['id']}/cancel')) : null,
+                    ),
                   Expanded(flex: 5, child: ListView(children: [_seatGrid(), _audience()])),
                   const Divider(height: 1),
                   Expanded(flex: 3, child: _chatPanel()),
                   _bottomBar(),
                 ]),
-              ),
+              )),
       ),
     );
   }

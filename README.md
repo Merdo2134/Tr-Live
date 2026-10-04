@@ -14,7 +14,8 @@ Sesli/görüntülü canlı oda uygulaması: **Flutter** (mobil) + **Node.js/Expr
 - **Müzik çalar:** odada herkes için senkron müzik; lisans kaydı zorunlu kütüphane, sıra, duraklat/ara/sonraki, otomatik geçiş, yerel ses seviyesi.
 - **Hediye:** tekli / eşit / rastgele / seçilenlere; **kendine hediye serbest**; Coin→Diamond muhasebesi; global şerit; liderlik tabloları.
 - **WIP:** 5 kademe (renkli isim, rozet, oda sayısı, ziyaretçi listesi, atılamama, profil efekti).
-- **Ajans/yayıncı:** başvuru, davet, onay, panel, aylık Diamond ve süre, komisyon, ödeme işaretleme.
+- **Ajans/yayıncı (Yoho tarzı):** 8 haneli ajans kodu, kodla başvuru, davet, yayın saati + Diamond hedefli **maaş kademeleri**, hedef tutmazsa kesinti, kademeli ajans komisyonu, resmi etkinlik şartı, dönem kapatma ve hesap özetleri, KYC şartı, ödendi işaretleme (ödeme platform dışında). Oranlar örnektir, panelden ayarlanır.
+- **Oda ekleri:** gizli oda (davet kodu), 8 tema (+ WIP 4 özel görsel), koltuk başına hediye sayacı, sohbet temizleme, **PK**, oda içi **Ludo** (ücretsiz, bahissiz).
 - **Aile:** rol, seviye/kapasite, puan, sahiplik devri.
 - **Bayilik, yönetim paneli, şikâyet yönetimi, güvenlik duvarı yönetimi.**
 - **Güvenlik duvarı:** IP yasağı, WAF kuralları, kullanıcı/uç nokta limitleri, WebSocket sel koruması, otomatik yasaklama, denetim kaydı ([`deploy/README.md`](deploy/README.md)).
