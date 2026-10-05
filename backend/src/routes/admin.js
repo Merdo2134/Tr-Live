@@ -378,9 +378,9 @@ router.post('/agencies/:agencyId/status', requireSuperAdmin, async (req, res) =>
     if (!Number.isInteger(bps) || bps < 0 || bps > 10000) throw fail('Komisyon 0-10000 (baz puan) arasında olmalı.');
   }
   const r = await query(
-    `UPDATE agencies SET status = $2, commission_bps = COALESCE($3, commission_bps),
-       approved_by = CASE WHEN $2 = 'active' THEN $4::uuid ELSE approved_by END,
-       approved_at = CASE WHEN $2 = 'active' THEN NOW() ELSE approved_at END
+    `UPDATE agencies SET status = $2::text, commission_bps = COALESCE($3, commission_bps),
+       approved_by = CASE WHEN $2::text = 'active' THEN $4::uuid ELSE approved_by END,
+       approved_at = CASE WHEN $2::text = 'active' THEN NOW() ELSE approved_at END
      WHERE id = $1 RETURNING id, status, commission_bps`,
     [agencyId, status, bps, req.user.id],
   );
@@ -411,10 +411,10 @@ router.post('/broadcasters/:userId/status', async (req, res) => {
   const userId = uuid(req.params.userId, 'Kullanıcı');
   const status = oneOf(req.body?.status, ['approved', 'rejected', 'suspended'], 'Durum');
   const r = await query(
-    `UPDATE broadcasters SET status = $2,
-       approved_by = CASE WHEN $2 = 'approved' THEN $3::uuid ELSE approved_by END,
-       approved_at = CASE WHEN $2 = 'approved' THEN NOW() ELSE approved_at END,
-       agency_id = CASE WHEN $2 IN ('rejected','suspended') THEN NULL ELSE agency_id END
+    `UPDATE broadcasters SET status = $2::text,
+       approved_by = CASE WHEN $2::text = 'approved' THEN $3::uuid ELSE approved_by END,
+       approved_at = CASE WHEN $2::text = 'approved' THEN NOW() ELSE approved_at END,
+       agency_id = CASE WHEN $2::text IN ('rejected','suspended') THEN NULL ELSE agency_id END
      WHERE user_id = $1 RETURNING user_id, status`,
     [userId, status, req.user.id],
   );
