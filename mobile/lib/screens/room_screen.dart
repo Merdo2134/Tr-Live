@@ -949,7 +949,8 @@ class _RoomScreenState extends State<RoomScreen> {
       for (final m in _members)
         if (m['seatIndex'] != null) (m['seatIndex'] as num).toInt(): m,
     };
-    final cols = _seatCount <= 5 ? 3 : 4;
+    final w = MediaQuery.sizeOf(context).width;
+    final cols = w < 600 ? (_seatCount <= 5 ? 3 : 4) : (w < 900 ? (_seatCount <= 5 ? 5 : 6) : (_seatCount <= 5 ? 5 : 8));
     return GridView.count(
       crossAxisCount: cols,
       shrinkWrap: true,

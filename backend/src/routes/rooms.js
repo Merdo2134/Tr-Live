@@ -56,8 +56,10 @@ router.get('/', optionalAuth, async (req, res) => {
   const tag = req.query.tag ? String(req.query.tag).trim().toLocaleLowerCase('tr').slice(0, 20) : null;
   const q = String(req.query.q ?? '').trim().toLowerCase().slice(0, 40);
   const like = q ? `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
+  const region = ['tr', 'other', 'friends'].includes(req.query.region) ? req.query.region : null;
+  if (region === 'friends' && !req.user) throw fail('Arkadaşları görmek için giriş yapın.', 401);
   const r = await query(
-    `SELECT r.id AS room_id, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
+    `SELECT r.id AS room_id, r.theme_image_url, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
        (r.password_hash IS NOT NULL) AS locked, r.theme, ${USER_PUBLIC_COLUMNS},
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id) AS member_count,
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.microphone = TRUE) AS mic_count
@@ -66,14 +68,18 @@ router.get('/', optionalAuth, async (req, res) => {
        AND (r.is_hidden = FALSE OR r.owner_id = $3::uuid OR EXISTS (SELECT 1 FROM room_members hm WHERE hm.room_id = r.id AND hm.user_id = $3::uuid))
        AND ($4::text IS NULL OR lower(r.name) LIKE $4 ESCAPE '\\' OR lower(u.display_name) LIKE $4 ESCAPE '\\' OR lower(u.username) LIKE $4 ESCAPE '\\'
             OR EXISTS (SELECT 1 FROM unnest(r.tags) t WHERE lower(t) LIKE $4 ESCAPE '\\'))
+       AND ($5::text IS NULL
+            OR ($5 = 'tr' AND lower(COALESCE(u.country, '')) IN ('türkiye', 'turkiye', 'turkey', 'tr', 'türkiye cumhuriyeti'))
+            OR ($5 = 'other' AND lower(COALESCE(u.country, '')) NOT IN ('türkiye', 'turkiye', 'turkey', 'tr', 'türkiye cumhuriyeti'))
+            OR ($5 = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $3::uuid AND f.followed_id = r.owner_id)))
      ORDER BY member_count DESC, r.created_at DESC LIMIT 100`,
-    [type, tag, req.user?.id ?? null, like],
+    [type, tag, req.user?.id ?? null, like, region],
   );
   // Kullanıcı sütunlarındaki "id" (= sahip kimliği) oda kimliğiyle karışmasın diye oda alanları takma adla alınır.
   res.json({
     rooms: r.rows.map((x) => ({
       id: x.room_id, name: x.room_name, roomType: x.room_type, seatCount: x.seat_count, ownerId: x.owner_id, createdAt: x.room_created_at,
-      memberCount: x.member_count, micCount: x.mic_count, tags: x.tags ?? [], locked: x.locked, theme: x.theme ?? 'default',
+      memberCount: x.member_count, micCount: x.mic_count, tags: x.tags ?? [], locked: x.locked, theme: x.theme ?? 'default', themeImageUrl: x.theme_image_url ?? null,
       owner: publicUser(x, req.user?.id ?? null),
     })),
   });

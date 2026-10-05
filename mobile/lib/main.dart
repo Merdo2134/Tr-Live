@@ -5,6 +5,7 @@ import 'services/api.dart';
 import 'services/auth_service.dart';
 import 'services/session.dart';
 import 'services/socket_service.dart';
+import 'widgets/app_theme.dart';
 import 'widgets/common.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -33,7 +34,9 @@ class TRLiveApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'TR Live',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.pinkAccent, brightness: Brightness.dark), useMaterial3: true),
+      theme: buildAppTheme(),
+      themeMode: ThemeMode.dark,
+      builder: appFrame,
       home: const _Boot(),
     );
   }
