@@ -1,5 +1,12 @@
 # Değişiklik ve inceleme raporu
 
+## v2.6 — Figma (HİLLİVE) yerleşimine geçiş, 1. aşama
+- Alt menü: Party | Keşfet | Giriş Sayfası | Mesajlar | Profil. Aile, liderlik, favoriler, kodla giriş ve kullanıcı arama "Giriş Sayfası"nda.
+- Party ana sayfası: Takip / Popüler / Yakında sekmeleri, dikey görsel kartlar (tür rozeti, etiket, dinleyici sayısı, altında başlık).
+- Yayın başlat: Sesli / Görüntülü seçimi tek pencerede.
+- Giriş ekranı Figma düzenine yaklaştırıldı (taç + logo, hap butonlar). Renkler uygulamanın kendi temasıdır.
+- Sunucu: `region=near` (aynı şehirdeki yayıncılar).
+
 ## v2.5 — Yeni tema ve duyarlı (responsive) ana sayfa
 - Tüm uygulama tek renk kaynağına bağlandı: `mobile/lib/widgets/app_theme.dart` (koyu lacivert zemin, turkuaz vurgu, pembe CANLI rozeti, altın bildirim). Renk değiştirmek için yalnızca bu dosya düzenlenir.
 - Ana sayfa yeniden tasarlandı: yuvarlak aksiyon düğmeleri, Trend / Arkadaşlar anahtarı, Global / Türkiye / Diğer bölge çipleri, görselli 2 sütunlu oda kartları.

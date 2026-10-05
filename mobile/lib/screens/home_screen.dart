@@ -26,8 +26,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
-  final _audioKey = GlobalKey<RoomsTabState>();
-  final _videoKey = GlobalKey<RoomsTabState>();
+  final _roomsKey = GlobalKey<RoomsTabState>();
 
   @override
   void initState() {
@@ -99,105 +98,34 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  static const _titles = ['Ana Sayfa', 'Görüntülü', 'Mesajlar', 'Aile', 'Profil'];
-
-  Widget _circleBtn({required IconData icon, required Color bg, required VoidCallback onTap, required String tip, required double size, Color fg = Colors.white, int badge = 0}) {
-    return Tooltip(
-      message: tip,
-      child: InkResponse(
-        onTap: onTap,
-        radius: size * 0.7,
-        child: Stack(clipBehavior: Clip.none, children: [
-          Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(color: bg, shape: BoxShape.circle, boxShadow: [BoxShadow(color: bg.withValues(alpha: 0.45), blurRadius: 10)]),
-            child: Icon(icon, color: fg, size: size * 0.5),
-          ),
-          if (badge > 0)
-            Positioned(
-              right: -3,
-              top: -3,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                constraints: const BoxConstraints(minWidth: 18),
-                decoration: BoxDecoration(color: Pal.red, borderRadius: BorderRadius.circular(10)),
-                child: Text(badge > 99 ? '99+' : '$badge', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
-              ),
-            ),
-        ]),
-      ),
-    );
-  }
-
-  Widget _header(BuildContext context) {
-    final w = MediaQuery.sizeOf(context).width;
-    final size = w < 360 ? 36.0 : (w < 420 ? 40.0 : 46.0);
-    final home = _index <= 1;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
-      child: Row(children: [
-        Expanded(
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: FittedBox(fit: BoxFit.scaleDown, child: Text(_titles[_index], style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Pal.text))),
-          ),
-        ),
-        if (home) ...[
-          _circleBtn(icon: Icons.group, bg: Pal.pink, size: size, tip: 'Favoriler ve son girilenler', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()))),
-          SizedBox(width: size * 0.18),
-          _circleBtn(icon: Icons.emoji_events, bg: Colors.transparent, fg: Pal.amber, size: size, tip: 'Liderlik tablosu', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
-          SizedBox(width: size * 0.18),
-          _circleBtn(
-            icon: Icons.mic,
-            bg: Pal.cyan,
-            fg: const Color(0xFF00212A),
-            size: size,
-            tip: 'Oda aç',
-            onTap: () async {
-              final tab = _index == 0 ? _audioKey.currentState : _videoKey.currentState;
-              await tab?.createRoom();
-            },
-          ),
-          SizedBox(width: size * 0.18),
-          ValueListenableBuilder<int>(
-            valueListenable: Inbox.unread,
-            builder: (_, n, __) => _circleBtn(icon: Icons.notifications, bg: Pal.amber, fg: const Color(0xFF2A1D00), size: size, tip: 'Bildirimler ve mesajlar', badge: n, onTap: () => setState(() => _index = 2)),
-          ),
-          SizedBox(width: size * 0.12),
-          IconButton(
-            tooltip: 'Oda ara',
-            iconSize: size * 0.62,
-            color: Pal.text,
-            icon: const Icon(Icons.search),
-            onPressed: () => (_index == 0 ? _audioKey.currentState : _videoKey.currentState)?.toggleSearch(),
-          ),
-        ] else
-          ValueListenableBuilder<Map<String, dynamic>?>(
-            valueListenable: Session.me,
-            builder: (_, me, __) => Chip(
-              avatar: const Icon(Icons.monetization_on, size: 18, color: Pal.amber),
-              label: Text(fmtNumber(me?['coins'])),
-              visualDensity: VisualDensity.compact,
-            ),
-          ),
-      ]),
-    );
-  }
-
   Widget _scaffold(BuildContext context) {
+    final showTitle = _index == 3 || _index == 4;
     return Scaffold(
       body: SafeArea(
         bottom: false,
         child: Column(children: [
-          _header(context),
+          if (showTitle)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+              child: Row(children: [
+                Expanded(child: Text(_index == 3 ? 'Mesajlar' : 'Profil', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Pal.text))),
+                ValueListenableBuilder<Map<String, dynamic>?>(
+                  valueListenable: Session.me,
+                  builder: (_, me, __) => Chip(
+                    avatar: const Icon(Icons.monetization_on, size: 18, color: Pal.amber),
+                    label: Text(fmtNumber(me?['coins'])),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ]),
+            ),
           Expanded(
             child: GiftRibbonOverlay(
               child: IndexedStack(index: _index, children: [
-                RoomsTab(key: _audioKey, type: 'audio', onJoinCode: _joinByCode),
-                RoomsTab(key: _videoKey, type: 'video', onJoinCode: _joinByCode),
+                RoomsTab(key: _roomsKey),
+                const DiscoverScreen(embedded: true),
+                HubScreen(onCreate: _startBroadcast, onJoinCode: _joinByCode),
                 const MessagesScreen(),
-                const FamilyScreen(),
                 const ProfileScreen(),
               ]),
             ),
@@ -206,27 +134,34 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
+        height: 64,
         onDestinationSelected: (i) {
           setState(() => _index = i);
-          if (i == 0) _audioKey.currentState?.refresh();
-          if (i == 1) _videoKey.currentState?.refresh();
+          if (i == 0) _roomsKey.currentState?.refresh();
         },
         destinations: [
-          const NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Sesli'),
-          const NavigationDestination(icon: Icon(Icons.videocam_outlined), selectedIcon: Icon(Icons.videocam), label: 'Görüntülü'),
+          const NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Party'),
+          const NavigationDestination(icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'Keşfet'),
+          const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Giriş Sayfası'),
           NavigationDestination(
             icon: ValueListenableBuilder<int>(
               valueListenable: Inbox.unread,
               builder: (_, n, __) => Badge(label: Text('$n'), isLabelVisible: n > 0, child: const Icon(Icons.chat_bubble_outline)),
             ),
             selectedIcon: const Icon(Icons.chat_bubble),
-            label: 'Mesaj',
+            label: 'Mesajlar',
           ),
-          const NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups), label: 'Aile'),
           const NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profil'),
         ],
       ),
     );
+  }
+
+  /// Yayın başlat: odayı RoomsTab açar; sekme henüz yüklenmediyse önce Party'ye geçilir.
+  Future<void> _startBroadcast(String type) async {
+    setState(() => _index = 0);
+    await WidgetsBinding.instance.endOfFrame;
+    await _roomsKey.currentState?.createRoom(type: type);
   }
 }
 
@@ -240,9 +175,7 @@ Future<void> openRoom(BuildContext context, RoomRequest req) async {
 }
 
 class RoomsTab extends StatefulWidget {
-  final String type;
-  final VoidCallback? onJoinCode;
-  const RoomsTab({super.key, required this.type, this.onJoinCode});
+  const RoomsTab({super.key});
 
   @override
   State<RoomsTab> createState() => RoomsTabState();
@@ -254,8 +187,7 @@ class RoomsTabState extends State<RoomsTab> {
   String? _error;
   String _q = '';
   Timer? _debounce;
-  bool _friends = false; // Trend / Arkadaşlar
-  String _region = 'all'; // all | tr | other
+  String _mode = 'popular'; // friends (Takip) | popular (Popüler) | near (Yakında)
   bool _searching = false;
 
   void toggleSearch() => setState(() {
@@ -288,8 +220,8 @@ class RoomsTabState extends State<RoomsTab> {
 
   Future<void> refresh() async {
     try {
-      final region = _friends ? 'friends' : (_region == 'all' ? null : _region);
-      final r = await Api.get('/api/rooms', query: {'type': widget.type, if (_q.isNotEmpty) 'q': _q, if (region != null) 'region': region});
+      final region = _mode == 'popular' ? null : _mode;
+      final r = await Api.get('/api/rooms', query: {if (_q.isNotEmpty) 'q': _q, if (region != null) 'region': region});
       if (!mounted) return;
       setState(() {
         _rooms = listOf(r['rooms']);
@@ -307,7 +239,8 @@ class RoomsTabState extends State<RoomsTab> {
 
   Future<void> _open(String id, String name, {bool locked = false}) => openRoom(context, RoomRequest(roomId: id, name: name, locked: locked));
 
-  Future<void> createRoom() async {
+  Future<void> createRoom({String type = 'audio'}) async {
+    var roomType = type;
     final nameCtl = TextEditingController();
     final tagsCtl = TextEditingController();
     final pwCtl = TextEditingController();
@@ -318,8 +251,18 @@ class RoomsTabState extends State<RoomsTab> {
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, setS) => AlertDialog(
-          title: Text(widget.type == 'video' ? 'Görüntülü oda aç' : 'Sesli oda aç'),
+          title: const Text('Yayın başlat'),
           content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            SegmentedButton<String>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: 'audio', icon: Icon(Icons.mic), label: Text('Sesli')),
+                ButtonSegment(value: 'video', icon: Icon(Icons.videocam), label: Text('Görüntülü')),
+              ],
+              selected: {roomType},
+              onSelectionChanged: (v) => setS(() => roomType = v.first),
+            ),
+            const SizedBox(height: 8),
             TextField(controller: nameCtl, maxLength: 60, decoration: const InputDecoration(labelText: 'Oda adı')),
             TextField(controller: tagsCtl, decoration: const InputDecoration(labelText: 'Etiketler (en fazla 3, virgülle)', hintText: 'müzik, sohbet, karaoke')),
             TextField(controller: pwCtl, obscureText: true, maxLength: 12, decoration: const InputDecoration(labelText: 'Oda şifresi (isteğe bağlı, 4-12)')),
@@ -353,7 +296,7 @@ class RoomsTabState extends State<RoomsTab> {
     if (ok != true || !mounted) return;
     final r = await guard(context, () => Api.post('/api/rooms', {
           'name': name.isEmpty ? 'TR Live Odası' : name,
-          'roomType': widget.type,
+          'roomType': roomType,
           'seatCount': seats,
           if (tags.isNotEmpty) 'tags': tags,
           if (pw.isNotEmpty) 'password': pw,
@@ -376,108 +319,84 @@ class RoomsTabState extends State<RoomsTab> {
     }
   }
 
-  Widget _modeButton(String label, IconData icon, bool selected, VoidCallback onTap) {
-    return Expanded(
-      child: Material(
-        color: selected ? Pal.surfaceHi : Colors.transparent,
-        shape: StadiumBorder(side: BorderSide(color: selected ? Pal.cyan : Pal.outline, width: 1.4)),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 13),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(icon, size: 20, color: selected ? Pal.cyan : Pal.textDim),
-              const SizedBox(width: 8),
-              Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: selected ? Pal.cyan : Pal.textDim))),
-            ]),
-          ),
-        ),
+  Widget _topTab(String id, String label) {
+    final sel = _mode == id;
+    return GestureDetector(
+      onTap: () {
+        setState(() => _mode = id);
+        refresh();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(color: sel ? Pal.cyan : Colors.transparent, borderRadius: BorderRadius.circular(20)),
+        child: Text(label, style: TextStyle(fontSize: 16, fontWeight: sel ? FontWeight.w800 : FontWeight.w600, color: sel ? const Color(0xFF00212A) : Pal.text)),
       ),
     );
   }
 
-  Widget _regionChip(String id, String label, {IconData? icon, Color color = Pal.cyan}) {
-    final sel = _region == id;
-    return ChoiceChip(
-      showCheckmark: false,
-      selected: sel,
-      avatar: icon == null ? null : Icon(icon, size: 18, color: sel ? color : Pal.textDim),
-      label: Text(label, style: TextStyle(color: sel ? color : Pal.textDim, fontWeight: FontWeight.w600)),
-      selectedColor: Pal.surfaceHi,
-      backgroundColor: Pal.surface,
-      side: BorderSide(color: sel ? color : Pal.outline, width: 1.3),
-      onSelected: (_) {
-        setState(() => _region = id);
-        refresh();
-      },
+  Widget _topBar(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final small = w < 360;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(small ? 8 : 12, 8, small ? 4 : 8, 6),
+      child: Row(children: [
+        IconButton(
+          tooltip: 'Liderlik tablosu',
+          icon: const Icon(Icons.workspace_premium, color: Pal.amber),
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+        ),
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [_topTab('friends', 'Takip'), _topTab('popular', 'Popüler'), _topTab('near', 'Yakında')]),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Yayın başlat',
+          style: IconButton.styleFrom(backgroundColor: Pal.cyan, foregroundColor: const Color(0xFF00212A)),
+          icon: const Icon(Icons.mic, size: 20),
+          onPressed: () => createRoom(),
+        ),
+        IconButton(tooltip: 'Oda ara', icon: Icon(_searching ? Icons.close : Icons.search, color: Pal.cyan), onPressed: toggleSearch),
+      ]),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null && _rooms.isEmpty) return LoadError(message: _error!, onRetry: refresh);
     final cols = Resp.roomColumns(MediaQuery.sizeOf(context).width);
-    final empty = _friends
+    final empty = _mode == 'friends'
         ? 'Takip ettiğin kişilerin açık odası yok.'
-        : (_q.isEmpty ? 'Şu an açık oda yok. İlk odayı sen aç!' : 'Aramanıza uyan oda yok.');
-    final list = RefreshIndicator(
-      onRefresh: refresh,
-      child: _rooms.isEmpty
-          ? ListView(children: [const SizedBox(height: 100), Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(empty, textAlign: TextAlign.center, style: const TextStyle(color: Pal.textDim))))])
-          : GridView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 96),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1.05),
-              itemCount: _rooms.length,
-              itemBuilder: (_, i) {
-                final r = _rooms[i];
-                return RoomCard(room: r, onTap: () => _open(r['id'] as String, (r['name'] ?? '').toString(), locked: r['locked'] == true));
-              },
-            ),
-    );
-    return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-        child: Row(children: [
-          _modeButton('Trend', Icons.local_fire_department, !_friends, () {
-            setState(() => _friends = false);
-            refresh();
-          }),
-          const SizedBox(width: 12),
-          _modeButton('Arkadaşlar', Icons.group, _friends, () {
-            setState(() => _friends = true);
-            refresh();
-          }),
-        ]),
-      ),
-      if (!_friends)
-        SizedBox(
-          height: 48,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              _regionChip('all', 'Global'),
-              const SizedBox(width: 8),
-              _regionChip('tr', 'Türkiye', icon: Icons.flag),
-              const SizedBox(width: 8),
-              _regionChip('other', 'Diğer', icon: Icons.public, color: Pal.purple),
-              const SizedBox(width: 8),
-              ActionChip(
-                avatar: const Icon(Icons.vpn_key, size: 18, color: Pal.amber),
-                label: const Text('Kodla gir', style: TextStyle(color: Pal.amber, fontWeight: FontWeight.w600)),
-                backgroundColor: Pal.surface,
-                side: const BorderSide(color: Pal.outline, width: 1.3),
-                onPressed: widget.onJoinCode,
+        : _mode == 'near'
+            ? 'Şehrinde açık oda yok. Profilinden şehrini girdiysen burada aynı şehirdekiler görünür.'
+            : (_q.isEmpty ? 'Şu an açık oda yok. İlk odayı sen aç!' : 'Aramanıza uyan oda yok.');
+    final Widget body;
+    if (_loading) {
+      body = const Center(child: CircularProgressIndicator());
+    } else if (_error != null && _rooms.isEmpty) {
+      body = LoadError(message: _error!, onRetry: refresh);
+    } else {
+      body = RefreshIndicator(
+        onRefresh: refresh,
+        child: _rooms.isEmpty
+            ? ListView(children: [const SizedBox(height: 100), Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(empty, textAlign: TextAlign.center, style: const TextStyle(color: Pal.textDim))))])
+            : GridView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(10, 4, 10, 96),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 0.78),
+                itemCount: _rooms.length,
+                itemBuilder: (_, i) {
+                  final r = _rooms[i];
+                  return RoomCard(room: r, onTap: () => _open(r['id'] as String, (r['name'] ?? '').toString(), locked: r['locked'] == true));
+                },
               ),
-            ],
-          ),
-        ),
+      );
+    }
+    return Column(children: [
+      _topBar(context),
       if (_searching)
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
           child: TextField(
             autofocus: true,
             decoration: InputDecoration(
@@ -499,8 +418,72 @@ class RoomsTabState extends State<RoomsTab> {
             },
           ),
         ),
-      const SizedBox(height: 4),
-      Expanded(child: list),
+      Expanded(child: body),
+    ]);
+  }
+}
+
+/// "Giriş Sayfası": yayın başlatma ve ana kısayollar.
+class HubScreen extends StatelessWidget {
+  final Future<void> Function(String type) onCreate;
+  final VoidCallback onJoinCode;
+  const HubScreen({super.key, required this.onCreate, required this.onJoinCode});
+
+  Widget _big(String label, IconData icon, List<Color> colors, VoidCallback onTap) {
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(vertical: 22),
+          decoration: BoxDecoration(gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(22)),
+          child: Column(children: [
+            Icon(icon, size: 38, color: Colors.white),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _tile(BuildContext context, String label, IconData icon, Color color, VoidCallback onTap) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Ink(
+        decoration: BoxDecoration(color: Pal.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: Pal.outline)),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 30, color: color),
+          const SizedBox(height: 8),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text(label, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Pal.text, fontWeight: FontWeight.w600))),
+        ]),
+      ),
+    );
+  }
+
+  Widget _page(BuildContext context, String title, Widget body) => Scaffold(appBar: AppBar(title: Text(title)), body: body);
+
+  @override
+  Widget build(BuildContext context) {
+    final cols = MediaQuery.sizeOf(context).width < 600 ? 3 : 5;
+    final tiles = <Widget>[
+      _tile(context, 'Aile', Icons.groups, Pal.cyan, () => Navigator.push(context, MaterialPageRoute(builder: (_) => _page(context, 'Aile', const FamilyScreen())))),
+      _tile(context, 'Liderlik', Icons.emoji_events, Pal.amber, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
+      _tile(context, 'Favoriler', Icons.star, Pal.pink, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()))),
+      _tile(context, 'Kodla gir', Icons.vpn_key, Pal.amber, onJoinCode),
+      _tile(context, 'Kullanıcı ara', Icons.person_search, Pal.cyan, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchScreen()))),
+    ];
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 96), children: [
+      const Text('Giriş Sayfası', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Pal.text)),
+      const SizedBox(height: 16),
+      Row(children: [
+        _big('Sesli yayın', Icons.mic, const [Color(0xFFFF7A18), Color(0xFFFF4F9A)], () => onCreate('audio')),
+        const SizedBox(width: 12),
+        _big('Canlı yayın', Icons.videocam, const [Pal.purple, Pal.cyan], () => onCreate('video')),
+      ]),
+      const SizedBox(height: 20),
+      GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1, children: tiles),
     ]);
   }
 }

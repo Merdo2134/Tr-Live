@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import 'home_screen.dart';
 
@@ -70,15 +71,17 @@ class _LoginScreenState extends State<LoginScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.podcasts, size: 64, color: Colors.pinkAccent),
+                const Icon(Icons.workspace_premium, size: 84, color: Pal.amber),
+                const SizedBox(height: 4),
+                const Text('TR LIVE', style: TextStyle(fontSize: 38, fontWeight: FontWeight.w800, letterSpacing: 4, color: Pal.text, fontFamily: 'serif')),
                 const SizedBox(height: 8),
-                Text('TR Live', style: Theme.of(context).textTheme.headlineLarge),
-                const SizedBox(height: 24),
+                Text(_register ? 'Kaydol' : 'Hoş geldin', style: const TextStyle(fontSize: 18, color: Pal.textDim)),
+                const SizedBox(height: 28),
                 TextField(
                   controller: _username,
                   autocorrect: false,
                   textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(labelText: 'Kullanıcı adı', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: 'Kullanıcı adı', prefixIcon: Icon(Icons.person_outline)),
                 ),
                 const SizedBox(height: 12),
                 if (_register) ...[
@@ -86,7 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _displayName,
                     textInputAction: TextInputAction.next,
                     maxLength: 60,
-                    decoration: const InputDecoration(labelText: 'Görünen ad', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(labelText: 'Görünen ad', prefixIcon: Icon(Icons.badge_outlined)),
                   ),
                   const SizedBox(height: 4),
                 ],
@@ -96,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   onSubmitted: (_) => _submit(),
                   decoration: InputDecoration(
                     labelText: 'Şifre',
-                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility),
                       onPressed: () => setState(() => _showPassword = !_showPassword),
@@ -104,19 +107,34 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: _busy ? null : _submit,
-                    child: _busy
-                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Text(_register ? 'Kayıt ol' : 'Giriş yap'),
+                Semantics(
+                  button: true,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(30),
+                    onTap: _busy ? null : _submit,
+                    child: Ink(
+                      height: 54,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(colors: [Pal.purple, Pal.pink]),
+                        borderRadius: BorderRadius.circular(30),
+                        boxShadow: [BoxShadow(color: Pal.pink.withValues(alpha: 0.35), blurRadius: 14)],
+                      ),
+                      child: Center(
+                        child: _busy
+                            ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                            : Text(_register ? 'Kaydol' : 'Giriş Yap', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                      ),
+                    ),
                   ),
                 ),
+                const SizedBox(height: 4),
                 TextButton(
                   onPressed: _busy ? null : () => setState(() => _register = !_register),
                   child: Text(_register ? 'Hesabım var, giriş yap' : 'Hesap oluştur'),
                 ),
+                const SizedBox(height: 8),
+                const Text('Bağlantıyı gerçekleştirerek Topluluk Politikamızı kabul etmiş olursunuz.', textAlign: TextAlign.center, style: TextStyle(color: Pal.textDim, fontSize: 12)),
               ]),
             ),
           ),

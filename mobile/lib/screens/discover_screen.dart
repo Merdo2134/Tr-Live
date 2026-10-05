@@ -5,7 +5,9 @@ import '../widgets/common.dart';
 
 /// Favori yayıncılar ve son girilen odalar. Yayıncı açıksa tek dokunuşla odasına girilir.
 class DiscoverScreen extends StatefulWidget {
-  const DiscoverScreen({super.key});
+  /// Alt menüde sekme olarak kullanılırken true: oda açılınca sayfa kapatılmaz.
+  final bool embedded;
+  const DiscoverScreen({super.key, this.embedded = false});
 
   @override
   State<DiscoverScreen> createState() => _DiscoverScreenState();
@@ -45,7 +47,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
 
   void _open(Map<String, dynamic>? room) {
     if (room == null) return;
-    Navigator.pop(context);
+    if (!widget.embedded) Navigator.pop(context);
     RoomDock.open(RoomRequest(roomId: room['id'].toString(), name: (room['name'] ?? 'Oda').toString(), locked: room['locked'] == true));
   }
 
@@ -75,7 +77,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Odalarım'), bottom: const TabBar(tabs: [Tab(text: 'Favoriler'), Tab(text: 'Son girilenler')])),
+        appBar: AppBar(title: const Text('Keşfet'), automaticallyImplyLeading: !widget.embedded, bottom: const TabBar(tabs: [Tab(text: 'Favoriler'), Tab(text: 'Son girilenler')])),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
