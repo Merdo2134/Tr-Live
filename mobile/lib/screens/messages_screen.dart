@@ -4,6 +4,7 @@ import '../services/api.dart';
 import '../services/inbox_service.dart';
 import '../services/session.dart';
 import '../services/socket_service.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/safety_actions.dart';
 import 'user_screens.dart';
@@ -57,12 +58,13 @@ class _MessagesScreenState extends State<MessagesScreen> {
       body: AsyncBody<List<Map<String, dynamic>>>(
         key: ValueKey(_version),
         load: () async => listOf((await Api.get('/api/messages/conversations'))['conversations']),
-        builder: (context, list, reload) => list.isEmpty
-            ? const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('Henüz mesajınız yok. Sağ alttaki düğmeyle yeni bir sohbet başlatın.', textAlign: TextAlign.center)))
-            : RefreshIndicator(
-                onRefresh: reload,
-                child: ListView(children: [
-                  for (final c in list)
+        builder: (context, list, reload) => RefreshIndicator(
+          onRefresh: reload,
+          child: ListView(children: [
+            const _InboxCards(),
+            if (list.isEmpty)
+              const Padding(padding: EdgeInsets.all(24), child: Text('Henüz mesajınız yok. Sağ alttaki düğmeyle yeni bir sohbet başlatın.', textAlign: TextAlign.center, style: TextStyle(color: Pal.textDim))),
+            for (final c in list)
                     ListTile(
                       leading: UserAvatar(user: mapOf(c['peer'])),
                       title: UserName(user: mapOf(c['peer']), style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -76,6 +78,126 @@ class _MessagesScreenState extends State<MessagesScreen> {
                         Inbox.refresh();
                         if (mounted) setState(() => _version++);
                       },
+                    ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Mesajlar ekranının üstündeki dört kategori kartı.
+class _InboxCards extends StatefulWidget {
+  const _InboxCards();
+
+  @override
+  State<_InboxCards> createState() => _InboxCardsState();
+}
+
+class _InboxCardsState extends State<_InboxCards> {
+  Map<String, dynamic> _sum = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final r = await Api.get('/api/inbox-summary');
+      if (mounted) setState(() => _sum = r);
+    } catch (_) {
+      // Rozetler olmasa da kartlar çalışır.
+    }
+  }
+
+  Future<void> _open(Widget page) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+    try {
+      await Api.post('/api/inbox-summary/seen');
+    } catch (_) {}
+    _load();
+  }
+
+  Widget _card(String label, IconData icon, List<Color> colors, int badge, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Stack(clipBehavior: Clip.none, children: [
+          Container(
+            height: 92,
+            decoration: BoxDecoration(gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(16)),
+            padding: const EdgeInsets.all(6),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(icon, size: 30, color: Colors.white),
+              const SizedBox(height: 6),
+              Text(label, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11.5)),
+            ]),
+          ),
+          if (badge > 0)
+            Positioned(
+              right: -4,
+              top: -5,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: const BoxDecoration(color: Pal.red, shape: BoxShape.circle),
+                child: Text('${badge > 99 ? '99+' : badge}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  int _n(String k) => (_sum[k] as num?)?.toInt() ?? 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final me = Session.id;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+      child: Row(children: [
+        _card('Arkadaşlık isteği', Icons.group_add, const [Color(0xFF7A5CFF), Color(0xFFB45CFF)], _n('followers'), () => _open(UserListScreen(title: 'Yeni takipçiler', path: '/api/users/$me/followers'))),
+        const SizedBox(width: 8),
+        _card('Ekip', Icons.workspace_premium, const [Color(0xFFFFB347), Color(0xFFFF7A18)], _n('team'), () => _open(const AnnouncementsScreen(kind: 'team', title: 'Ekip'))),
+        const SizedBox(width: 8),
+        _card('Etkinlik duyurusu', Icons.campaign, const [Color(0xFF1FD6F5), Color(0xFF2FE6A8)], _n('event'), () => _open(const AnnouncementsScreen(kind: 'event', title: 'Etkinlik duyurusu'))),
+        const SizedBox(width: 8),
+        _card('Ödül bildirimleri', Icons.card_giftcard, const [Color(0xFFFF4F9A), Color(0xFF8E5CFF)], _n('reward'), () => _open(const AnnouncementsScreen(kind: 'reward', title: 'Ödül bildirimleri'))),
+      ]),
+    );
+  }
+}
+
+class AnnouncementsScreen extends StatelessWidget {
+  final String kind;
+  final String title;
+  const AnnouncementsScreen({super.key, required this.kind, required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: AsyncBody<List<Map<String, dynamic>>>(
+        load: () async => listOf((await Api.get('/api/announcements', query: {'kind': kind}))['announcements']),
+        builder: (context, items, reload) => items.isEmpty
+            ? const Center(child: Text('Henüz duyuru yok.', style: TextStyle(color: Pal.textDim)))
+            : RefreshIndicator(
+                onRefresh: reload,
+                child: ListView(padding: const EdgeInsets.all(12), children: [
+                  for (final a in items)
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('${a['title']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                          const SizedBox(height: 6),
+                          Text('${a['text']}', style: const TextStyle(height: 1.35)),
+                          const SizedBox(height: 8),
+                          Text(_time(a['createdAt']), style: const TextStyle(color: Pal.textDim, fontSize: 12)),
+                        ]),
+                      ),
                     ),
                 ]),
               ),

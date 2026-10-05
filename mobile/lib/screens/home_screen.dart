@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../widgets/app_theme.dart';
+import '../widgets/banner_carousel.dart';
 import '../widgets/room_card.dart';
 import '../widgets/room_theme.dart';
+import '../widgets/seat_picker.dart';
 import '../services/api.dart';
 import '../services/inbox_service.dart';
 import '../services/session.dart';
@@ -11,6 +13,7 @@ import 'discover_screen.dart';
 import '../widgets/common.dart';
 import '../widgets/gift_ribbon.dart';
 import 'family_screen.dart';
+import 'feed_screen.dart';
 import 'leaderboard_screen.dart';
 import 'messages_screen.dart';
 import 'profile_screen.dart';
@@ -123,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: GiftRibbonOverlay(
               child: IndexedStack(index: _index, children: [
                 RoomsTab(key: _roomsKey),
-                const DiscoverScreen(embedded: true),
+                const FeedScreen(),
                 HubScreen(onCreate: _startBroadcast, onJoinCode: _joinByCode),
                 const MessagesScreen(),
                 const ProfileScreen(),
@@ -270,15 +273,7 @@ class RoomsTabState extends State<RoomsTab> {
             const SizedBox(height: 4),
             ThemePicker(value: theme, onChanged: (v) => setS(() => theme = v)),
             const SizedBox(height: 8),
-            Row(children: [
-              const Text('Koltuk sayısı'),
-              const Spacer(),
-              DropdownButton<int>(
-                value: seats,
-                items: [for (final n in const [2, 5, 8, 9, 12, 15, 20]) DropdownMenuItem(value: n, child: Text('$n koltuk'))],
-                onChanged: (v) => setS(() => seats = v ?? 8),
-              ),
-            ]),
+            SeatLayoutPicker(value: seats, onChanged: (v) => setS(() => seats = v)),
           ])),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
@@ -379,16 +374,25 @@ class RoomsTabState extends State<RoomsTab> {
       body = RefreshIndicator(
         onRefresh: refresh,
         child: _rooms.isEmpty
-            ? ListView(children: [const SizedBox(height: 100), Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(empty, textAlign: TextAlign.center, style: const TextStyle(color: Pal.textDim))))])
-            : GridView.builder(
+            ? ListView(children: [const BannerCarousel(), const SizedBox(height: 60), Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(empty, textAlign: TextAlign.center, style: const TextStyle(color: Pal.textDim))))])
+            : CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(10, 4, 10, 96),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 0.78),
-                itemCount: _rooms.length,
-                itemBuilder: (_, i) {
-                  final r = _rooms[i];
-                  return RoomCard(room: r, onTap: () => _open(r['id'] as String, (r['name'] ?? '').toString(), locked: r['locked'] == true));
-                },
+                slivers: [
+                  const SliverToBoxAdapter(child: BannerCarousel()),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 96),
+                    sliver: SliverGrid(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 0.78),
+                      delegate: SliverChildBuilderDelegate(
+                        (_, i) {
+                          final r = _rooms[i];
+                          return RoomCard(room: r, onTap: () => _open(r['id'] as String, (r['name'] ?? '').toString(), locked: r['locked'] == true));
+                        },
+                        childCount: _rooms.length,
+                      ),
+                    ),
+                  ),
+                ],
               ),
       );
     }

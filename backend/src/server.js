@@ -25,6 +25,7 @@ import { router as safetyRouter } from './routes/safety.js';
 import { router as leaderboardsRouter } from './routes/leaderboards.js';
 import { router as pkRouter } from './routes/pk.js';
 import { router as gamesRouter } from './routes/games.js';
+import { router as feedRouter } from './routes/feed.js';
 import { startMusicTicker } from './services/music.js';
 import { startPkTicker } from './services/pk.js';
 import { startGameTicker } from './services/games.js';
@@ -76,6 +77,7 @@ app.use('/api/wip', wipRouter);
 app.use('/api/dealer', dealersRouter);
 app.use('/api/admin', adminRouter);
 // Aşağıdakiler '/api' altında birden çok yol tanımladığı için en sona konur.
+app.use('/api', feedRouter);
 app.use('/api', giftsRouter);
 app.use('/api', agenciesRouter);
 app.use('/api', musicRouter);

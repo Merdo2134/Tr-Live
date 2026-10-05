@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
 import '../widgets/common.dart';
+import 'admin_content.dart';
 import 'admin_payouts.dart';
 
 class AdminScreen extends StatelessWidget {
@@ -20,6 +21,7 @@ class AdminScreen extends StatelessWidget {
       if (admin) const Tab(text: 'Güvenlik'),
       if (admin) const Tab(text: 'Bayi'),
       if (admin) const Tab(text: 'Katalog'),
+      if (admin) const Tab(text: 'Banner/Duyuru'),
     ];
     return DefaultTabController(
       length: tabs.length,
@@ -37,6 +39,7 @@ class AdminScreen extends StatelessWidget {
           if (admin) const _SecurityTab(),
           if (admin) const _DealersTab(),
           if (admin) const _CatalogTab(),
+          if (admin) const ContentTab(),
         ]),
       ),
     );

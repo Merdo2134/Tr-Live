@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import express from 'express';
 import { query, tx } from '../database.js';
 import { requireAuth, requireStaff, requireSuperAdmin } from '../auth.js';
 import { supportMayCall, banEnd, mayActOnUser } from '../staff_logic.js';
@@ -12,6 +13,7 @@ import { dealerSell } from '../services/dealers.js';
 import { hub } from '../realtime.js';
 import { banIpPersist, unbanIp, listBans, securityStats } from '../firewall.js';
 import net from 'node:net';
+import { saveUpload, removeUpload, IMAGE_TYPES } from '../services/images.js';
 
 export const router = Router();
 router.use(requireAuth, requireStaff);
@@ -676,5 +678,59 @@ router.delete('/security/blocks/:ip', requireSuperAdmin, async (req, res) => {
   const ip = String(req.params.ip);
   if (!net.isIP(ip)) throw fail('Geçerli bir IP adresi girin.');
   await unbanIp(ip);
+  res.json({ ok: true });
+});
+
+// ---------- Banner ve duyuru yönetimi (yalnızca yönetici) ----------
+router.get('/banners', async (_req, res) => {
+  const r = await query(`SELECT id, image_url, title, link_url, sort_order, is_active FROM banners ORDER BY sort_order, created_at DESC LIMIT 50`);
+  res.json({ banners: r.rows.map((b) => ({ id: b.id, imageUrl: b.image_url, title: b.title, linkUrl: b.link_url, sortOrder: b.sort_order, active: b.is_active })) });
+});
+
+router.put('/banners/image', express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
+  res.json({ url: await saveUpload(req) });
+});
+
+router.post('/banners', async (req, res) => {
+  const imageUrl = String(req.body?.imageUrl ?? '');
+  if (!/^\/uploads\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(imageUrl)) throw fail('Önce bir görsel yükleyin.');
+  const title = text(req.body?.title, 'Başlık', { max: 80 }) || null;
+  const linkUrl = req.body?.linkUrl ? httpsUrl(req.body.linkUrl, 'Bağlantı') : null;
+  const sortOrder = Number.isInteger(req.body?.sortOrder) ? req.body.sortOrder : 0;
+  const r = await query(`INSERT INTO banners(image_url, title, link_url, sort_order) VALUES($1,$2,$3,$4) RETURNING id`, [imageUrl, title, linkUrl, sortOrder]);
+  await auditStaff({ query }, req.user.id, null, 'banner_add', { id: r.rows[0].id });
+  res.status(201).json({ id: r.rows[0].id });
+});
+
+router.patch('/banners/:id', async (req, res) => {
+  const id = uuid(req.params.id);
+  if (typeof req.body?.active !== 'boolean') throw fail('active alanı true/false olmalı.');
+  const r = await query(`UPDATE banners SET is_active = $2 WHERE id = $1`, [id, req.body.active]);
+  if (!r.rowCount) throw fail('Banner bulunamadı.', 404);
+  res.json({ ok: true });
+});
+
+router.delete('/banners/:id', async (req, res) => {
+  const id = uuid(req.params.id);
+  const r = await query(`DELETE FROM banners WHERE id = $1 RETURNING image_url`, [id]);
+  if (!r.rowCount) throw fail('Banner bulunamadı.', 404);
+  await removeUpload(r.rows[0].image_url);
+  await auditStaff({ query }, req.user.id, null, 'banner_delete', { id });
+  res.json({ ok: true });
+});
+
+router.post('/announcements', async (req, res) => {
+  const kind = oneOf(req.body?.kind, ['team', 'event', 'reward'], 'Tür');
+  const title = text(req.body?.title, 'Başlık', { min: 2, max: 80, required: true });
+  const body = text(req.body?.text, 'Metin', { min: 1, max: 2000, required: true });
+  const r = await query(`INSERT INTO announcements(kind, title, body, created_by) VALUES($1,$2,$3,$4) RETURNING id`, [kind, title, body, req.user.id]);
+  await auditStaff({ query }, req.user.id, null, 'announcement_add', { id: r.rows[0].id, kind });
+  res.status(201).json({ id: r.rows[0].id });
+});
+
+router.delete('/announcements/:id', async (req, res) => {
+  const id = uuid(req.params.id);
+  const r = await query(`DELETE FROM announcements WHERE id = $1`, [id]);
+  if (!r.rowCount) throw fail('Duyuru bulunamadı.', 404);
   res.json({ ok: true });
 });

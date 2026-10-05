@@ -2,8 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/safety_actions.dart';
+import 'feed_screen.dart';
 import 'messages_screen.dart';
 
 /// Kapak, avatar (çerçeveli), isim, rozetler ve sayaçlar. Kendi ve başkasının profilinde ortak kullanılır.
@@ -134,6 +136,34 @@ class UserProfileScreen extends StatefulWidget {
 
 class _UserProfileScreenState extends State<UserProfileScreen> {
   int _version = 0;
+  bool _postsTab = false;
+
+  Widget _tabs() {
+    Widget t(String label, bool sel, VoidCallback onTap) => Expanded(
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: sel ? Pal.cyan : Pal.outline, width: sel ? 2.5 : 1))),
+              child: Center(child: Text(label, style: TextStyle(fontSize: 16, fontWeight: sel ? FontWeight.w800 : FontWeight.w500, color: sel ? Pal.cyan : Pal.textDim))),
+            ),
+          ),
+        );
+    return Row(children: [t('Profil', !_postsTab, () => setState(() => _postsTab = false)), t('Paylaşım', _postsTab, () => setState(() => _postsTab = true))]);
+  }
+
+  Widget _info(Map<String, dynamic> p) {
+    final place = [p['city'], p['country']].where((e) => e != null && '$e'.isNotEmpty).join(', ');
+    final bio = (p['bio'] ?? '').toString();
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (place.isNotEmpty) Row(children: [const Icon(Icons.place_outlined, size: 18, color: Pal.cyan), const SizedBox(width: 6), Text(place)]),
+        if (bio.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 12), child: Text(bio, style: const TextStyle(height: 1.4))),
+        if (place.isEmpty && bio.isEmpty) const Text('Bu kullanıcı henüz hakkında bir şey yazmadı.', style: TextStyle(color: Pal.textDim)),
+      ]),
+    );
+  }
 
   Future<void> _toggleFollow(Map<String, dynamic> p) async {
     final following = p['isFollowing'] == true;
@@ -201,6 +231,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   ]),
                 ),
               if (hidden) const Padding(padding: EdgeInsets.all(24), child: Text('Bu kullanıcı profilini gizlemiş.', textAlign: TextAlign.center)),
+              if (!hidden) ...[
+                _tabs(),
+                if (_postsTab) FeedList(key: ValueKey('posts-${widget.userId}-$_version'), userId: widget.userId, shrink: true) else _info(p),
+              ],
             ]),
           );
         },

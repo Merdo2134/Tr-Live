@@ -6,7 +6,7 @@ import { closeMicSessions, closeRoomMicSessions } from './mic.js';
 import { endPkForRoom } from './pk.js';
 import { cancelRoomGame, forfeitUserInRoom } from './games.js';
 
-export const SUPPORTED_SEATS = new Set([2, 5, 8, 9, 12, 15, 20]);
+export const SUPPORTED_SEATS = new Set([2, 4, 5, 6, 8, 9, 12, 15, 20]);
 
 // Odayı kapatır: üyeleri temizler, yayın oturumlarını bitirir, herkese bildirir.
 export async function closeRoom(roomId) {

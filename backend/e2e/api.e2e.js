@@ -742,6 +742,45 @@ test('favori yayıncı, son girilen odalar, oda arama, mikrofon sırası', { ski
   ok(await api('POST', `/api/rooms/${room.id}/leave`, { token: host.token }));
 });
 
+test('Keşfet akışı, banner ve duyurular', { skip, timeout: 90000 }, async () => {
+  const a = await register('fa'); const b = await register('fb');
+  // gönderi: boş olamaz, yazı ile açılır, beğeni tekrar sayılmaz, yorum sayacı artar
+  status(await api('POST', '/api/posts', { token: a.token, body: { text: '   ' } }), 400, 'boş gönderi');
+  const post = (await api('POST', '/api/posts', { token: a.token, body: { text: 'Merhaba dünya' } })).body.post;
+  assert.equal(post.mine, true);
+  ok(await api('POST', `/api/posts/${post.id}/like`, { token: b.token }));
+  const again = await api('POST', `/api/posts/${post.id}/like`, { token: b.token });
+  assert.equal(again.body.likeCount, 1, 'çifte beğeni sayılmaz');
+  ok(await api('POST', `/api/posts/${post.id}/comments`, { token: b.token, body: { text: 'Güzel!' } }));
+  assert.equal((await api('GET', `/api/posts/${post.id}/comments`, { token: b.token })).body.comments.length, 1);
+  // akış: genel herkese, takip yalnızca takip edilenlere
+  const all = await api('GET', '/api/posts?scope=all', { token: b.token });
+  const row = all.body.posts.find((x) => x.id === post.id);
+  assert.ok(row && row.liked === true && row.commentCount === 1);
+  assert.ok(!(await api('GET', '/api/posts?scope=following', { token: b.token })).body.posts.some((x) => x.id === post.id));
+  ok(await api('POST', `/api/users/${a.id}/follow`, { token: b.token }));
+  assert.ok((await api('GET', '/api/posts?scope=following', { token: b.token })).body.posts.some((x) => x.id === post.id));
+  // silme: başkası silemez, sahibi siler
+  status(await api('DELETE', `/api/posts/${post.id}`, { token: b.token }), 403, 'başkası silemez');
+  ok(await api('DELETE', `/api/posts/${post.id}`, { token: a.token }));
+  assert.ok(!(await api('GET', '/api/posts?scope=all', { token: b.token })).body.posts.some((x) => x.id === post.id));
+  // görsel adresi yalnızca yüklenen dosya biçiminde olabilir
+  status(await api('POST', '/api/posts', { token: a.token, body: { text: 'x', imageUrl: 'https://evil.test/a.png' } }), 400, 'dış adres');
+  // banner ve duyuru yalnızca yönetici
+  status(await api('POST', '/api/admin/announcements', { token: a.token, body: { kind: 'event', title: 'Test', text: 'Merhaba' } }), 403);
+  ok(await api('POST', '/api/admin/announcements', { token: U.d.token, body: { kind: 'event', title: 'Etkinlik', text: 'Hafta sonu yarışma' } }));
+  const ann = await api('GET', '/api/announcements?kind=event', { token: a.token });
+  assert.equal(ann.body.announcements[0].title, 'Etkinlik');
+  const sum = await api('GET', '/api/inbox-summary', { token: a.token });
+  assert.ok(sum.body.event >= 0);
+  assert.deepEqual((await api('GET', '/api/banners')).body.banners, []);
+  // oda bölgesi / şehir filtresi ve yeni koltuk düzeni
+  const room = (await api('POST', '/api/rooms', { token: a.token, body: { name: 'Altı koltuk', seatCount: 6 } }));
+  ok(room);
+  status(await api('POST', '/api/rooms', { token: a.token, body: { name: 'Yedi', seatCount: 7 } }), 400, 'desteklenmeyen düzen');
+  status(await api('GET', '/api/rooms?region=near'), 401, 'yakındakiler giriş ister');
+});
+
 test('liderlik tablosu, cüzdan geçmişi ve hesap silme', { skip, timeout: 60000 }, async () => {
   const lb = await api('GET', '/api/leaderboards?type=senders&period=weekly', { token: U.b.token });
   ok(lb);
