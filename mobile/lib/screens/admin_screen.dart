@@ -4,31 +4,6 @@ import '../services/session.dart';
 import '../widgets/common.dart';
 import 'admin_payouts.dart';
 
-/// Birden fazla alanlı basit form penceresi; {etiket: değer} döner.
-Future<Map<String, String>?> formDialog(BuildContext context, String title, List<String> labels, {Map<String, String> initial = const {}}) async {
-  final controllers = {for (final l in labels) l: TextEditingController(text: initial[l] ?? '')};
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (c) => AlertDialog(
-      title: Text(title),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final l in labels) TextField(controller: controllers[l], decoration: InputDecoration(labelText: l)),
-        ]),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
-        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Tamam')),
-      ],
-    ),
-  );
-  final values = {for (final l in labels) l: controllers[l]!.text.trim()};
-  for (final c in controllers.values) {
-    c.dispose();
-  }
-  return ok == true ? values : null;
-}
-
 class AdminScreen extends StatelessWidget {
   const AdminScreen({super.key});
 
@@ -518,7 +493,7 @@ class _ReportsTabState extends State<_ReportsTab> {
     final id = r['targetUserId'];
     if (id == null || !await confirm(context, '@${r['target']} hesabı yasaklansın mı?', action: 'Yasakla')) return;
     if (!mounted) return;
-    final res = await guard(context, () => Api.post('/api/admin/users/$id/status', {'status': 'banned', 'reason': 'Şikâyet: ${r['reason']}'}));
+    final res = await guard(context, () => Api.post('/api/admin/users/$id/ban', {'reason': 'Şikâyet: ${r['reason']}'}));
     if (res != null && mounted) toast(context, 'Hesap yasaklandı.');
   }
 

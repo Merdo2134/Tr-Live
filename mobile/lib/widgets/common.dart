@@ -284,3 +284,28 @@ Future<Map<String, dynamic>?> pickUser(BuildContext context, {bool admin = false
   controller.dispose();
   return r;
 }
+
+/// Birden fazla alanlı basit form penceresi; {etiket: değer} döner.
+Future<Map<String, String>?> formDialog(BuildContext context, String title, List<String> labels, {Map<String, String> initial = const {}}) async {
+  final controllers = {for (final l in labels) l: TextEditingController(text: initial[l] ?? '')};
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text(title),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final l in labels) TextField(controller: controllers[l], decoration: InputDecoration(labelText: l)),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Tamam')),
+      ],
+    ),
+  );
+  final values = {for (final l in labels) l: controllers[l]!.text.trim()};
+  for (final c in controllers.values) {
+    c.dispose();
+  }
+  return ok == true ? values : null;
+}

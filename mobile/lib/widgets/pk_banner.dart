@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../widgets/common.dart';
+import '../services/api.dart';
+import 'common.dart';
 
 /// Oda üstündeki PK şeridi: iki tarafın skoru, kalan süre ve en çok destek verenler.
 class PkBanner extends StatefulWidget {
