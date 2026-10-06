@@ -14,9 +14,11 @@ class BannerCarousel extends StatefulWidget {
 
 class _BannerCarouselState extends State<BannerCarousel> {
   List<Map<String, dynamic>> _items = [];
-  final _ctl = PageController();
+  // Sonsuz döngü: çok büyük sayfa sayısının ortasından başlanır, hep ileri kayar; sondan sonra yine baştaki banner gelir.
+  static const _loopBase = 10000;
+  late final PageController _ctl = PageController(initialPage: _loopBase);
   Timer? _timer;
-  int _page = 0;
+  int _page = _loopBase;
 
   @override
   void initState() {
@@ -29,11 +31,15 @@ class _BannerCarouselState extends State<BannerCarousel> {
       final r = await Api.get('/api/banners');
       if (!mounted) return;
       setState(() => _items = listOf(r['banners']));
+      // İlk gösterilen sayfa her zaman 1. banner olsun.
+      final start = _items.isEmpty ? _loopBase : _loopBase - (_loopBase % _items.length);
+      _page = start;
+      if (_ctl.hasClients) _ctl.jumpToPage(start);
       _timer?.cancel();
       if (_items.length > 1) {
         _timer = Timer.periodic(const Duration(seconds: 5), (_) {
           if (!mounted || !_ctl.hasClients) return;
-          _ctl.animateToPage((_page + 1) % _items.length, duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
+          _ctl.animateToPage(_page + 1, duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
         });
       }
     } catch (_) {
@@ -60,10 +66,11 @@ class _BannerCarouselState extends State<BannerCarousel> {
           child: Stack(children: [
             PageView.builder(
               controller: _ctl,
-              itemCount: _items.length,
+              itemCount: _loopBase * 2,
+              physics: _items.length > 1 ? null : const NeverScrollableScrollPhysics(),
               onPageChanged: (i) => setState(() => _page = i),
               itemBuilder: (_, i) {
-                final url = Api.absoluteUrl(_items[i]['imageUrl'] as String?);
+                final url = Api.absoluteUrl(_items[i % _items.length]['imageUrl'] as String?);
                 return url == null
                     ? const ColoredBox(color: Pal.surfaceHi)
                     : Image.network(url, fit: BoxFit.cover, width: double.infinity, errorBuilder: (_, __, ___) => const ColoredBox(color: Pal.surfaceHi));
@@ -78,9 +85,9 @@ class _BannerCarouselState extends State<BannerCarousel> {
                   for (var i = 0; i < _items.length; i++)
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 3),
-                      width: i == _page ? 14 : 6,
+                      width: i == _page % _items.length ? 14 : 6,
                       height: 6,
-                      decoration: BoxDecoration(color: i == _page ? Pal.cyan : Colors.white54, borderRadius: BorderRadius.circular(3)),
+                      decoration: BoxDecoration(color: i == _page % _items.length ? Pal.cyan : Colors.white54, borderRadius: BorderRadius.circular(3)),
                     ),
                 ]),
               ),
