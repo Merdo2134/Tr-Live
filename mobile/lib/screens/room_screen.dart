@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import '../services/api.dart';
+import '../services/background_service.dart';
 import '../services/music_service.dart';
 import '../services/room_dock.dart';
 import '../services/session.dart';
@@ -34,7 +35,7 @@ class RoomScreen extends StatefulWidget {
   State<RoomScreen> createState() => _RoomScreenState();
 }
 
-class _RoomScreenState extends State<RoomScreen> {
+class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _room;
   Map<String, dynamic> _me = {};
   List<Map<String, dynamic>> _members = [];
@@ -75,11 +76,22 @@ class _RoomScreenState extends State<RoomScreen> {
     super.initState();
     _sub = SocketService.instance.events.listen(_onEvent);
     RoomDock.exitHandler = _onBack;
+    WidgetsBinding.instance.addObserver(this);
     _enter();
+  }
+
+  /// Arka plandan dönünce oda bilgisi yenilenir (bağlantı arada kopmuş olabilir).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !_joined || _closing || !mounted) return;
+    SocketService.instance.subscribeRoom(widget.roomId);
+    _loadMembers().catchError((_) {});
+    _loadMessages().catchError((_) {});
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (RoomDock.exitHandler == _onBack) RoomDock.exitHandler = null;
     _sub?.cancel();
     _chatCtl.dispose();
@@ -126,6 +138,7 @@ class _RoomScreenState extends State<RoomScreen> {
       _loadMessages();
       _loadExtras();
       MusicService.instance.bind(widget.roomId);
+      BackgroundService.instance.ensurePermissions((msg, action) => confirm(context, msg, action: action));
     } catch (e) {
       if (!mounted) return;
       toast(context, errorText(e), error: true);
@@ -268,7 +281,16 @@ class _RoomScreenState extends State<RoomScreen> {
       await _loadMembers();
       if (_lk == null) _connectLivekit();
     } catch (e) {
-      _exit(errorText(e));
+      // Yalnızca sunucu açıkça reddederse (oda kapandı, engellendi...) odadan çıkarılır.
+      // Ağ kesintisi gibi geçici hatalarda oda açık kalır ve biraz sonra yeniden denenir.
+      final code = e is ApiException ? e.statusCode : null;
+      if (code != null && code >= 400 && code < 500 && code != 429 && code != 408) {
+        _exit(errorText(e));
+      } else {
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted && !_closing && !_rejoining) _rejoin();
+        });
+      }
     } finally {
       _rejoining = false;
     }
@@ -451,6 +473,7 @@ class _RoomScreenState extends State<RoomScreen> {
     if (userId == Session.id) {
       final changed = _me['microphone'] != mic;
       _me = {..._me, 'seatIndex': seat, 'microphone': mic};
+      BackgroundService.instance.micChanged(mic);
       if (changed) _syncPublish();
     }
   }
@@ -501,6 +524,7 @@ class _RoomScreenState extends State<RoomScreen> {
       try {
         await room.localParticipant?.setMicrophoneEnabled(_onSeat && _micOn);
         if (_isVideo) await room.localParticipant?.setCameraEnabled(_onSeat && _camOn);
+        BackgroundService.instance.micChanged(_onSeat); // izin verildikten sonra servis "mikrofon" türüne geçer
         return;
       } catch (_) {
         // Yayın izni sunucudan birkaç yüz ms içinde gelir; kısa süre bekleyip tekrar dene.

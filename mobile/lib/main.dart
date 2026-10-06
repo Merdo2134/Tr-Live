@@ -1,8 +1,12 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api.dart';
 import 'services/auth_service.dart';
+import 'services/background_service.dart';
+import 'services/error_log.dart';
 import 'services/session.dart';
 import 'services/socket_service.dart';
 import 'widgets/app_theme.dart';
@@ -11,8 +15,25 @@ import 'widgets/common.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 bool _loggingOut = false;
 
+// Yüzen balonun giriş noktası: tree-shaking silmesin diye burada da dışa açılır.
+@pragma('vm:entry-point')
+void overlayMain() => overlayMainImpl();
+
 Future<void> main() async {
+  // Yakalanmamış hatalar uygulamayı çökertmesin; kayda geçip devam edilir.
+  FlutterError.onError = (details) {
+    ErrorLog.add('Arayüz hatası', details.exception, details.stack);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    ErrorLog.add('Beklenmeyen hata', error, stack);
+    return true;
+  };
+  runZonedGuarded(_boot, (error, stack) => ErrorLog.add('Bölge hatası', error, stack));
+}
+
+Future<void> _boot() async {
   WidgetsFlutterBinding.ensureInitialized();
+  BackgroundService.instance.init();
   await AuthService.restore();
   // Oturum sona erdiğinde (401, yasaklı hesap, şifre değişimi) giriş ekranına dön.
   Api.onUnauthorized = () async {

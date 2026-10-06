@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/api.dart';
+import '../services/error_log.dart';
 import '../widgets/common.dart';
 import 'user_screens.dart';
 
@@ -170,6 +172,70 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                   ),
               ]),
       ),
+    );
+  }
+}
+
+
+/// Yakalanan hataların kaydı: çökme olursa buradan kopyalayıp gönderebilirsiniz.
+class ErrorLogScreen extends StatefulWidget {
+  const ErrorLogScreen({super.key});
+
+  @override
+  State<ErrorLogScreen> createState() => _ErrorLogScreenState();
+}
+
+class _ErrorLogScreenState extends State<ErrorLogScreen> {
+  List<String> _items = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final l = await ErrorLog.load();
+    if (mounted) setState(() {
+      _items = l;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Hata kaydı'), actions: [
+        IconButton(
+          tooltip: 'Tümünü kopyala',
+          icon: const Icon(Icons.copy),
+          onPressed: _items.isEmpty
+              ? null
+              : () {
+                  Clipboard.setData(ClipboardData(text: _items.join('\n\n')));
+                  toast(context, 'Kopyalandı.');
+                },
+        ),
+        IconButton(
+          tooltip: 'Temizle',
+          icon: const Icon(Icons.delete_outline),
+          onPressed: () async {
+            await ErrorLog.clear();
+            _load();
+          },
+        ),
+      ]),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _items.isEmpty
+              ? const Center(child: Text('Kayıtlı hata yok.', style: TextStyle(color: Colors.white54)))
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _items.length,
+                  separatorBuilder: (_, __) => const Divider(),
+                  itemBuilder: (_, i) => SelectableText(_items[i], style: const TextStyle(fontSize: 12)),
+                ),
     );
   }
 }

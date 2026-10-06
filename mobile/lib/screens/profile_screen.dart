@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api.dart';
+import '../services/background_service.dart';
 import '../services/auth_service.dart';
 import '../services/session.dart';
 import '../widgets/common.dart';
@@ -124,6 +126,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onChanged: _toggleHidden,
             ),
             const Divider(),
+            ListTile(
+              leading: const Icon(Icons.layers_outlined),
+              title: const Text('Arka plan ve balon izinleri'),
+              subtitle: const Text('Oda arka planda açık kalsın, diğer uygulamaların üzerinde balon görünsün'),
+              onTap: () async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.remove('asked_battery');
+                await prefs.remove('asked_overlay');
+                if (!mounted) return;
+                await BackgroundService.instance.ensurePermissions((msg, action) => confirm(context, msg, action: action));
+              },
+            ),
+            ListTile(leading: const Icon(Icons.bug_report_outlined), title: const Text('Hata kaydı'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const ErrorLogScreen())),
             ListTile(leading: const Icon(Icons.lock_reset), title: const Text('Şifre değiştir'), onTap: _changePassword),
             ListTile(leading: const Icon(Icons.logout), title: const Text('Çıkış yap'), onTap: _goLogin),
             ListTile(leading: const Icon(Icons.delete_forever, color: Colors.redAccent), title: const Text('Hesabı sil', style: TextStyle(color: Colors.redAccent)), onTap: _deleteAccount),

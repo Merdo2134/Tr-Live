@@ -52,14 +52,34 @@ export async function isRoomMember(userId, roomId) {
 }
 
 // Uygulaması kapanmış / bağlantısı kopmuş kullanıcıları odadan temizler.
-// Bir üye, WebSocket üzerinden odaya abone değilse ve 90 sn'den eskiyse çıkarılır.
+// Arka plana alınan telefonlarda bağlantı kısa süre kopabilir; bu yüzden üye hemen atılmaz:
+// WebSocket üzerinden odaya abone olmayan üye, KESİNTİSİZ olarak bekleme süresini aşarsa çıkarılır
+// (üye 5 dk, oda sahibi 15 dk — oda sahibi çıkınca oda kapanacağı için daha uzun). Geri bağlanırsa sayaç sıfırlanır.
+const GRACE_MS = { user: Number(process.env.ROOM_GRACE_SECONDS || 300) * 1000, owner: Number(process.env.ROOM_OWNER_GRACE_SECONDS || 900) * 1000 };
+
 export function startRoomSweeper() {
+  const missingSince = new Map(); // "odaId:kullanıcıId" → ilk eksik görüldüğü an
   const timer = setInterval(async () => {
     try {
-      const r = await query(`SELECT room_id, user_id FROM room_members WHERE joined_at < NOW() - INTERVAL '90 seconds'`);
+      const now = Date.now();
+      const r = await query(`SELECT room_id, user_id, role FROM room_members WHERE joined_at < NOW() - INTERVAL '90 seconds'`);
+      const alive = new Set();
       for (const m of r.rows) {
-        if (!hub.isUserInRoom(m.user_id, m.room_id)) await leaveRoom(m.user_id, m.room_id);
+        const key = `${m.room_id}:${m.user_id}`;
+        alive.add(key);
+        if (hub.isUserInRoom(m.user_id, m.room_id)) {
+          missingSince.delete(key);
+          continue;
+        }
+        const since = missingSince.get(key) ?? now;
+        missingSince.set(key, since);
+        const limit = m.role === 'owner' ? GRACE_MS.owner : GRACE_MS.user;
+        if (now - since >= limit) {
+          missingSince.delete(key);
+          await leaveRoom(m.user_id, m.room_id);
+        }
       }
+      for (const key of missingSince.keys()) if (!alive.has(key)) missingSince.delete(key); // odadan zaten çıkmış olanları unut
     } catch (error) {
       console.error('Oda temizleyici hatası:', error.message);
     }

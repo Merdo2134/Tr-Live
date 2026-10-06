@@ -27,6 +27,14 @@ class SocketService {
     _connect();
   }
 
+  /// Uygulama arka plandan dönünce bağlantıyı hemen yeniler (bekleme süresini beklemeden).
+  void reconnectNow() {
+    if (!_wanted) return;
+    _retry?.cancel();
+    _attempt = 0;
+    _connect();
+  }
+
   void stop() {
     _wanted = false;
     _roomId = null;

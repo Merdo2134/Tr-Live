@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'background_service.dart';
 
 class RoomRequest {
   final String roomId;
@@ -34,6 +35,7 @@ class RoomDock {
     _serial++;
     request.value = r;
     minimized.value = false;
+    BackgroundService.instance.roomOpened(r.name);
   }
 
   static void minimize() {
@@ -48,6 +50,7 @@ class RoomDock {
     request.value = null;
     minimized.value = false;
     myRole = 'user';
+    BackgroundService.instance.roomClosed();
     exitHandler = null;
   }
 }
