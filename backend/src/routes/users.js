@@ -4,6 +4,7 @@ import { requireAuth } from '../auth.js';
 import { userLimit } from '../firewall.js';
 import { fail, uuid } from '../http.js';
 import { loadProfile } from '../services/profile.js';
+import { loadPublicRows } from '../services/users.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 
 export const router = Router();
@@ -25,6 +26,30 @@ router.get('/search', async (req, res) => {
     [like(q), q.toLowerCase(), req.user.id],
   );
   res.json({ users: r.rows.map((x) => publicUser(x, req.user.id)) });
+});
+
+// Oda içi profil kartı: "Yakın Arkadaşlarım" (bu kişiye en çok hediye gönderen 5 kişi) ve "Madalyalar" (rozetler).
+router.get('/:userId/card', async (req, res) => {
+  const targetId = uuid(req.params.userId, 'Kullanıcı');
+  const t = (await query(`SELECT id, is_hidden FROM users WHERE id = $1 AND account_status <> 'deleted'`, [targetId])).rows[0];
+  if (!t) throw fail('Kullanıcı bulunamadı.', 404);
+  if (t.is_hidden && targetId !== req.user.id) return res.json({ supporters: [], medals: [] });
+  const sup = await query(
+    `SELECT sender_id, SUM(coin_amount)::text AS coins FROM gift_transactions
+     WHERE receiver_id = $1 AND sender_id <> $1 GROUP BY sender_id ORDER BY SUM(coin_amount) DESC LIMIT 5`,
+    [targetId],
+  );
+  const users = new Map((await loadPublicRows(sup.rows.map((x) => x.sender_id))).map((u) => [u.id, u]));
+  const medals = await query(
+    `SELECT item_name, metadata->>'assetUrl' AS asset_url FROM inventory_items
+     WHERE user_id = $1 AND item_type = 'badge' AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY created_at DESC LIMIT 12`,
+    [targetId],
+  );
+  res.json({
+    supporters: sup.rows.filter((x) => users.has(x.sender_id)).map((x) => ({ user: publicUser(users.get(x.sender_id), req.user.id), coins: x.coins })),
+    medals: medals.rows.map((m) => ({ name: m.item_name, assetUrl: m.asset_url })),
+  });
 });
 
 router.get('/:userId', async (req, res) => {

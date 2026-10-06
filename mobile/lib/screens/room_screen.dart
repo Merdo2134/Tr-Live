@@ -7,6 +7,7 @@ import '../services/music_service.dart';
 import '../services/room_dock.dart';
 import '../services/session.dart';
 import '../services/socket_service.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/gift_ribbon.dart';
 import '../widgets/safety_actions.dart';
@@ -1009,79 +1010,292 @@ class _RoomScreenState extends State<RoomScreen> {
     showGiftSheet(context, roomId: widget.roomId, members: _members, recipientId: target);
   }
 
+  /// Oda içi kullanıcı kartı (Figma): büyük avatar, rozetler, Yakın Arkadaşlarım, Madalyalar, yetkiye göre işlem düğmeleri.
+  /// Yönetim düğmeleri yalnızca yetkisi olana görünür; normal kullanıcı yalnızca Etiketle / Hediye / Takip görür.
   void _memberSheet(Map<String, dynamic> m) {
     final userId = m['userId'].toString();
     final user = mapOf(m['user']);
     final isSelf = userId == Session.id;
     final role = (m['role'] ?? 'user').toString();
+    final seat = m['seatIndex'] == null ? null : (m['seatIndex'] as num).toInt();
+    // Yetkiler: kendi rolüm hedefin rolünden yüksek olmalı (oda sahibine dokunulamaz).
+    final canMod = !isSelf && _canModerate(role);
+    final canRole = !isSelf && (_myRole == 'owner' || _myRole == 'cohost') && role != 'owner' && (_myRole == 'owner' || role != 'cohost');
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (c) {
+        void close() => Navigator.pop(c);
+        Widget action(IconData icon, String label, VoidCallback onTap, {Color color = Pal.amber}) => Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: onTap,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    CircleAvatar(radius: 22, backgroundColor: color, child: Icon(icon, color: Colors.black87, size: 24)),
+                    const SizedBox(height: 4),
+                    FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                  ]),
+                ),
+              ),
+            );
+        Widget bigAction(IconData icon, String label, VoidCallback onTap) => Expanded(
+              child: InkWell(
+                onTap: onTap,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(icon, color: Pal.amber, size: 34),
+                    const SizedBox(height: 2),
+                    FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+                  ]),
+                ),
+              ),
+            );
+        return FutureBuilder<List<Map<String, dynamic>?>>(
+          future: Future.wait([
+            Api.get('/api/users/$userId').then<Map<String, dynamic>?>((r) => mapOf(r['profile'])).catchError((_) => null),
+            Api.get('/api/users/$userId/card').then<Map<String, dynamic>?>((r) => r).catchError((_) => null),
+          ]),
+          builder: (context, snap) {
+            final profile = snap.data?[0];
+            final card = snap.data?[1];
+            final supporters = listOf(card?['supporters']);
+            final medals = listOf(card?['medals']);
+            var following = profile?['isFollowing'] == true;
+            final family = mapOf(profile?['family']);
+            final username = (profile?['username'] ?? user?['username'] ?? '').toString();
+            return StatefulBuilder(
+              builder: (context, setS) => SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 48),
+                  child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
+                    Container(
+                      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
+                      decoration: const BoxDecoration(color: Color(0xFF26262B), borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 52, 16, 0),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Text((user?['displayName'] ?? '').toString(), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 6),
+                          Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                            _pill('LV${user?['coinLevel'] ?? 1}', Pal.pink, icon: Icons.star),
+                            _pill('Hediye ${user?['giftLevel'] ?? 1}', Pal.purple, icon: Icons.diamond),
+                            if (user?['wipLevel'] != null) _pill('WIP ${user?['wipLevel']}', Pal.amber),
+                            if (role != 'user') _pill(_roleLabels[role] ?? role, Pal.cyan),
+                            if (family != null) _pill('${family['name']}', Pal.red),
+                            if (seat != null) _pill('${seat + 1}. koltuk', Colors.white24),
+                          ]),
+                          const SizedBox(height: 8),
+                          if (username.isNotEmpty)
+                            InkWell(
+                              onTap: () {
+                                Clipboard.setData(ClipboardData(text: username));
+                                toast(context, 'Kimlik kopyalandı.');
+                              },
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Text('ID: $username', style: const TextStyle(color: Colors.white70)),
+                                const SizedBox(width: 4),
+                                const Icon(Icons.copy, size: 14, color: Colors.white54),
+                              ]),
+                            ),
+                          const SizedBox(height: 10),
+                          const Text('Yakın Arkadaşlarım', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 8),
+                          if (snap.connectionState != ConnectionState.done)
+                            const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)))
+                          else if (supporters.isEmpty)
+                            const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text('Henüz yok.', style: TextStyle(color: Colors.white54)))
+                          else
+                            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                              for (final s in supporters)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(2),
+                                      decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Pal.purple, width: 2)),
+                                      child: UserAvatar(user: mapOf(s['user']), radius: 24),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    _pill('LV${mapOf(s['user'])?['coinLevel'] ?? 1}', Pal.purple),
+                                  ]),
+                                ),
+                            ]),
+                          const SizedBox(height: 12),
+                          Container(
+                            height: 64,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(border: Border.all(color: Pal.amber), borderRadius: BorderRadius.circular(10)),
+                            child: Row(children: [
+                              const Text('Madalyalar', style: TextStyle(fontWeight: FontWeight.w700)),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: medals.isEmpty
+                                    ? const Align(alignment: Alignment.centerRight, child: Text('Henüz yok', style: TextStyle(color: Colors.white54, fontSize: 12)))
+                                    : ListView(scrollDirection: Axis.horizontal, reverse: true, children: [
+                                        for (final md in medals)
+                                          Padding(
+                                            padding: const EdgeInsets.only(left: 6),
+                                            child: Tooltip(
+                                              message: (md['name'] ?? '').toString(),
+                                              child: Api.absoluteUrl(md['assetUrl'] as String?) != null
+                                                  ? Image.network(Api.absoluteUrl(md['assetUrl'] as String?)!, width: 52, height: 52, errorBuilder: (_, __, ___) => const Icon(Icons.military_tech, color: Pal.amber, size: 40))
+                                                  : const Icon(Icons.military_tech, color: Pal.amber, size: 40),
+                                            ),
+                                          ),
+                                      ]),
+                              ),
+                            ]),
+                          ),
+                          // Yönetim düğmeleri: yalnızca yetkili olana görünür.
+                          if (canMod || canRole) ...[
+                            const SizedBox(height: 10),
+                            Row(children: [
+                              if (canRole)
+                                action(Icons.manage_accounts, 'Yönetici', () {
+                                  close();
+                                  _roleChoice(userId, role);
+                                }),
+                              if (canMod)
+                                seat != null
+                                    ? action(Icons.mic_off, 'Mic Kapat', () { close(); _moderate(userId, 'mic-off'); }, color: Colors.white70)
+                                    : action(Icons.mic, 'Mic Aç', () { close(); _moderate(userId, 'mic-invite', body: {}); }),
+                              if (canMod) action(Icons.comments_disabled, 'Sohbet', () { close(); _muteChoice(userId); }),
+                              if (canMod && seat != null) action(Icons.event_seat, 'Koltuk', () { close(); _moderate(userId, 'mic-off'); _lockSeat(seat, true); }),
+                              if (canMod) action(Icons.exit_to_app, 'Odadan At', () async {
+                                close();
+                                if (await confirm(this.context, '${user?['displayName'] ?? 'Kullanıcı'} odadan atılsın mı?', action: 'At')) _moderate(userId, 'kick');
+                              }),
+                            ]),
+                          ],
+                          const SizedBox(height: 8),
+                          const Divider(height: 1, color: Colors.white12),
+                          Row(children: [
+                            bigAction(Icons.alternate_email, 'Etiketle', () {
+                              close();
+                              final name = (user?['displayName'] ?? '').toString();
+                              _chatCtl.text = '${_chatCtl.text}@$name ';
+                              _chatCtl.selection = TextSelection.collapsed(offset: _chatCtl.text.length);
+                            }),
+                            bigAction(Icons.card_giftcard, 'Hediye Gönder', () {
+                              close();
+                              _openGifts(userId);
+                            }),
+                            if (!isSelf)
+                              bigAction(following ? Icons.check : Icons.add, following ? 'Takipte' : 'Takip Et', () async {
+                                final ok = await guard<bool>(this.context, () async {
+                                  if (following) {
+                                    await Api.delete('/api/users/$userId/follow');
+                                  } else {
+                                    await Api.post('/api/users/$userId/follow');
+                                  }
+                                  return true;
+                                });
+                                if (ok == true) setS(() => following = !following);
+                              })
+                            else
+                              bigAction(Icons.person, 'Profilim', () {
+                                close();
+                                Navigator.push(this.context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: userId)));
+                              }),
+                          ]),
+                        ]),
+                      ),
+                    ),
+                    // Üstte taşan büyük avatar (dokununca tam profil)
+                    Positioned(
+                      top: -48,
+                      child: GestureDetector(
+                        onTap: () {
+                          close();
+                          Navigator.push(this.context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: userId)));
+                        },
+                        child: UserAvatar(user: user, radius: 48),
+                      ),
+                    ),
+                    if (!isSelf)
+                      Positioned(
+                        top: 10,
+                        left: 12,
+                        child: IconButton(
+                          tooltip: 'Şikâyet / engelle',
+                          icon: const Icon(Icons.error_outline, color: Pal.amber, size: 30),
+                          onPressed: () {
+                            close();
+                            _reportMenu(userId, (user?['displayName'] ?? 'Kullanıcı').toString(), canMod);
+                          },
+                        ),
+                      ),
+                    Positioned(
+                      top: 10,
+                      right: 12,
+                      child: IconButton(tooltip: 'Kapat', icon: const CircleAvatar(radius: 16, backgroundColor: Pal.amber, child: Icon(Icons.close, color: Colors.black, size: 20)), onPressed: close),
+                    ),
+                  ]),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _pill(String text, Color color, {IconData? icon}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(10)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (icon != null) ...[Icon(icon, size: 12, color: Colors.white), const SizedBox(width: 3)],
+          Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.white)),
+        ]),
+      );
+
+  void _roleChoice(String userId, String role) {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (c) {
-        void close() => Navigator.pop(c);
-        return SafeArea(
-          child: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              ListTile(
-                leading: UserAvatar(user: user),
-                title: UserName(user: user, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('${_roleLabels[role] ?? role}${m['seatIndex'] != null ? ' · ${(m['seatIndex'] as num).toInt() + 1}. koltuk' : ''}'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.person),
-                title: const Text('Profili gör'),
-                onTap: () {
-                  close();
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: userId)));
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.card_giftcard),
-                title: Text(isSelf ? 'Kendine hediye gönder' : 'Hediye gönder'),
-                onTap: () {
-                  close();
-                  _openGifts(userId);
-                },
-              ),
-              if (!isSelf && _canModerate(role)) ...[
-                if (m['seatIndex'] != null)
-                  ListTile(leading: const Icon(Icons.mic_off), title: const Text('Koltuktan kaldır'), onTap: () { close(); _moderate(userId, 'mic-off'); })
-                else
-                  ListTile(leading: const Icon(Icons.mic_none), title: const Text('Mikrofona davet et'), onTap: () { close(); _moderate(userId, 'mic-invite', body: {}); }),
-                ListTile(leading: const Icon(Icons.comments_disabled), title: const Text('Sohbette sustur (10 dk)'), onTap: () { close(); _moderate(userId, 'chat-mute', body: {'minutes': 10}); }),
-                ListTile(leading: const Icon(Icons.exit_to_app), title: const Text('Odadan at'), onTap: () { close(); _moderate(userId, 'kick'); }),
-                ListTile(leading: const Icon(Icons.block), title: const Text('Engelle'), onTap: () { close(); _moderate(userId, 'block'); }),
-              ],
-              if (!isSelf) ...[
-                ListTile(
-                  leading: const Icon(Icons.flag_outlined),
-                  title: const Text('Şikâyet et'),
-                  onTap: () {
-                    close();
-                    reportDialog(context, kind: 'user', targetUserId: userId, roomId: widget.roomId);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.person_off_outlined),
-                  title: const Text('Kullanıcıyı engelle'),
-                  onTap: () {
-                    close();
-                    blockUserDialog(context, userId, (user?['displayName'] ?? 'Kullanıcı').toString());
-                  },
-                ),
-              ],
-              if (!isSelf && (_myRole == 'owner' || _myRole == 'cohost') && role != 'owner') ...[
-                if (role != 'moderator')
-                  ListTile(leading: const Icon(Icons.shield), title: const Text('Moderatör yap'), onTap: () { close(); _moderate(userId, 'role', body: {'role': 'moderator'}); }),
-                if (_myRole == 'owner' && role != 'cohost')
-                  ListTile(leading: const Icon(Icons.stars), title: const Text('Yardımcı sahip yap'), onTap: () { close(); _moderate(userId, 'role', body: {'role': 'cohost'}); }),
-                if (role != 'user')
-                  ListTile(leading: const Icon(Icons.remove_moderator), title: const Text('Yetkiyi al'), onTap: () { close(); _moderate(userId, 'role', body: {'role': 'user'}); }),
-              ],
-            ]),
-          ),
-        );
-      },
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (role != 'moderator') ListTile(leading: const Icon(Icons.shield), title: const Text('Moderatör yap'), onTap: () { Navigator.pop(c); _moderate(userId, 'role', body: {'role': 'moderator'}); }),
+          if (_myRole == 'owner' && role != 'cohost') ListTile(leading: const Icon(Icons.stars), title: const Text('Yardımcı sahip yap'), onTap: () { Navigator.pop(c); _moderate(userId, 'role', body: {'role': 'cohost'}); }),
+          if (role != 'user') ListTile(leading: const Icon(Icons.remove_moderator), title: const Text('Yetkiyi al'), onTap: () { Navigator.pop(c); _moderate(userId, 'role', body: {'role': 'user'}); }),
+        ]),
+      ),
+    );
+  }
+
+  void _muteChoice(String userId) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final mins in const [10, 60, 1440])
+            ListTile(
+              leading: const Icon(Icons.comments_disabled),
+              title: Text('Sohbette sustur (${mins == 1440 ? '1 gün' : (mins == 60 ? '1 saat' : '$mins dk')})'),
+              onTap: () { Navigator.pop(c); _moderate(userId, 'chat-mute', body: {'minutes': mins}); },
+            ),
+          ListTile(leading: const Icon(Icons.chat), title: const Text('Susturmayı kaldır'), onTap: () { Navigator.pop(c); _moderate(userId, 'chat-mute', body: {'minutes': 0}); }),
+        ]),
+      ),
+    );
+  }
+
+  void _reportMenu(String userId, String name, bool canRoomBlock) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.flag_outlined), title: const Text('Şikâyet et'), onTap: () { Navigator.pop(c); reportDialog(context, kind: 'user', targetUserId: userId, roomId: widget.roomId); }),
+          ListTile(leading: const Icon(Icons.person_off_outlined), title: const Text('Kullanıcıyı engelle'), onTap: () { Navigator.pop(c); blockUserDialog(context, userId, name); }),
+          if (canRoomBlock) ListTile(leading: const Icon(Icons.block), title: const Text('Bu odadan engelle'), onTap: () { Navigator.pop(c); _moderate(userId, 'block'); }),
+        ]),
+      ),
     );
   }
 
