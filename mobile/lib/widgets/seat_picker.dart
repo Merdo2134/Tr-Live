@@ -51,3 +51,107 @@ class SeatLayoutPicker extends StatelessWidget {
     ]);
   }
 }
+
+/// Koltuk düzeni (Figma "Mikrofon Modu"): her satırdaki koltuk sayısı, yukarıdan aşağıya.
+List<int> seatRows(int n) {
+  switch (n) {
+    case 2:
+      return [2];
+    case 4:
+      return [2, 2];
+    case 5:
+      return [1, 4];
+    case 6:
+      return [2, 4];
+    case 8:
+      return [4, 4];
+    case 9:
+      return [1, 4, 4];
+    case 12:
+      return [2, 5, 5];
+    case 15:
+      return [5, 5, 5];
+    case 20:
+      return [5, 5, 5, 5];
+  }
+  final rows = <int>[];
+  for (var left = n; left > 0; left -= 4) {
+    rows.add(left >= 4 ? 4 : left);
+  }
+  return rows;
+}
+
+/// Oda içinde "Mikrofon Modu" penceresi: koltuk sayısını seçtirir. Seçilen sayıyı döndürür.
+Future<int?> showMicModeSheet(BuildContext context, {required int current}) {
+  const modes = [2, 5, 8, 9, 12, 15, 20];
+  final list = modes.contains(current) ? modes : [...modes, current]..sort();
+  return showModalBottomSheet<int>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (c) => SafeArea(
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        child: Container(
+          color: const Color(0xFF1B1B1F),
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(c).height * 0.8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              color: const Color(0xFFFFE100),
+              padding: const EdgeInsets.fromLTRB(20, 10, 12, 10),
+              child: Row(children: [
+                const Expanded(child: Text('Mikrofon Modu', textAlign: TextAlign.center, style: TextStyle(color: Colors.black, fontWeight: FontWeight.w800, fontSize: 20))),
+                IconButton(onPressed: () => Navigator.pop(c), icon: const Icon(Icons.cancel, color: Colors.black, size: 32)),
+              ]),
+            ),
+            Flexible(
+              child: GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: 3,
+                padding: const EdgeInsets.all(12),
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.82,
+                children: [
+                  for (final n in list)
+                    InkWell(
+                      onTap: () => Navigator.pop(c, n),
+                      child: Column(children: [
+                        Expanded(
+                          child: Stack(children: [
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF0B1B4A), Color(0xFF3A63B8)]),
+                                ),
+                                padding: const EdgeInsets.all(6),
+                                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                  for (final r in seatRows(n))
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 2),
+                                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                        for (var i = 0; i < r; i++)
+                                          Container(margin: const EdgeInsets.symmetric(horizontal: 2), width: 14, height: 14, decoration: const BoxDecoration(color: Colors.white54, shape: BoxShape.circle)),
+                                      ]),
+                                    ),
+                                ]),
+                              ),
+                            ),
+                            if (n == current)
+                              const Positioned(top: 4, right: 4, child: CircleAvatar(radius: 12, backgroundColor: Color(0xFFFFE100), child: Icon(Icons.check, size: 16, color: Colors.black))),
+                          ]),
+                        ),
+                        const SizedBox(height: 6),
+                        Text('$n Mikrofon', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                      ]),
+                    ),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      ),
+    ),
+  );
+}

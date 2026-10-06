@@ -313,7 +313,7 @@ router.post('/:roomId/join', requireAuth, userLimit('room_join', 40, 60e3), asyn
 // Oda ayarları: ad, etiketler, şifre, sohbet açık/kapalı (oda sahibi ve yardımcı sahip).
 router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
-  await activeRoom(roomId);
+  const before = await activeRoom(roomId);
   const me = await memberOf(roomId, req.user.id);
   if (!me || !['owner', 'cohost'].includes(me.role)) throw fail('Oda ayarlarını yalnızca oda sahibi ve yardımcı sahip değiştirebilir.', 403);
   const sets = []; const values = [];
@@ -323,6 +323,13 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   if (b.tags !== undefined) set('tags', cleanTags(b.tags));
   if (b.chatEnabled !== undefined) { if (typeof b.chatEnabled !== 'boolean') throw fail('chatEnabled true/false olmalı.'); set('chat_enabled', b.chatEnabled); }
   if (b.theme !== undefined) set('theme', oneOf(b.theme, THEMES, 'Tema'));
+  let newSeats = null;
+  if (b.seatCount !== undefined) {
+    newSeats = Number(b.seatCount);
+    if (!SUPPORTED_SEATS.has(newSeats)) throw fail('Geçersiz koltuk sayısı.');
+    set('seat_count', newSeats);
+    set('locked_seats', (before.locked_seats ?? []).filter((i) => i < newSeats)); // kalkan koltukların kilidi de kalkar
+  }
   if (b.themeImageUrl !== undefined) {
     if (b.themeImageUrl !== null && b.themeImageUrl !== '') {
       if (!(await featuresFor(req.user.id)).customRoomTheme) throw fail('Özel tema görseli için WIP 4 veya üzeri gerekir.', 403);
@@ -353,15 +360,28 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   values.push(roomId);
   const r = (await query(`UPDATE rooms SET ${sets.join(', ')} WHERE id = $${values.length} RETURNING *`, values)).rows[0];
   // Kalıcı oda bilgisi (ad, etiket, tema) bir sonraki açılış için saklanır.
-  if (b.name !== undefined || b.tags !== undefined || b.theme !== undefined) {
+  if (b.name !== undefined || b.tags !== undefined || b.theme !== undefined || newSeats !== null) {
     await query(
-      `UPDATE room_profiles SET name = $3, tags = $4, theme = $5, updated_at = NOW() WHERE owner_id = $1 AND room_type = $2`,
-      [r.owner_id, r.room_type, r.name, r.tags ?? [], r.theme],
+      `UPDATE room_profiles SET name = $3, tags = $4, theme = $5, seat_count = $6, updated_at = NOW() WHERE owner_id = $1 AND room_type = $2`,
+      [r.owner_id, r.room_type, r.name, r.tags ?? [], r.theme, r.seat_count],
     );
+  }
+  // Koltuk sayısı azaldıysa taşan koltuklardakiler dinleyiciye iner (mikrofonları kapanır).
+  if (newSeats !== null && newSeats < before.seat_count) {
+    const gone = (await query(
+      `UPDATE room_members SET seat_index = NULL, microphone = FALSE WHERE room_id = $1 AND seat_index >= $2 RETURNING user_id`,
+      [roomId, newSeats],
+    )).rows;
+    for (const g of gone) {
+      await closeMicSessions(g.user_id, roomId);
+      await setCanPublish(roomId, g.user_id, false);
+      hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId: g.user_id, seatIndex: null, microphone: false });
+    }
   }
   hub.broadcastRoom(roomId, {
     type: 'room_settings', roomId, name: r.name, tags: r.tags, locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled,
     theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, hidden: r.is_hidden,
+    seatCount: r.seat_count, lockedSeats: r.locked_seats ?? [],
   });
   res.json({ room: roomJson(r, { showCode: true }) });
 });

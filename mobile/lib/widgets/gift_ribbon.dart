@@ -10,6 +10,8 @@ import 'common.dart';
 class GiftRibbonOverlay extends StatefulWidget {
   final Widget child;
   final String? roomId;
+  /// Bu cihazda hediye / giriş efektleri gösterilsin mi (oda araçlarındaki "Efekt ve Ses").
+  static bool effectsOn = true;
   const GiftRibbonOverlay({super.key, required this.child, this.roomId});
 
   @override
@@ -39,6 +41,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   }
 
   void _onEvent(Map<String, dynamic> e) {
+    if (!GiftRibbonOverlay.effectsOn) return;
     final type = e['type'];
     if (type == 'global_gift_ribbon') {
       // Aynı odadaysak zaten room_gift ile göstereceğiz.

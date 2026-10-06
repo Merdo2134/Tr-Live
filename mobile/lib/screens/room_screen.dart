@@ -12,6 +12,7 @@ import '../widgets/gift_ribbon.dart';
 import '../widgets/safety_actions.dart';
 import '../widgets/pk_banner.dart';
 import '../widgets/room_theme.dart';
+import '../widgets/seat_picker.dart';
 import 'gift_sheet.dart';
 import 'ludo_screen.dart';
 import 'pk_sheet.dart';
@@ -423,6 +424,8 @@ class _RoomScreenState extends State<RoomScreen> {
               ...?_room,
               'name': e['name'], 'tags': e['tags'], 'locked': e['locked'], 'chatEnabled': e['chatEnabled'],
               'theme': e['theme'], 'themeImageUrl': e['themeImageUrl'], 'scoreboardEnabled': e['scoreboardEnabled'], 'hidden': e['hidden'],
+              if (e['seatCount'] != null) 'seatCount': e['seatCount'],
+              if (e['lockedSeats'] != null) 'lockedSeats': e['lockedSeats'],
             });
         break;
       case 'room_music_state':
@@ -612,6 +615,194 @@ class _RoomScreenState extends State<RoomScreen> {
     final r = await guard(context, () => Api.patch('/api/rooms/${widget.roomId}', {'name': name, 'tags': tags}));
     final room = mapOf(r?['room']);
     if (room != null && mounted) setState(() => _room = {...?_room, ...room});
+  }
+
+  // ---------- Oda araçları (kayar pencere) ----------
+  bool get _isOwnerOrCohost => _myRole == 'owner' || _myRole == 'cohost';
+
+  Future<bool> _patchRoom(Map<String, dynamic> body) async {
+    final r = await guard(context, () => Api.patch('/api/rooms/${widget.roomId}', body));
+    final room = mapOf(r?['room']);
+    if (room != null && mounted) setState(() => _room = {...?_room, ...room});
+    return room != null;
+  }
+
+  Future<void> _micMode() async {
+    final n = await showMicModeSheet(context, current: _seatCount);
+    if (n == null || n == _seatCount || !mounted) return;
+    if (n < _seatCount && !await confirm(context, 'Koltuk sayısı $n olacak. Fazla koltuklardakiler dinleyiciye iner. Devam edilsin mi?', action: 'Değiştir')) return;
+    if (!mounted) return;
+    if (await _patchRoom({'seatCount': n}) && mounted) toast(context, 'Mikrofon modu: $n mikrofon.');
+  }
+
+  Future<void> _shareRoom() async {
+    final code = _room?['joinCode']?.toString();
+    final name = (_room?['name'] ?? widget.initialName).toString();
+    await Clipboard.setData(ClipboardData(text: '🎙 TR Live — "$name" odasına gel!${code != null ? '\nOda kodu: $code' : ''}'));
+    if (mounted) toast(context, 'Oda daveti kopyalandı. İstediğin yere yapıştırıp paylaş.');
+  }
+
+  Future<void> _effectsAndSound() async {
+    var on = GiftRibbonOverlay.effectsOn;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => AlertDialog(
+          title: const Text('Efekt ve Ses'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            SwitchListTile(
+              title: const Text('Hediye ve giriş efektleri'),
+              subtitle: const Text('Yalnızca bu cihazda geçerli.'),
+              value: on,
+              onChanged: (v) {
+                setS(() => on = v);
+                GiftRibbonOverlay.effectsOn = v;
+              },
+            ),
+          ]),
+          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Tamam'))],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _roomPassword() async {
+    final ctl = TextEditingController();
+    final locked = _room?['locked'] == true;
+    final res = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(locked ? 'Oda kilidi (açık)' : 'Oda kilidi'),
+        content: TextField(controller: ctl, obscureText: true, maxLength: 12, decoration: InputDecoration(labelText: locked ? 'Yeni şifre' : 'Oda şifresi (4-12 karakter)')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Vazgeç')),
+          if (locked) TextButton(onPressed: () => Navigator.pop(c, ''), child: const Text('Kilidi kaldır')),
+          FilledButton(onPressed: () => Navigator.pop(c, ctl.text.trim()), child: const Text('Kaydet')),
+        ],
+      ),
+    );
+    ctl.dispose();
+    if (res == null || !mounted) return;
+    if (res.isNotEmpty && res.length < 4) return toast(context, 'Şifre en az 4 karakter olmalı.', error: true);
+    if (res.isEmpty && !locked) return;
+    if (await _patchRoom({'password': res.isEmpty ? null : res}) && mounted) toast(context, res.isEmpty ? 'Oda kilidi kaldırıldı.' : 'Oda şifreyle kilitlendi.');
+  }
+
+  Future<void> _roomThemes() async {
+    var theme = (_room?['theme'] ?? 'default').toString();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => AlertDialog(
+          title: const Text('Özel Temalar'),
+          content: SingleChildScrollView(child: ThemePicker(value: theme, onChanged: (v) => setS(() => theme = v))),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Uygula')),
+          ],
+        ),
+      ),
+    );
+    if (ok == true && mounted) await _patchRoom({'theme': theme});
+  }
+
+  Future<void> _toggleHidden() async {
+    final hide = _room?['hidden'] != true;
+    if (!await confirm(context, hide ? 'Oda listeden gizlensin mi? Yalnızca davet koduyla girilebilir.' : 'Oda herkese açık listeye geri dönsün mü?', action: hide ? 'Gizle' : 'Göster')) return;
+    if (!mounted) return;
+    if (await _patchRoom({'hidden': hide}) && mounted) {
+      final code = _room?['joinCode']?.toString();
+      toast(context, hide ? 'Oda gizlendi.${code != null ? ' Kod: $code' : ''}' : 'Oda herkese açıldı.');
+    }
+  }
+
+  void _openTools() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheet) {
+        void run(VoidCallback f) {
+          Navigator.pop(sheet);
+          f();
+        }
+
+        void need(bool ok, VoidCallback f) {
+          if (ok) return run(f);
+          toast(context, 'Bu aracı kullanma yetkiniz yok.', error: true);
+        }
+
+        void soon(String what) {
+          Navigator.pop(sheet);
+          toast(context, '$what çok yakında.');
+        }
+
+        Widget feature(IconData icon, String label, VoidCallback onTap, {Color? color}) => InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    width: 66,
+                    height: 66,
+                    decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(22), border: Border.all(color: Colors.white12)),
+                    child: Icon(icon, size: 30, color: color ?? Colors.white70),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(label, textAlign: TextAlign.center, maxLines: 2, style: const TextStyle(fontSize: 12, color: Colors.white70, height: 1.15)),
+                ]),
+              ),
+            );
+
+        final chatOn = _room?['chatEnabled'] != false;
+        final hidden = _room?['hidden'] == true;
+        final locked = _room?['locked'] == true;
+        final pkFree = _pk == null || !['pending', 'active'].contains(_pk!['status']);
+        final tools = <Widget>[
+          feature(Icons.share, 'Yayını\nPaylaş', () => run(_shareRoom)),
+          feature(Icons.graphic_eq, 'Efekt\nve Ses', () => run(_effectsAndSound)),
+          feature(chatOn ? Icons.speaker_notes_off : Icons.chat, chatOn ? 'Sohbet\nYasağı' : 'Sohbeti\nAç', () => need(_isOwnerOrCohost, () => _patchRoom({'chatEnabled': !chatOn})), color: chatOn ? null : Colors.greenAccent),
+          feature(Icons.task_alt, 'Günlük\nGörev', () => soon('Günlük görevler')),
+          feature(Icons.library_music, 'Müzik\nSeç', () => run(_openMusic)),
+          feature(Icons.cleaning_services, 'Sohbet\nTemizleme', () => need(_isManager, _clearChat)),
+          feature(locked ? Icons.lock : Icons.lock_open, 'Oda\nKilidi', () => need(_myRole == 'owner', _roomPassword), color: locked ? Colors.orangeAccent : null),
+          feature(Icons.palette, 'Özel\nTemalar', () => need(_isOwnerOrCohost, _roomThemes)),
+          feature(hidden ? Icons.visibility_off : Icons.visibility, 'Oda\nGizleme', () => need(_myRole == 'owner', _toggleHidden), color: hidden ? Colors.orangeAccent : null),
+          feature(Icons.mic_external_on, 'Mikrofon\nModu', () => need(_isOwnerOrCohost, _micMode)),
+          feature(Icons.settings, 'Oda\nAyarları', () => need(_isOwnerOrCohost, _roomSettings)),
+        ];
+        return DraggableScrollableSheet(
+          initialChildSize: 0.62,
+          minChildSize: 0.3,
+          maxChildSize: 0.92,
+          expand: false,
+          builder: (_, scroll) => Container(
+            decoration: const BoxDecoration(color: Color(0xFF1B1B1F), borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+            child: ListView(controller: scroll, padding: const EdgeInsets.fromLTRB(16, 10, 16, 24), children: [
+              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+              Row(children: [
+                const Expanded(child: Text('İnteraktif Özellikler', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                IconButton(onPressed: () => Navigator.pop(sheet), icon: const Icon(Icons.close)),
+              ]),
+              Wrap(spacing: 18, runSpacing: 4, children: [
+                if (_myRole == 'owner') feature(Icons.sports_mma, 'PK', () => pkFree ? run(() => showPkChallengeSheet(context, roomId: widget.roomId)) : toast(context, 'Zaten bir PK sürüyor.', error: true), color: Colors.redAccent),
+                feature(Icons.casino, 'Oyunlar\n(Ludo)', () => run(_openGames), color: Colors.lightBlueAccent),
+                feature(Icons.redeem, 'Şanslı\nÇanta', () => soon('Şanslı çanta'), color: Colors.redAccent),
+              ]),
+              const SizedBox(height: 10),
+              const Text('Temel Araçlar', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              LayoutBuilder(builder: (context, box) {
+                final per = (box.maxWidth / 84).floor().clamp(3, 6);
+                final w = box.maxWidth / per;
+                return Wrap(runSpacing: 6, children: [for (final t in tools) SizedBox(width: w, child: t)]);
+              }),
+            ]),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _roomSettings() async {
@@ -923,14 +1114,16 @@ class _RoomScreenState extends State<RoomScreen> {
   // ---------- Arayüz ----------
   Widget _seatTile(int index, Map<String, dynamic>? m) {
     if (m == null) {
-      final reserved = index == 0;
+      final reserved = index == 0 && _myRole != 'owner';
       final locked = _lockedSeats.contains(index);
       return InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: reserved
             ? null
             : () {
-                if (_canSeatManage) {
+                if (index == 0) {
+                  _takeMic(0); // oda sahibi kendi koltuğuna geri döner
+                } else if (_canSeatManage) {
                   showModalBottomSheet<void>(
                     context: context,
                     showDragHandle: true,
@@ -994,15 +1187,28 @@ class _RoomScreenState extends State<RoomScreen> {
       for (final m in _members)
         if (m['seatIndex'] != null) (m['seatIndex'] as num).toInt(): m,
     };
-    final w = MediaQuery.sizeOf(context).width;
-    final cols = w < 600 ? (_seatCount <= 5 ? 3 : 4) : (w < 900 ? (_seatCount <= 5 ? 5 : 6) : (_seatCount <= 5 ? 5 : 8));
-    return GridView.count(
-      crossAxisCount: cols,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(12),
-      childAspectRatio: 0.95,
-      children: [for (var i = 0; i < _seatCount; i++) _seatTile(i, bySeat[i])],
+    final rows = seatRows(_seatCount);
+    final maxCols = rows.reduce((a, b) => a > b ? a : b);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      child: LayoutBuilder(builder: (context, box) {
+        // Her koltuk aynı genişlikte; kısa satırlar ortalanır (Figma yerleşimi).
+        final cw = (box.maxWidth / maxCols).clamp(0.0, 120.0);
+        var next = 0;
+        return Column(children: [
+          for (final count in rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (var k = 0; k < count; k++)
+                  Builder(builder: (_) {
+                    final i = next++;
+                    return SizedBox(width: cw, child: _seatTile(i, bySeat[i]));
+                  }),
+              ]),
+            ),
+        ]);
+      }),
     );
   }
 
@@ -1068,10 +1274,7 @@ class _RoomScreenState extends State<RoomScreen> {
           else
             FilledButton.icon(onPressed: () => _takeMic(), icon: const Icon(Icons.mic), label: const Text('Mikrofona çık')),
           const Spacer(),
-          if (_myRole == 'owner' && (_pk == null || !['pending', 'active'].contains(_pk!['status'])))
-            IconButton(tooltip: 'PK başlat', onPressed: () => showPkChallengeSheet(context, roomId: widget.roomId), icon: const Icon(Icons.sports_mma)),
-          IconButton(tooltip: 'Oyunlar (Ludo)', onPressed: _openGames, icon: const Icon(Icons.casino)),
-          IconButton(tooltip: 'Müzik', onPressed: _openMusic, icon: const Icon(Icons.library_music)),
+          IconButton(tooltip: 'Oda araçları', onPressed: _openTools, icon: const Icon(Icons.apps_rounded)),
           IconButton.filled(tooltip: 'Hediye gönder', onPressed: _members.isEmpty ? null : () => _openGifts(), icon: const Icon(Icons.card_giftcard)),
         ]),
       ),

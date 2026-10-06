@@ -805,6 +805,18 @@ test('kalıcı oda: bir kez kur, tek adımda aç, ad/etiket sabit, yöneticiler 
   // oda içinden ad/etiket değişir ve kalıcı olur
   ok(await api('PATCH', `/api/rooms/${roomId1}`, { token: own.token, body: { name: 'Yeni Ad', tags: ['karaoke'] } }));
   status(await api('PATCH', `/api/rooms/${roomId1}`, { token: mod.token, body: { name: 'Hack' } }), 403, 'moderatör adı değiştiremez');
+  // mikrofon modu: koltuk sayısı değişir, taşan koltuktakiler iner, oda sahibi 0. koltuğa geri dönebilir
+  ok(await api('PATCH', `/api/rooms/${roomId1}`, { token: own.token, body: { seatCount: 12 } }));
+  ok(await api('POST', `/api/rooms/${roomId1}/mic/take`, { token: mod.token, body: { seatIndex: 10 } }));
+  ok(await api('POST', `/api/rooms/${roomId1}/mic/take`, { token: own.token, body: { seatIndex: 3 } }));
+  ok(await api('POST', `/api/rooms/${roomId1}/mic/take`, { token: own.token, body: { seatIndex: 0 } }));
+  ok(await api('PATCH', `/api/rooms/${roomId1}`, { token: own.token, body: { seatCount: 5 } }));
+  const after = (await api('GET', `/api/rooms/${roomId1}/members`, { token: own.token })).body.members;
+  assert.equal(after.find((x) => x.userId === mod.id).seatIndex, null, 'taşan koltuk boşalır');
+  assert.equal(after.find((x) => x.userId === own.id).seatIndex, 0);
+  status(await api('PATCH', `/api/rooms/${roomId1}`, { token: own.token, body: { seatCount: 7 } }), 400, 'desteklenmeyen koltuk sayısı');
+  status(await api('PATCH', `/api/rooms/${roomId1}`, { token: mod.token, body: { seatCount: 8 } }), 403, 'moderatör modu değiştiremez');
+  ok(await api('PATCH', `/api/rooms/${roomId1}`, { token: own.token, body: { seatCount: 9 } }));
   // kapat ve tek adımda yeniden aç
   ok(await api('POST', `/api/rooms/${roomId1}/close`, { token: own.token }));
   const mine = (await api('GET', '/api/rooms/mine', { token: own.token })).body.rooms.audio;
