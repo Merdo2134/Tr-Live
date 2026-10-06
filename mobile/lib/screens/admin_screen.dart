@@ -419,6 +419,73 @@ class _DealersTabState extends State<_DealersTab> {
 class _CatalogTab extends StatelessWidget {
   const _CatalogTab();
 
+  Future<void> _giftForm(BuildContext context) async {
+    final name = TextEditingController();
+    final price = TextEditingController();
+    final icon = TextEditingController();
+    final anim = TextEditingController();
+    var format = 'auto';
+    var category = 'popular';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => AlertDialog(
+          title: const Text('Hediye ekle'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(controller: name, decoration: const InputDecoration(labelText: 'Ad')),
+              TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Coin fiyatı')),
+              TextField(controller: icon, decoration: const InputDecoration(labelText: 'İkon adresi (https)')),
+              TextField(controller: anim, decoration: const InputDecoration(labelText: 'Animasyon adresi (https, isteğe bağlı)')),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: format,
+                decoration: const InputDecoration(labelText: 'Animasyon biçimi'),
+                items: const [
+                  DropdownMenuItem(value: 'auto', child: Text('Otomatik (uzantıdan)')),
+                  DropdownMenuItem(value: 'mp4', child: Text('Şeffaf MP4 (VAP)')),
+                  DropdownMenuItem(value: 'lottie', child: Text('Lottie (.json)')),
+                  DropdownMenuItem(value: 'webp', child: Text('WebP / GIF')),
+                ],
+                onChanged: (v) => setS(() => format = v ?? 'auto'),
+              ),
+              DropdownButtonFormField<String>(
+                value: category,
+                decoration: const InputDecoration(labelText: 'Hediye sekmesi'),
+                items: const [
+                  DropdownMenuItem(value: 'popular', child: Text('Popüler')),
+                  DropdownMenuItem(value: 'event', child: Text('Etkinlik')),
+                  DropdownMenuItem(value: 'private', child: Text('Kişiye Özel')),
+                  DropdownMenuItem(value: 'vip', child: Text('Vip')),
+                ],
+                onChanged: (v) => setS(() => category = v ?? 'popular'),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Ekle')),
+          ],
+        ),
+      ),
+    );
+    final body = {
+      'name': name.text.trim(),
+      'coinPrice': price.text.trim(),
+      'iconUrl': icon.text.trim().isEmpty ? null : icon.text.trim(),
+      'animationUrl': anim.text.trim().isEmpty ? null : anim.text.trim(),
+      if (format != 'auto') 'animationFormat': format,
+      'category': category,
+    };
+    name.dispose();
+    price.dispose();
+    icon.dispose();
+    anim.dispose();
+    if (ok != true || !context.mounted) return;
+    final r = await guard(context, () => Api.post('/api/admin/gifts', body));
+    if (r != null && context.mounted) toast(context, 'Hediye eklendi. Kimlik: ${r['id']}');
+  }
+
   Future<void> _create(BuildContext context, String title, List<String> labels, String path, Map<String, dynamic> Function(Map<String, String>) body) async {
     final f = await formDialog(context, title, labels);
     if (f == null || !context.mounted) return;
@@ -434,8 +501,7 @@ class _CatalogTab extends StatelessWidget {
       FilledButton.icon(
         icon: const Icon(Icons.card_giftcard),
         label: const Text('Hediye ekle'),
-        onPressed: () => _create(context, 'Hediye ekle', ['Ad', 'Coin fiyatı', 'İkon adresi', 'Animasyon adresi'], '/api/admin/gifts',
-            (f) => {'name': f['Ad'], 'coinPrice': f['Coin fiyatı'], 'iconUrl': f['İkon adresi'], 'animationUrl': f['Animasyon adresi']}),
+        onPressed: () => _giftForm(context),
       ),
       const SizedBox(height: 8),
       FilledButton.icon(

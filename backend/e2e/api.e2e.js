@@ -199,6 +199,28 @@ test('hediye: tekli, KENDİNE hediye, eşit dağıtım, bakiye/muhasebe doğrulu
   ok(wip);
 });
 
+test('hediye: çoklu alıcı (her birine tam adet), Tüm Koltuk / Tüm Oda, sekmeler', { skip, timeout: 60000 }, async () => {
+  const list = await api('GET', '/api/gifts', { token: U.a.token });
+  ok(list);
+  assert.ok(list.body.globalMinCoins);
+  assert.ok(list.body.gifts.every((g) => ['event', 'popular', 'private', 'vip'].includes(g.category)));
+  const a0 = await coins(U.a);
+  const each = await api('POST', `/api/rooms/${roomId}/gifts/send`, { token: U.a.token, body: { giftId: rose.id, quantity: 2, distribution: 'each', recipientIds: [U.b.id, U.c.id] } });
+  ok(each, 'each');
+  assert.equal(each.body.totalCoins, '40', 'adet × kişi');
+  assert.equal(await coins(U.a), a0 - 40n);
+  status(await api('POST', `/api/rooms/${roomId}/gifts/send`, { token: U.a.token, body: { giftId: rose.id, quantity: 1, distribution: 'each', recipientIds: [] } }), 400, 'boş alıcı listesi');
+  status(await api('POST', `/api/rooms/${roomId}/gifts/send`, { token: U.a.token, body: { giftId: rose.id, quantity: 1, distribution: 'each', recipientIds: ['00000000-0000-4000-8000-000000000000'] } }), 400, 'odada olmayan alıcı');
+  const mic = await api('POST', `/api/rooms/${roomId}/gifts/send`, { token: U.a.token, body: { giftId: rose.id, quantity: 1, distribution: 'all_mic' } });
+  ok(mic, 'all_mic');
+  assert.ok(mic.body.transactions.every((t) => t.receiverId !== U.a.id), 'kendine gitmez');
+  const all = await api('POST', `/api/rooms/${roomId}/gifts/send`, { token: U.a.token, body: { giftId: rose.id, quantity: 1, distribution: 'all_room' } });
+  ok(all, 'all_room');
+  assert.ok(all.body.transactions.length >= 2);
+  assert.ok(all.body.transactions.every((t) => t.receiverId !== U.a.id));
+});
+
+
 test('moderasyon: yetki, mikrofon kapatma, atma, engelleme, rol, WIP dokunulmazlığı', { skip, timeout: 60000 }, async () => {
   status(await api('POST', `/api/rooms/${roomId}/members/${U.a.id}/kick`, { token: U.b.token }), 403, 'üye sahibi atamaz');
   ok(await api('POST', `/api/rooms/${roomId}/members/${U.b.id}/mic-off`, { token: U.a.token }), 'mic-off');

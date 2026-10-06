@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_vap_kit/flutter_vap_kit.dart';
 import 'package:lottie/lottie.dart';
 import '../services/api.dart';
 import '../services/socket_service.dart';
@@ -25,6 +26,11 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   StreamSubscription? _sub;
   Timer? _timer;
   Timer? _entranceTimer;
+  // Tam ekran hediye animasyonu (şeffaf mp4 = Tencent VAP, lottie, webp/gif). Sırayla, tek tek oynar.
+  final List<Map<String, dynamic>> _anims = [];
+  Map<String, dynamic>? _anim;
+  int _animSeq = 0;
+  Timer? _animTimer;
 
   @override
   void initState() {
@@ -37,6 +43,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     _sub?.cancel();
     _timer?.cancel();
     _entranceTimer?.cancel();
+    _animTimer?.cancel();
     super.dispose();
   }
 
@@ -48,11 +55,60 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       if (widget.roomId != null && e['roomId'] == widget.roomId) return;
       _enqueue(e);
     } else if (type == 'room_gift' && widget.roomId != null && e['roomId'] == widget.roomId) {
+      _enqueueAnim(mapOf(e['gift']));
       _enqueue(e);
     } else if (type == 'room_member_joined' && widget.roomId != null && e['roomId'] == widget.roomId) {
       final effect = mapOf(e['entranceEffect']);
       if (effect != null) _showEntrance(e, effect);
     }
+  }
+
+  void _enqueueAnim(Map<String, dynamic>? gift) {
+    final url = Api.absoluteUrl(gift?['animationUrl'] as String?);
+    if (gift == null || url == null) return;
+    if (_anims.length < 5) _anims.add({'url': url, 'format': (gift['animationFormat'] ?? '').toString()});
+    if (_anim == null) _nextAnim();
+  }
+
+  void _nextAnim() {
+    _animTimer?.cancel();
+    if (!mounted) return;
+    if (_anims.isEmpty) {
+      setState(() => _anim = null);
+      return;
+    }
+    final a = _anims.removeAt(0);
+    setState(() => _anim = {...a, 'seq': ++_animSeq});
+    // Güvenlik süresi: oynatıcı bitiş bildirmese de ekran açık kalmasın.
+    final still = a['format'] != 'mp4' && a['format'] != 'lottie' && !(a['url'] as String).toLowerCase().split('?').first.endsWith('.mp4') && !(a['url'] as String).toLowerCase().split('?').first.endsWith('.json');
+    _animTimer = Timer(Duration(seconds: still ? 4 : 15), _nextAnim);
+  }
+
+  Widget _buildAnim() {
+    final a = _anim!;
+    final url = a['url'] as String;
+    final format = a['format'] as String;
+    final key = ValueKey(a['seq']);
+    final isLottie = format == 'lottie' || url.toLowerCase().split('?').first.endsWith('.json');
+    final isVideo = format == 'mp4' || url.toLowerCase().split('?').first.endsWith('.mp4');
+    Widget child;
+    if (isVideo) {
+      child = VapPlayer.network(url, key: key, fit: BoxFit.contain, onComplete: _nextAnim);
+    } else if (isLottie) {
+      child = Lottie.network(
+        url,
+        key: key,
+        repeat: false,
+        onLoaded: (c) {
+          _animTimer?.cancel();
+          _animTimer = Timer(c.duration + const Duration(milliseconds: 300), _nextAnim);
+        },
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    } else {
+      child = Image.network(url, key: key, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const SizedBox.shrink());
+    }
+    return Positioned.fill(child: IgnorePointer(child: child));
   }
 
   void _enqueue(Map<String, dynamic> e) {
@@ -85,6 +141,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     final top = MediaQuery.of(context).padding.top + 8;
     return Stack(children: [
       widget.child,
+      if (_anim != null) _buildAnim(),
       if (_entrance != null) _buildEntrance(top),
       if (_current != null) Positioned(top: top, left: 12, right: 12, child: _buildRibbon(_current!)),
     ]);

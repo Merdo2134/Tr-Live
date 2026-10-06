@@ -15,22 +15,25 @@ import { loadPublicRows } from '../services/users.js';
 export const router = Router();
 router.use(requireAuth);
 
-const DISTRIBUTIONS = ['single', 'equal', 'random', 'selected'];
+// single: tek kişi · equal/random/selected: adet kişiler arasında bölünür · each: seçilen HER kişiye tam adet
+// all_mic: mikrofondaki herkese (kendin hariç) tam adet · all_room: odadaki herkese (kendin hariç) tam adet
+const DISTRIBUTIONS = ['single', 'equal', 'random', 'selected', 'each', 'all_mic', 'all_room'];
+const MAX_BULK_RECIPIENTS = 50;
 const giftJson = (g) => ({
   id: g.id, name: g.name, coinPrice: String(g.coin_price), iconUrl: g.icon_url, animationUrl: g.animation_url,
-  animationFormat: g.animation_format, hasAlpha: g.has_alpha,
+  animationFormat: g.animation_format, hasAlpha: g.has_alpha, category: g.category ?? 'popular',
 });
 
 router.get('/gifts', async (req, res) => {
   const r = await query(`SELECT * FROM gifts WHERE is_active = TRUE ORDER BY coin_price`);
-  res.json({ gifts: r.rows.map(giftJson) });
+  res.json({ gifts: r.rows.map(giftJson), globalMinCoins: String(config.globalGiftMinCoins) });
 });
 
 // Uygulama açılışında şeridi doldurmak için son global hediyeler.
 router.get('/gifts/global/recent', async (req, res) => {
   const r = await query(
     `SELECT e.id, e.coin_amount, e.display_level, e.created_at, e.sender_id, e.receiver_id, e.room_id,
-            g.name AS gift_name, g.icon_url, g.animation_url, gt.quantity
+            g.name AS gift_name, g.icon_url, g.animation_url, g.animation_format, gt.quantity
      FROM global_gift_events e
      JOIN gift_transactions gt ON gt.id = e.gift_transaction_id
      JOIN gifts g ON g.id = gt.gift_id
@@ -41,7 +44,7 @@ router.get('/gifts/global/recent', async (req, res) => {
   res.json({
     events: r.rows.map((x) => ({
       id: x.id, roomId: x.room_id, coinAmount: String(x.coin_amount), displayLevel: x.display_level, quantity: x.quantity, createdAt: x.created_at,
-      gift: { name: x.gift_name, iconUrl: x.icon_url, animationUrl: x.animation_url },
+      gift: { name: x.gift_name, iconUrl: x.icon_url, animationUrl: x.animation_url, animationFormat: x.animation_format },
       sender: publicUser(users.get(x.sender_id)), receiver: publicUser(users.get(x.receiver_id)),
     })),
   });
@@ -57,6 +60,8 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
   const distribution = oneOf(req.body?.distribution ?? 'single', DISTRIBUTIONS, 'Dağıtım tipi');
   const recipientId = distribution === 'single' ? uuid(req.body?.recipientId, 'Alıcı') : null;
   const selectedUserIds = distribution === 'selected' ? uuidArray(req.body?.selectedUserIds, 'Seçilen kullanıcılar', 20) : [];
+  const eachIds = distribution === 'each' ? uuidArray(req.body?.recipientIds, 'Alıcılar', MAX_BULK_RECIPIENTS) : [];
+  if (distribution === 'each' && !eachIds.length) throw fail('En az bir alıcı seçin.');
   const senderId = req.user.id;
 
   const result = await tx(async (c) => {
@@ -76,11 +81,22 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
     if (distribution === 'single') {
       if (!members.some((m) => m.user_id === recipientId)) throw fail('Alıcı odada değil.');
       allocation = [{ userId: recipientId, quantity }];
+    } else if (distribution === 'each') {
+      const inRoom = new Set(members.map((m) => m.user_id));
+      if (!eachIds.every((id) => inRoom.has(id))) throw fail('Seçilen alıcılardan biri odada değil.');
+      allocation = eachIds.map((userId) => ({ userId, quantity }));
+    } else if (distribution === 'all_mic' || distribution === 'all_room') {
+      const targets = members.filter((m) => m.user_id !== senderId && (distribution === 'all_room' || m.microphone === true));
+      if (!targets.length) throw fail(distribution === 'all_mic' ? 'Mikrofonda başka kimse yok.' : 'Odada başka kimse yok.');
+      if (targets.length > MAX_BULK_RECIPIENTS) throw fail(`Toplu hediye en fazla ${MAX_BULK_RECIPIENTS} kişiye gönderilebilir.`);
+      allocation = targets.map((m) => ({ userId: m.user_id, quantity }));
     } else {
       allocation = distributeGift(members, quantity, distribution, selectedUserIds);
     }
 
-    const totalCoins = BigInt(gift.coin_price) * BigInt(quantity);
+    // Toplam tutar, dağıtılan toplam adede göre hesaplanır (bölünen modlarda = adet, "herkese" modlarında = adet × kişi).
+    const totalUnits = allocation.reduce((s, a) => s + BigInt(a.quantity), 0n);
+    const totalCoins = BigInt(gift.coin_price) * totalUnits;
     // Kilitlenmeyi (deadlock) önlemek için ilgili tüm kullanıcı satırları TEK sorguda, sıralı kilitlenir.
     const lockIds = [...new Set([senderId, ...allocation.map((a) => a.userId)])];
     const locked = (await c.query(`SELECT id, coins FROM users WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, [lockIds])).rows;
@@ -154,7 +170,10 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
   // ---- Olaylar (işlem başarıyla bittikten sonra) ----
   const userRows = await loadPublicRows([...new Set([senderId, ...result.allocation.map((a) => a.userId)])]);
   const byId = new Map(userRows.map((u) => [u.id, u]));
-  const giftInfo = { id: result.gift.id, name: result.gift.name, iconUrl: result.gift.icon_url, animationUrl: result.gift.animation_url };
+  const giftInfo = {
+    id: result.gift.id, name: result.gift.name, iconUrl: result.gift.icon_url, animationUrl: result.gift.animation_url,
+    animationFormat: result.gift.animation_format,
+  };
   const sender = publicUser(byId.get(senderId));
   const receivers = result.transactions.map((t) => ({
     user: publicUser(byId.get(t.receiverId)), quantity: t.quantity, coinAmount: t.coinAmount,

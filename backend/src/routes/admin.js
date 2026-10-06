@@ -273,10 +273,11 @@ router.post('/users/:userId/inventory', async (req, res) => {
 // ---------------- Katalog (yalnızca yönetici) ----------------
 router.post('/gifts', requireSuperAdmin, async (req, res) => {
   const r = await query(
-    `INSERT INTO gifts(name, coin_price, icon_url, animation_url, animation_format, has_alpha) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+    `INSERT INTO gifts(name, coin_price, icon_url, animation_url, animation_format, has_alpha, category) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [text(req.body?.name, 'Ad', { min: 2, max: 80, required: true }), bigAmount(req.body?.coinPrice, 'Fiyat').toString(),
       httpsUrl(req.body?.iconUrl, 'İkon adresi'), httpsUrl(req.body?.animationUrl, 'Animasyon adresi'),
-      oneOf(req.body?.animationFormat ?? 'lottie', ['lottie', 'svga', 'mp4', 'webp'], 'Animasyon biçimi'), req.body?.hasAlpha !== false],
+      oneOf(req.body?.animationFormat ?? (/\.mp4(\?|$)/i.test(String(req.body?.animationUrl ?? '')) ? 'mp4' : 'lottie'), ['lottie', 'svga', 'mp4', 'webp'], 'Animasyon biçimi'), req.body?.hasAlpha !== false,
+      oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip'], 'Hediye sekmesi')],
   );
   res.status(201).json({ id: r.rows[0].id });
 });
