@@ -131,7 +131,7 @@ class WipChip extends StatelessWidget {
       margin: const EdgeInsets.only(left: 6),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(color: color.withValues(alpha: 0.2), border: Border.all(color: color), borderRadius: BorderRadius.circular(8)),
-      child: Text('WIP $level', style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+      child: Text('WIP $level', style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.bold)),
     );
   }
 }

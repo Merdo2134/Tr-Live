@@ -340,7 +340,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 decoration: BoxDecoration(color: mine ? Colors.pinkAccent.shade400 : Colors.white12, borderRadius: BorderRadius.circular(16)),
                                 child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                                   Text((m['text'] ?? '').toString()),
-                                  Text(_time(m['createdAt']), style: const TextStyle(fontSize: 10, color: Colors.white54)),
+                                  Text(_time(m['createdAt']), style: const TextStyle(fontSize: 11, color: Colors.white54)),
                                 ]),
                               ),
                             );

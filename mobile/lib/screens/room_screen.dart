@@ -928,7 +928,7 @@ class _RoomScreenState extends State<RoomScreen> {
         ),
       Expanded(
         child: _messages.isEmpty
-            ? const Center(child: Text('Henüz mesaj yok.', style: TextStyle(color: Colors.white38)))
+            ? const Center(child: Text('Henüz mesaj yok.', style: TextStyle(color: Colors.white54)))
             : ListView.builder(
                 controller: _chatScroll,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -968,7 +968,7 @@ class _RoomScreenState extends State<RoomScreen> {
           ]),
         )
       else
-        const Padding(padding: EdgeInsets.all(8), child: Text('Bu odada yazılı sohbet kapalı.', style: TextStyle(color: Colors.white38))),
+        const Padding(padding: EdgeInsets.all(8), child: Text('Bu odada yazılı sohbet kapalı.', style: TextStyle(color: Colors.white54))),
     ]);
   }
 
@@ -1176,7 +1176,7 @@ class _RoomScreenState extends State<RoomScreen> {
             margin: const EdgeInsets.only(top: 2),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
             decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(8)),
-            child: Text('💎 ${fmtNumber(_scores[userId] ?? 0)}', style: const TextStyle(fontSize: 10, color: Colors.amberAccent)),
+            child: Text('💎 ${fmtNumber(_scores[userId] ?? 0)}', style: const TextStyle(fontSize: 11, color: Colors.amberAccent)),
           ),
       ]),
     );
@@ -1228,7 +1228,7 @@ class _RoomScreenState extends State<RoomScreen> {
                 width: 56,
                 child: Column(children: [
                   UserAvatar(user: mapOf(m['user']), radius: 18),
-                  Text((mapOf(m['user'])?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
+                  Text((mapOf(m['user'])?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
                 ]),
               ),
             ),

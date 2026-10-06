@@ -79,7 +79,7 @@ class _PkBannerState extends State<PkBanner> {
               [for (final t in listOf(x['top'])) (mapOf(t['user'])?['displayName'] ?? '').toString()].take(3).join(' · '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10, color: Colors.white54),
+              style: const TextStyle(fontSize: 11, color: Colors.white54),
             ),
           ]),
         );

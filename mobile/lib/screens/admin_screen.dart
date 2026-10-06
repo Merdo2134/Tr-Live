@@ -584,7 +584,7 @@ class _ReportsTabState extends State<_ReportsTab> {
                         Text('${r['kind']} · ${r['reason']}', style: Theme.of(context).textTheme.titleSmall),
                         Text('Şikâyet eden: @${r['reporter']}${r['target'] != null ? '  →  @${r['target']}' : ''}'),
                         if ((r['details'] ?? '').toString().isNotEmpty) Text(r['details'].toString(), style: const TextStyle(color: Colors.white70)),
-                        if (r['roomId'] != null) Text('Oda: ${r['roomId']}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                        if (r['roomId'] != null) Text('Oda: ${r['roomId']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
                         const SizedBox(height: 8),
                         Wrap(spacing: 8, children: [
                           FilledButton.tonal(onPressed: () => _resolve(r, 'resolved'), child: const Text('Çözüldü')),

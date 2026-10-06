@@ -12,7 +12,29 @@ class Pal {
   static const purple = Color(0xFFB45CFF);
   static const red = Color(0xFFE5483D);
   static const text = Color(0xFFEAF4FA);
-  static const textDim = Color(0xFF6F8CA3);
+  static const textDim = Color(0xFF8AA5BB); // koyu zeminlerde en az 4.5:1 kontrast (WCAG AA)
+}
+
+/// Material 3 yazı ölçeği (sp / satır yüksekliği). Android'in standardı; sosyal uygulamalarda gövde 14-16, etiket 11-12, başlık 16-22 kullanılır.
+TextTheme _textTheme() {
+  TextStyle t(double size, double line, FontWeight w, [double spacing = 0]) => TextStyle(fontSize: size, height: line / size, fontWeight: w, letterSpacing: spacing, color: Pal.text);
+  return TextTheme(
+    displayLarge: t(57, 64, FontWeight.w400, -0.25),
+    displayMedium: t(45, 52, FontWeight.w400),
+    displaySmall: t(36, 44, FontWeight.w400),
+    headlineLarge: t(32, 40, FontWeight.w600),
+    headlineMedium: t(28, 36, FontWeight.w600),
+    headlineSmall: t(24, 32, FontWeight.w600),
+    titleLarge: t(22, 28, FontWeight.w700),
+    titleMedium: t(16, 24, FontWeight.w600, 0.15),
+    titleSmall: t(14, 20, FontWeight.w600, 0.1),
+    bodyLarge: t(16, 24, FontWeight.w400, 0.5),
+    bodyMedium: t(14, 20, FontWeight.w400, 0.25),
+    bodySmall: t(12, 16, FontWeight.w400, 0.4),
+    labelLarge: t(14, 20, FontWeight.w600, 0.1),
+    labelMedium: t(12, 16, FontWeight.w600, 0.5),
+    labelSmall: t(11, 16, FontWeight.w600, 0.5),
+  );
 }
 
 ThemeData buildAppTheme() {
@@ -33,6 +55,10 @@ ThemeData buildAppTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
+    textTheme: _textTheme(),
+    // Dokunma hedefi en az 48x48 dp (Android erişilebilirlik standardı).
+    materialTapTargetSize: MaterialTapTargetSize.padded,
+    visualDensity: VisualDensity.standard,
     scaffoldBackgroundColor: Pal.bg,
     canvasColor: Pal.bg,
     dividerColor: Pal.outline.withValues(alpha: 0.5),
@@ -68,10 +94,10 @@ ThemeData buildAppTheme() {
       hintStyle: const TextStyle(color: Pal.textDim),
     ),
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(backgroundColor: Pal.cyan, foregroundColor: const Color(0xFF00212A), shape: shape, minimumSize: const Size(64, 46)),
+      style: FilledButton.styleFrom(backgroundColor: Pal.cyan, foregroundColor: const Color(0xFF00212A), shape: shape, minimumSize: const Size(64, 48)),
     ),
-    outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(foregroundColor: Pal.cyan, side: const BorderSide(color: Pal.outline), shape: shape, minimumSize: const Size(64, 46))),
-    textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(foregroundColor: Pal.cyan)),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(foregroundColor: Pal.cyan, side: const BorderSide(color: Pal.outline), shape: shape, minimumSize: const Size(64, 48))),
+    textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(foregroundColor: Pal.cyan, minimumSize: const Size(48, 48))),
     floatingActionButtonTheme: FloatingActionButtonThemeData(backgroundColor: Pal.cyan, foregroundColor: const Color(0xFF00212A), shape: shape),
     chipTheme: ChipThemeData(backgroundColor: Pal.surface, side: const BorderSide(color: Pal.outline), labelStyle: const TextStyle(color: Pal.text), shape: const StadiumBorder()),
     listTileTheme: const ListTileThemeData(iconColor: Pal.cyan, textColor: Pal.text),
@@ -88,6 +114,13 @@ class Resp {
   /// Oda kartı sütunu: dar telefon 2, geniş telefon/katlanabilir 3, tablet 4-5.
   static int roomColumns(double w) => w < 600 ? 2 : (w < 840 ? 3 : (w < 1100 ? 4 : 5));
 
+  // Android pencere boyutu sınıfları (dp): compact < 600, medium 600-839, expanded 840-1199, large ≥ 1200.
+  static bool isCompact(double w) => w < 600;
+  static bool isMedium(double w) => w >= 600 && w < 840;
+
+  /// Ekran kenar boşluğu: telefonda 16, tablette 24, geniş ekranda 32 (Material düzen ızgarası).
+  static double margin(double w) => w < 600 ? 16 : (w < 1200 ? 24 : 32);
+
   /// Uygulama içeriğinin en geniş hâli; geniş ekranlarda ortalanır.
   static const maxContent = 1200.0;
 }
@@ -95,7 +128,7 @@ class Resp {
 /// Tüm uygulamayı saran kap: yazı ölçeğini sınırlar, geniş ekranda içeriği ortalar.
 Widget appFrame(BuildContext context, Widget? child) {
   final mq = MediaQuery.of(context);
-  final scale = mq.textScaler.clamp(minScaleFactor: 0.85, maxScaleFactor: 1.25);
+  final scale = mq.textScaler.clamp(minScaleFactor: 0.85, maxScaleFactor: 1.3);
   return MediaQuery(
     data: mq.copyWith(textScaler: scale),
     child: ColoredBox(

@@ -68,7 +68,7 @@ class ThemePicker extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 2),
-            Text(t.label, style: const TextStyle(fontSize: 10)),
+            Text(t.label, style: const TextStyle(fontSize: 11)),
           ]),
         ),
     ]);

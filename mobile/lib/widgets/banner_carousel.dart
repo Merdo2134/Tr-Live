@@ -58,7 +58,7 @@ class _BannerCarouselState extends State<BannerCarousel> {
   Widget build(BuildContext context) {
     if (_items.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+      padding: EdgeInsets.fromLTRB(Resp.margin(MediaQuery.sizeOf(context).width) - 6, 0, Resp.margin(MediaQuery.sizeOf(context).width) - 6, 10),
       child: AspectRatio(
         aspectRatio: 2.4,
         child: ClipRRect(

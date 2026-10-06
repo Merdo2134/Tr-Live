@@ -94,7 +94,7 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(track?['title']?.toString() ?? 'Şu an müzik çalmıyor', style: Theme.of(context).textTheme.titleMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
                 if ((track?['artist'] ?? '').toString().isNotEmpty) Text(track!['artist'].toString(), style: const TextStyle(color: Colors.white60)),
-                Text(status == 'playing' ? 'Çalıyor' : status == 'paused' ? 'Duraklatıldı' : 'Durdu', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                Text(status == 'playing' ? 'Çalıyor' : status == 'paused' ? 'Duraklatıldı' : 'Durdu', style: const TextStyle(color: Colors.white54, fontSize: 12)),
               ]),
             ),
           ]),

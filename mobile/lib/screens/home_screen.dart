@@ -453,7 +453,7 @@ class RoomsTabState extends State<RoomsTab> {
                 slivers: [
                   const SliverToBoxAdapter(child: BannerCarousel()),
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 96),
+                    padding: EdgeInsets.fromLTRB(Resp.margin(MediaQuery.sizeOf(context).width) - 6, 0, Resp.margin(MediaQuery.sizeOf(context).width) - 6, 96),
                     sliver: SliverGrid(
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 0.78),
                       delegate: SliverChildBuilderDelegate(

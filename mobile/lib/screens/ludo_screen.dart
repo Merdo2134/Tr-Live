@@ -374,7 +374,7 @@ class _LudoScreenState extends State<LudoScreen> with SingleTickerProviderStateM
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.casino, size: 56, color: Colors.white38),
+          const Icon(Icons.casino, size: 56, color: Colors.white54),
           const SizedBox(height: 12),
           Text(message ?? 'Odada açık oyun yok.'),
           const SizedBox(height: 12),
