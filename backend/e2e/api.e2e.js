@@ -846,6 +846,9 @@ test('kalıcı oda: bir kez kur, tek adımda aç, ad/etiket sabit, yöneticiler 
   const reopen = await api('POST', '/api/rooms', { token: own.token, body: { name: 'Yok Sayılır' } });
   status(reopen, 201);
   assert.equal(reopen.body.room.name, 'Yeni Ad'); assert.equal(reopen.body.room.seatCount, 9);
+  // heartbeat: üye canlı tutulur, üye olmayan 403, kapalı oda 404
+  ok(await api('POST', `/api/rooms/${reopen.body.room.id}/heartbeat`, { token: own.token }));
+  status(await api('POST', `/api/rooms/${reopen.body.room.id}/heartbeat`, { token: mod.token }), 403, 'üye olmayan');
   // yönetici yeni oturumda rolünü geri alır
   const j = await api('POST', `/api/rooms/${reopen.body.room.id}/join`, { token: mod.token });
   assert.equal(j.body.me.role, 'moderator');

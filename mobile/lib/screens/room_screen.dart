@@ -43,6 +43,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   bool _joined = false;
   bool _closing = false;
   bool _rejoining = false;
+  Timer? _beat;
 
   lk.Room? _lk;
   bool _lkConnecting = false;
@@ -80,6 +81,26 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     _enter();
   }
 
+  /// Her 25 sn'de sunucuya "oda açık" sinyali gider: üyeyi canlı tutar, WebSocket aboneliğini tazeler,
+  /// oda sunucuda kapanmışsa kullanıcı sonsuza dek ölü odada kalmaz.
+  void _startHeartbeat() {
+    _beat?.cancel();
+    _beat = Timer.periodic(const Duration(seconds: 25), (_) async {
+      if (!mounted || !_joined || _closing) return;
+      SocketService.instance.subscribeRoom(widget.roomId);
+      try {
+        await Api.post('/api/rooms/${widget.roomId}/heartbeat');
+      } on ApiException catch (e) {
+        if (!mounted || _closing) return;
+        if (e.statusCode == 404) {
+          _exit('Oda kapandı.');
+        } else if (e.statusCode == 403) {
+          _rejoin();
+        }
+      } catch (_) {/* ağ kesintisi: bir sonraki sinyalde tekrar denenir */}
+    });
+  }
+
   /// Arka plandan dönünce oda bilgisi yenilenir (bağlantı arada kopmuş olabilir).
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -91,6 +112,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _beat?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     if (RoomDock.exitHandler == _onBack) RoomDock.exitHandler = null;
     _sub?.cancel();
@@ -138,6 +160,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       _loadMessages();
       _loadExtras();
       MusicService.instance.bind(widget.roomId);
+      _startHeartbeat();
       BackgroundService.instance.ensurePermissions((msg, action) => confirm(context, msg, action: action));
     } catch (e) {
       if (!mounted) return;

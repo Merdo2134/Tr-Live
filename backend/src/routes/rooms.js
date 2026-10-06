@@ -415,6 +415,15 @@ router.get('/:roomId/members', requireAuth, async (req, res) => {
   });
 });
 
+// Uygulamadan düzenli gelen "oda açık" sinyali: üyeyi canlı tutar ve oda arada kapanmışsa istemciye hemen 404 döner.
+router.post('/:roomId/heartbeat', requireAuth, userLimit('heartbeat', 12, 60e3), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const room = await activeRoom(roomId);
+  const r = await query(`UPDATE room_members SET last_seen_at = NOW() WHERE room_id = $1 AND user_id = $2`, [roomId, req.user.id]);
+  if (!r.rowCount) throw fail('Bu odanın üyesi değilsiniz.', 403);
+  res.json({ ok: true, seatCount: room.seat_count });
+});
+
 // ---------- Mikrofon / koltuk ----------
 router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
