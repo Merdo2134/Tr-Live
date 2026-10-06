@@ -53,7 +53,7 @@ class _FeedScreenState extends State<FeedScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Row(children: [
-            const Expanded(child: Text('Keşfet', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Pal.text))),
+            const Expanded(child: Text('Akış', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Pal.text))),
             Container(
               width: 210,
               padding: const EdgeInsets.all(3),

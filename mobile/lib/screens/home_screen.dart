@@ -2,12 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/banner_carousel.dart';
+import '../widgets/crown_icon.dart';
 import '../widgets/room_card.dart';
 import '../widgets/room_theme.dart';
 import '../widgets/seat_picker.dart';
 import '../services/api.dart';
 import '../services/inbox_service.dart';
-import '../services/session.dart';
 import '../services/room_dock.dart';
 import 'discover_screen.dart';
 import '../widgets/common.dart';
@@ -29,7 +29,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
-  final _roomsKey = GlobalKey<RoomsTabState>();
+  final _audioKey = GlobalKey<RoomsTabState>();
+  final _videoKey = GlobalKey<RoomsTabState>();
+  String _side = 'audio'; // son açık oda tarafı: sesli | görüntülü
 
   @override
   void initState() {
@@ -101,33 +103,130 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _select(int i) {
+    setState(() {
+      _index = i;
+      if (i == 0) _side = 'audio';
+      if (i == 2) _side = 'video';
+    });
+    if (i == 0) _audioKey.currentState?.refresh();
+    if (i == 2) _videoKey.currentState?.refresh();
+  }
+
+  Future<void> _createRoom() async {
+    final tab = _side == 'video' ? _videoKey.currentState : _audioKey.currentState;
+    await tab?.createRoom(type: _side);
+  }
+
+  /// Üst satır: Sesli | Akış | Görüntülü | Mesajlar | Profil
+  Widget _topRow() {
+    Widget item(int i, IconData icon, IconData activeIcon, String label, {Widget? badge}) {
+      final sel = _index == i;
+      final color = sel ? Pal.cyan : Pal.textDim;
+      return Expanded(
+        child: Semantics(
+          button: true,
+          selected: sel,
+          label: label,
+          child: InkWell(
+            onTap: () => _select(i),
+            child: Container(
+              padding: const EdgeInsets.only(top: 8, bottom: 6),
+              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: sel ? Pal.cyan : Colors.transparent, width: 3))),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                badge ?? Icon(sel ? activeIcon : icon, color: color, size: 26),
+                const SizedBox(height: 2),
+                FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: TextStyle(color: color, fontSize: 11.5, fontWeight: sel ? FontWeight.w800 : FontWeight.w500))),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: const BoxDecoration(color: Pal.surface, border: Border(bottom: BorderSide(color: Pal.outline, width: 0.8))),
+      child: Row(children: [
+        item(0, Icons.mic_none, Icons.mic, 'Sesli'),
+        item(1, Icons.dynamic_feed_outlined, Icons.dynamic_feed, 'Akış'),
+        item(2, Icons.videocam_outlined, Icons.videocam, 'Görüntülü'),
+        item(
+          3,
+          Icons.chat_bubble_outline,
+          Icons.chat_bubble,
+          'Mesajlar',
+          badge: ValueListenableBuilder<int>(
+            valueListenable: Inbox.unread,
+            builder: (_, n, __) => Badge(label: Text('$n'), isLabelVisible: n > 0, child: Icon(_index == 3 ? Icons.chat_bubble : Icons.chat_bubble_outline, color: _index == 3 ? Pal.cyan : Pal.textDim, size: 26)),
+          ),
+        ),
+        item(4, Icons.person_outline, Icons.person, 'Profil'),
+      ]),
+    );
+  }
+
+  /// Alt satır: TRLive tacı (sıralamalar) ve oda açma düğmesi.
+  Widget _bottomRow() {
+    final video = _side == 'video';
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        decoration: const BoxDecoration(color: Pal.surface, border: Border(top: BorderSide(color: Pal.outline, width: 0.8))),
+        child: Row(children: [
+          Semantics(
+            button: true,
+            label: 'TRLive sıralamaları',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const CrownIcon(size: 34),
+                  const SizedBox(width: 6),
+                  Text('TRLive', style: TextStyle(fontFamily: 'serif', fontWeight: FontWeight.w800, fontSize: MediaQuery.sizeOf(context).width < 360 ? 17 : 20, letterSpacing: 1, color: Pal.text)),
+                ]),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(26),
+              onTap: _createRoom,
+              child: Ink(
+                height: 46,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: video ? const [Pal.purple, Pal.cyan] : const [Color(0xFFFF7A18), Pal.pink]),
+                  borderRadius: BorderRadius.circular(26),
+                  boxShadow: [BoxShadow(color: (video ? Pal.purple : Pal.pink).withValues(alpha: 0.35), blurRadius: 12)],
+                ),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(video ? Icons.videocam : Icons.mic, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text(video ? 'Görüntülü yayın aç' : 'Sesli oda aç', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)))),
+                ]),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
   Widget _scaffold(BuildContext context) {
-    final showTitle = _index == 3 || _index == 4;
     return Scaffold(
       body: SafeArea(
         bottom: false,
         child: Column(children: [
-          if (showTitle)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
-              child: Row(children: [
-                Expanded(child: Text(_index == 3 ? 'Mesajlar' : 'Profil', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Pal.text))),
-                ValueListenableBuilder<Map<String, dynamic>?>(
-                  valueListenable: Session.me,
-                  builder: (_, me, __) => Chip(
-                    avatar: const Icon(Icons.monetization_on, size: 18, color: Pal.amber),
-                    label: Text(fmtNumber(me?['coins'])),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-              ]),
-            ),
+          _topRow(),
           Expanded(
             child: GiftRibbonOverlay(
               child: IndexedStack(index: _index, children: [
-                RoomsTab(key: _roomsKey),
+                RoomsTab(key: _audioKey, type: 'audio', onJoinCode: _joinByCode),
                 const FeedScreen(),
-                HubScreen(onCreate: _startBroadcast, onJoinCode: _joinByCode),
+                RoomsTab(key: _videoKey, type: 'video', onJoinCode: _joinByCode),
                 const MessagesScreen(),
                 const ProfileScreen(),
               ]),
@@ -135,36 +234,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ]),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        height: 64,
-        onDestinationSelected: (i) {
-          setState(() => _index = i);
-          if (i == 0) _roomsKey.currentState?.refresh();
-        },
-        destinations: [
-          const NavigationDestination(icon: Icon(Icons.mic_none), selectedIcon: Icon(Icons.mic), label: 'Party'),
-          const NavigationDestination(icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'Keşfet'),
-          const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Giriş Sayfası'),
-          NavigationDestination(
-            icon: ValueListenableBuilder<int>(
-              valueListenable: Inbox.unread,
-              builder: (_, n, __) => Badge(label: Text('$n'), isLabelVisible: n > 0, child: const Icon(Icons.chat_bubble_outline)),
-            ),
-            selectedIcon: const Icon(Icons.chat_bubble),
-            label: 'Mesajlar',
-          ),
-          const NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profil'),
-        ],
-      ),
+      bottomNavigationBar: _bottomRow(),
     );
-  }
-
-  /// Yayın başlat: odayı RoomsTab açar; sekme henüz yüklenmediyse önce Party'ye geçilir.
-  Future<void> _startBroadcast(String type) async {
-    setState(() => _index = 0);
-    await WidgetsBinding.instance.endOfFrame;
-    await _roomsKey.currentState?.createRoom(type: type);
   }
 }
 
@@ -178,7 +249,9 @@ Future<void> openRoom(BuildContext context, RoomRequest req) async {
 }
 
 class RoomsTab extends StatefulWidget {
-  const RoomsTab({super.key});
+  final String type; // audio | video
+  final VoidCallback? onJoinCode;
+  const RoomsTab({super.key, required this.type, this.onJoinCode});
 
   @override
   State<RoomsTab> createState() => RoomsTabState();
@@ -224,7 +297,7 @@ class RoomsTabState extends State<RoomsTab> {
   Future<void> refresh() async {
     try {
       final region = _mode == 'popular' ? null : _mode;
-      final r = await Api.get('/api/rooms', query: {if (_q.isNotEmpty) 'q': _q, if (region != null) 'region': region});
+      final r = await Api.get('/api/rooms', query: {'type': widget.type, if (_q.isNotEmpty) 'q': _q, if (region != null) 'region': region});
       if (!mounted) return;
       setState(() {
         _rooms = listOf(r['rooms']);
@@ -242,8 +315,8 @@ class RoomsTabState extends State<RoomsTab> {
 
   Future<void> _open(String id, String name, {bool locked = false}) => openRoom(context, RoomRequest(roomId: id, name: name, locked: locked));
 
-  Future<void> createRoom({String type = 'audio'}) async {
-    var roomType = type;
+  Future<void> createRoom({String? type}) async {
+    var roomType = type ?? widget.type;
     final nameCtl = TextEditingController();
     final tagsCtl = TextEditingController();
     final pwCtl = TextEditingController();
@@ -333,26 +406,38 @@ class RoomsTabState extends State<RoomsTab> {
     final w = MediaQuery.sizeOf(context).width;
     final small = w < 360;
     return Padding(
-      padding: EdgeInsets.fromLTRB(small ? 8 : 12, 8, small ? 4 : 8, 6),
+      padding: EdgeInsets.fromLTRB(small ? 8 : 12, 6, small ? 0 : 4, 4),
       child: Row(children: [
-        IconButton(
-          tooltip: 'Liderlik tablosu',
-          icon: const Icon(Icons.workspace_premium, color: Pal.amber),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
-        ),
         Expanded(
           child: FittedBox(
             fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
             child: Row(mainAxisSize: MainAxisSize.min, children: [_topTab('friends', 'Takip'), _topTab('popular', 'Popüler'), _topTab('near', 'Yakında')]),
           ),
         ),
-        IconButton(
-          tooltip: 'Yayın başlat',
-          style: IconButton.styleFrom(backgroundColor: Pal.cyan, foregroundColor: const Color(0xFF00212A)),
-          icon: const Icon(Icons.mic, size: 20),
-          onPressed: () => createRoom(),
-        ),
         IconButton(tooltip: 'Oda ara', icon: Icon(_searching ? Icons.close : Icons.search, color: Pal.cyan), onPressed: toggleSearch),
+        PopupMenuButton<String>(
+          tooltip: 'Diğer',
+          icon: const Icon(Icons.more_vert, color: Pal.text),
+          onSelected: (v) {
+            switch (v) {
+              case 'family':
+                Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('Aile')), body: const FamilyScreen())));
+              case 'fav':
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()));
+              case 'code':
+                widget.onJoinCode?.call();
+              case 'user':
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchScreen()));
+            }
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'family', child: ListTile(leading: Icon(Icons.groups), title: Text('Aile'), dense: true)),
+            PopupMenuItem(value: 'fav', child: ListTile(leading: Icon(Icons.star), title: Text('Favoriler ve son girilenler'), dense: true)),
+            PopupMenuItem(value: 'code', child: ListTile(leading: Icon(Icons.vpn_key), title: Text('Gizli odaya kodla gir'), dense: true)),
+            PopupMenuItem(value: 'user', child: ListTile(leading: Icon(Icons.person_search), title: Text('Kullanıcı ara'), dense: true)),
+          ],
+        ),
       ]),
     );
   }
@@ -423,71 +508,6 @@ class RoomsTabState extends State<RoomsTab> {
           ),
         ),
       Expanded(child: body),
-    ]);
-  }
-}
-
-/// "Giriş Sayfası": yayın başlatma ve ana kısayollar.
-class HubScreen extends StatelessWidget {
-  final Future<void> Function(String type) onCreate;
-  final VoidCallback onJoinCode;
-  const HubScreen({super.key, required this.onCreate, required this.onJoinCode});
-
-  Widget _big(String label, IconData icon, List<Color> colors, VoidCallback onTap) {
-    return Expanded(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: onTap,
-        child: Ink(
-          padding: const EdgeInsets.symmetric(vertical: 22),
-          decoration: BoxDecoration(gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(22)),
-          child: Column(children: [
-            Icon(icon, size: 38, color: Colors.white),
-            const SizedBox(height: 8),
-            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
-          ]),
-        ),
-      ),
-    );
-  }
-
-  Widget _tile(BuildContext context, String label, IconData icon, Color color, VoidCallback onTap) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      child: Ink(
-        decoration: BoxDecoration(color: Pal.surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: Pal.outline)),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, size: 30, color: color),
-          const SizedBox(height: 8),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text(label, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Pal.text, fontWeight: FontWeight.w600))),
-        ]),
-      ),
-    );
-  }
-
-  Widget _page(BuildContext context, String title, Widget body) => Scaffold(appBar: AppBar(title: Text(title)), body: body);
-
-  @override
-  Widget build(BuildContext context) {
-    final cols = MediaQuery.sizeOf(context).width < 600 ? 3 : 5;
-    final tiles = <Widget>[
-      _tile(context, 'Aile', Icons.groups, Pal.cyan, () => Navigator.push(context, MaterialPageRoute(builder: (_) => _page(context, 'Aile', const FamilyScreen())))),
-      _tile(context, 'Liderlik', Icons.emoji_events, Pal.amber, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen()))),
-      _tile(context, 'Favoriler', Icons.star, Pal.pink, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()))),
-      _tile(context, 'Kodla gir', Icons.vpn_key, Pal.amber, onJoinCode),
-      _tile(context, 'Kullanıcı ara', Icons.person_search, Pal.cyan, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchScreen()))),
-    ];
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 96), children: [
-      const Text('Giriş Sayfası', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Pal.text)),
-      const SizedBox(height: 16),
-      Row(children: [
-        _big('Sesli yayın', Icons.mic, const [Color(0xFFFF7A18), Color(0xFFFF4F9A)], () => onCreate('audio')),
-        const SizedBox(width: 12),
-        _big('Canlı yayın', Icons.videocam, const [Pal.purple, Pal.cyan], () => onCreate('video')),
-      ]),
-      const SizedBox(height: 20),
-      GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1, children: tiles),
     ]);
   }
 }
