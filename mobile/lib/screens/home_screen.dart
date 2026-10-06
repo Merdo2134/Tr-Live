@@ -118,8 +118,8 @@ class _HomeScreenState extends State<HomeScreen> {
     await tab?.createRoom(type: _side);
   }
 
-  /// Üst satır: Sesli | Akış | Görüntülü | Mesajlar | Profil
-  Widget _topRow() {
+  /// Alt satır: Sesli | Akış | Görüntülü | Mesajlar | Profil
+  Widget _tabRow() {
     Widget item(int i, IconData icon, IconData activeIcon, String label, {Widget? badge}) {
       final sel = _index == i;
       final color = sel ? Pal.cyan : Pal.textDim;
@@ -132,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () => _select(i),
             child: Container(
               padding: const EdgeInsets.only(top: 8, bottom: 6),
-              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: sel ? Pal.cyan : Colors.transparent, width: 3))),
+              decoration: BoxDecoration(border: Border(top: BorderSide(color: sel ? Pal.cyan : Colors.transparent, width: 3))),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 badge ?? Icon(sel ? activeIcon : icon, color: color, size: 26),
                 const SizedBox(height: 2),
@@ -145,8 +145,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Container(
-      decoration: const BoxDecoration(color: Pal.surface, border: Border(bottom: BorderSide(color: Pal.outline, width: 0.8))),
-      child: Row(children: [
+      decoration: const BoxDecoration(color: Pal.surface, border: Border(top: BorderSide(color: Pal.outline, width: 0.8))),
+      child: SafeArea(top: false, child: Row(children: [
         item(0, Icons.mic_none, Icons.mic, 'Sesli'),
         item(1, Icons.dynamic_feed_outlined, Icons.dynamic_feed, 'Akış'),
         item(2, Icons.videocam_outlined, Icons.videocam, 'Görüntülü'),
@@ -161,18 +161,18 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         item(4, Icons.person_outline, Icons.person, 'Profil'),
-      ]),
+      ])),
     );
   }
 
-  /// Alt satır: TRLive tacı (sıralamalar) ve oda açma düğmesi.
-  Widget _bottomRow() {
+  /// Üst satır: TRLive tacı (sıralamalar) ve oda açma düğmesi.
+  Widget _crownRow() {
     final video = _side == 'video';
     return SafeArea(
-      top: false,
+      bottom: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        decoration: const BoxDecoration(color: Pal.surface, border: Border(top: BorderSide(color: Pal.outline, width: 0.8))),
+        decoration: const BoxDecoration(color: Pal.surface, border: Border(bottom: BorderSide(color: Pal.outline, width: 0.8))),
         child: Row(children: [
           Semantics(
             button: true,
@@ -217,10 +217,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _scaffold(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Column(children: [
-          _topRow(),
+      body: Column(children: [
+          _crownRow(),
           Expanded(
             child: GiftRibbonOverlay(
               child: IndexedStack(index: _index, children: [
@@ -233,8 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ]),
-      ),
-      bottomNavigationBar: _bottomRow(),
+      bottomNavigationBar: _tabRow(),
     );
   }
 }
@@ -315,76 +312,67 @@ class RoomsTabState extends State<RoomsTab> {
 
   Future<void> _open(String id, String name, {bool locked = false}) => openRoom(context, RoomRequest(roomId: id, name: name, locked: locked));
 
+  /// Oda aç: kayıtlı odan varsa doğrudan girer. Yoksa bir kez kurulum penceresi açılır (ad, etiket, koltuk düzeni, tema).
   Future<void> createRoom({String? type}) async {
-    var roomType = type ?? widget.type;
+    final roomType = type ?? widget.type;
+    final mine = await guard(context, () => Api.get('/api/rooms/mine'));
+    if (mine == null || !mounted) return;
+    final profile = mapOf(mapOf(mine['rooms'])?[roomType]);
+    final body = <String, dynamic>{'roomType': roomType};
+    if (profile == null) {
+      final setup = await _setupDialog(roomType);
+      if (setup == null || !mounted) return;
+      body.addAll(setup);
+    }
+    final r = await guard(context, () => Api.post('/api/rooms', body));
+    final room = mapOf(r?['room']);
+    if (room != null && mounted) await _open(room['id'] as String, room['name'] as String);
+  }
+
+  Future<Map<String, dynamic>?> _setupDialog(String roomType) async {
     final nameCtl = TextEditingController();
     final tagsCtl = TextEditingController();
-    final pwCtl = TextEditingController();
-    var seats = 8;
-    var hidden = false;
+    var seats = roomType == 'video' ? 4 : 8;
     var theme = 'default';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, setS) => AlertDialog(
-          title: const Text('Yayın başlat'),
-          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            SegmentedButton<String>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: 'audio', icon: Icon(Icons.mic), label: Text('Sesli')),
-                ButtonSegment(value: 'video', icon: Icon(Icons.videocam), label: Text('Görüntülü')),
-              ],
-              selected: {roomType},
-              onSelectionChanged: (v) => setS(() => roomType = v.first),
-            ),
-            const SizedBox(height: 8),
-            TextField(controller: nameCtl, maxLength: 60, decoration: const InputDecoration(labelText: 'Oda adı')),
-            TextField(controller: tagsCtl, decoration: const InputDecoration(labelText: 'Etiketler (en fazla 3, virgülle)', hintText: 'müzik, sohbet, karaoke')),
-            TextField(controller: pwCtl, obscureText: true, maxLength: 12, decoration: const InputDecoration(labelText: 'Oda şifresi (isteğe bağlı, 4-12)')),
-            SwitchListTile(dense: true, contentPadding: EdgeInsets.zero, title: const Text('Gizli oda (kodla girilir)'), value: hidden, onChanged: (v) => setS(() => hidden = v)),
-            const SizedBox(height: 4),
-            ThemePicker(value: theme, onChanged: (v) => setS(() => theme = v)),
-            const SizedBox(height: 8),
-            SeatLayoutPicker(value: seats, onChanged: (v) => setS(() => seats = v)),
-          ])),
+          title: Text(roomType == 'video' ? 'Görüntülü odanı kur' : 'Sesli odanı kur'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text(
+                'Odanı bir kez kurarsın. Sonraki seferlerde "Oda aç"a basman yeterli: aynı ad ve etiketlerle doğrudan odana girersin. Ad ve etiketleri oda içinde oda adına dokunarak değiştirebilirsin.',
+                style: TextStyle(color: Pal.textDim, fontSize: 13, height: 1.35),
+              ),
+              const SizedBox(height: 12),
+              TextField(controller: nameCtl, maxLength: 60, decoration: const InputDecoration(labelText: 'Oda adı')),
+              TextField(controller: tagsCtl, decoration: const InputDecoration(labelText: 'Etiketler (en fazla 3, virgülle)', hintText: 'müzik, sohbet, karaoke')),
+              const SizedBox(height: 12),
+              SeatLayoutPicker(value: seats, onChanged: (v) => setS(() => seats = v)),
+              const SizedBox(height: 12),
+              ThemePicker(value: theme, onChanged: (v) => setS(() => theme = v)),
+            ]),
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Aç')),
+            FilledButton(
+              onPressed: () {
+                if (nameCtl.text.trim().length < 2) return toast(c, 'Oda adı en az 2 karakter olmalı.', error: true);
+                Navigator.pop(c, true);
+              },
+              child: const Text('Kur ve aç'),
+            ),
           ],
         ),
       ),
     );
     final name = nameCtl.text.trim();
     final tags = tagsCtl.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
-    final pw = pwCtl.text.trim();
     nameCtl.dispose();
     tagsCtl.dispose();
-    pwCtl.dispose();
-    if (ok != true || !mounted) return;
-    final r = await guard(context, () => Api.post('/api/rooms', {
-          'name': name.isEmpty ? 'TR Live Odası' : name,
-          'roomType': roomType,
-          'seatCount': seats,
-          if (tags.isNotEmpty) 'tags': tags,
-          if (pw.isNotEmpty) 'password': pw,
-          'hidden': hidden,
-          'theme': theme,
-        }));
-    final room = mapOf(r?['room']);
-    if (room != null && mounted) {
-      if (room['joinCode'] != null) {
-        await showDialog<void>(
-          context: context,
-          builder: (c) => AlertDialog(
-            title: const Text('Gizli oda hazır'),
-            content: Text('Davet kodu: ${room['joinCode']}\nBu kodu yalnızca girmesini istediklerinize verin. Kodu oda ayarlarından da görebilirsiniz.'),
-            actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('Tamam'))],
-          ),
-        );
-      }
-      if (mounted) await _open(room['id'] as String, room['name'] as String);
-    }
+    if (ok != true) return null;
+    return {'name': name, 'seatCount': seats, 'theme': theme, if (tags.isNotEmpty) 'tags': tags};
   }
 
   Widget _topTab(String id, String label) {

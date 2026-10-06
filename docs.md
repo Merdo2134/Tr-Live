@@ -12,7 +12,7 @@ Kullanıcı bakiyesi **asla** başka kullanıcılara gösterilmez (`views.js`).
 **Profil (`/api/me`):** `GET /`, `PATCH /`, `PUT /avatar|cover` (ham png/jpeg/webp, ≤3 MB), `POST /password`, `DELETE /` (şifre ile), `GET /wallet`, `GET /visitors` (WIP 2+)
 **Kullanıcılar:** `GET /api/users/search?q=`, `GET /:id`, `POST|DELETE /:id/follow`, `GET /:id/followers|following`
 **Envanter:** `GET /api/inventory`, `POST /equip|unequip {itemId}`, `GET /catalog/frames|entrance-effects`
-**Odalar:** `GET /api/rooms?type=audio|video`, `POST /`, `GET /:id`, `POST /:id/join|leave|close`, `GET /:id/members`,
+**Odalar:** `GET /api/rooms?type=audio|video`, `GET /mine` (kalıcı oda profilleri), `POST /` (ilk seferde kurar, sonra açar; şifre yok), `GET /:id/managers`, `GET /:id`, `POST /:id/join|leave|close`, `GET /:id/members`,
 `POST /:id/mic/take {seatIndex?}`, `POST /:id/mic/leave`, `POST /:id/livekit-token`,
 `POST /:id/members/:uid/kick|block|mic-off|role {role}`, `DELETE /:id/blocks/:uid`
 **Hediye:** `GET /api/gifts`, `GET /api/gifts/global/recent`, `POST /api/rooms/:id/gifts/send`

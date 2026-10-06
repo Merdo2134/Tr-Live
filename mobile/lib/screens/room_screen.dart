@@ -560,9 +560,61 @@ class _RoomScreenState extends State<RoomScreen> {
     await guard(context, () => Api.post('/api/rooms/${widget.roomId}/close'));
   }
 
-  Future<void> _roomSettings() async {
+  /// Oda adına dokununca: ad ve etiketler (oda sahibi / yardımcı sahip düzenler) ve oda yöneticileri.
+  Future<void> _roomInfo() async {
+    final canEdit = _myRole == 'owner' || _myRole == 'cohost';
+    final res = await guard(context, () => Api.get('/api/rooms/${widget.roomId}/managers'));
+    if (!mounted) return;
+    final managers = listOf(res?['managers']);
     final nameCtl = TextEditingController(text: (_room?['name'] ?? '').toString());
     final tagsCtl = TextEditingController(text: ((_room?['tags'] as List?) ?? const []).join(', '));
+    String roleLabel(String r) => r == 'owner' ? 'Oda sahibi' : (r == 'cohost' ? 'Yardımcı sahip' : 'Moderatör');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Oda bilgileri'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (canEdit) ...[
+              TextField(controller: nameCtl, maxLength: 60, decoration: const InputDecoration(labelText: 'Oda adı')),
+              TextField(controller: tagsCtl, decoration: const InputDecoration(labelText: 'Etiketler (en fazla 3, virgülle)', hintText: 'müzik, sohbet')),
+              const Padding(padding: EdgeInsets.only(top: 6), child: Text('Değişiklikler odanın bir sonraki açılışında da geçerli kalır.', style: TextStyle(color: Colors.white54, fontSize: 12))),
+            ] else ...[
+              Text((_room?['name'] ?? '').toString(), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              Text(((_room?['tags'] as List?) ?? const []).isEmpty ? 'Etiket yok' : '#${((_room?['tags'] as List).join('  #'))}'),
+            ],
+            const SizedBox(height: 16),
+            const Text('Oda yöneticileri', style: TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            for (final m in managers)
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: UserAvatar(user: mapOf(m['user']), radius: 18),
+                title: UserName(user: mapOf(m['user'])),
+                trailing: Text(roleLabel('${m['role']}'), style: const TextStyle(color: Colors.white60, fontSize: 12)),
+              ),
+            if (managers.length <= 1) const Text('Henüz yönetici yok. Oda içinde bir kullanıcıya dokunup moderatör veya yardımcı sahip yapabilirsiniz.', style: TextStyle(color: Colors.white54, fontSize: 12)),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: Text(canEdit ? 'Vazgeç' : 'Kapat')),
+          if (canEdit) FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Kaydet')),
+        ],
+      ),
+    );
+    final name = nameCtl.text.trim();
+    final tags = tagsCtl.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+    nameCtl.dispose();
+    tagsCtl.dispose();
+    if (ok != true || !mounted) return;
+    final r = await guard(context, () => Api.patch('/api/rooms/${widget.roomId}', {'name': name, 'tags': tags}));
+    final room = mapOf(r?['room']);
+    if (room != null && mounted) setState(() => _room = {...?_room, ...room});
+  }
+
+  Future<void> _roomSettings() async {
     final pwCtl = TextEditingController();
     final imgCtl = TextEditingController(text: (_room?['themeImageUrl'] ?? '').toString());
     var chatEnabled = _room?['chatEnabled'] != false;
@@ -579,8 +631,7 @@ class _RoomScreenState extends State<RoomScreen> {
           title: const Text('Oda ayarları'),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              TextField(controller: nameCtl, maxLength: 60, decoration: const InputDecoration(labelText: 'Oda adı')),
-              TextField(controller: tagsCtl, decoration: const InputDecoration(labelText: 'Etiketler (en fazla 3, virgülle)', hintText: 'müzik, sohbet')),
+              const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('Oda adı ve etiketleri için oda adına dokunun.', style: TextStyle(color: Colors.white54, fontSize: 12))),
               if (_myRole == 'owner') ...[
                 TextField(controller: pwCtl, obscureText: true, maxLength: 12, enabled: !removePw, decoration: InputDecoration(labelText: _room?['locked'] == true ? 'Yeni şifre (boş = değişmez)' : 'Oda şifresi (isteğe bağlı)')),
                 if (_room?['locked'] == true) CheckboxListTile(dense: true, value: removePw, title: const Text('Şifreyi kaldır'), onChanged: (v) => setS(() => removePw = v == true)),
@@ -620,19 +671,13 @@ class _RoomScreenState extends State<RoomScreen> {
         ),
       ),
     );
-    final name = nameCtl.text.trim();
-    final tags = tagsCtl.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
     final pw = pwCtl.text.trim();
     final img = imgCtl.text.trim();
-    nameCtl.dispose();
-    tagsCtl.dispose();
     pwCtl.dispose();
     imgCtl.dispose();
     if (ok != true || !mounted) return;
     final prevImg = (_room?['themeImageUrl'] ?? '').toString();
     final r = await guard(context, () => Api.patch('/api/rooms/${widget.roomId}', {
-          'name': name,
-          'tags': tags,
           'chatEnabled': chatEnabled,
           'scoreboardEnabled': scoreboard,
           'theme': theme,
@@ -1047,7 +1092,19 @@ class _RoomScreenState extends State<RoomScreen> {
         appBar: AppBar(
           title: Row(children: [
             if (_room?['hidden'] == true) const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.visibility_off, size: 18)),
-            Flexible(child: Text((_room?['name'] ?? widget.initialName).toString(), overflow: TextOverflow.ellipsis)),
+            Flexible(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _roomInfo,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Flexible(child: Text((_room?['name'] ?? widget.initialName).toString(), overflow: TextOverflow.ellipsis)),
+                    const Icon(Icons.arrow_drop_down),
+                  ]),
+                ),
+              ),
+            ),
           ]),
           leading: IconButton(tooltip: 'Odayı küçült', icon: const Icon(Icons.keyboard_arrow_down), onPressed: RoomDock.minimize),
           actions: [

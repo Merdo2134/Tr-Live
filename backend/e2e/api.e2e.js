@@ -133,8 +133,11 @@ test('oda: oluşturma, etiket, katılma, mikrofon, üyeler', { skip, timeout: 60
   const r = await api('POST', '/api/rooms', { token: U.a.token, body: { name: 'E2E Oda', seatCount: 8, tags: ['müzik', 'sohbet'] } });
   ok(r, 'oda');
   roomId = r.body.room.id;
-  const second = await api('POST', '/api/rooms', { token: U.a.token, body: { name: 'İkinci' } });
-  status(second, 409, 'WIP yokken en fazla 1 oda');
+  // kalıcı oda: aynı türde ikinci "oda aç" yeni oda açmaz, mevcut odayı döndürür; ad ve etiketler profildeki gibi kalır
+  const second = await api('POST', '/api/rooms', { token: U.a.token, body: { name: 'İkinci', tags: ['başka'] } });
+  status(second, 200, 'aynı odaya girer');
+  assert.equal(second.body.room.id, roomId);
+  assert.equal(second.body.room.name, 'E2E Oda');
   const list = await api('GET', `/api/rooms?tag=${encodeURIComponent('müzik')}`);
   ok(list);
   const row = list.body.rooms.find((x) => x.id === roomId);
@@ -295,10 +298,11 @@ test('müzik çalar: kütüphane, sıra, yetki, duraklat/devam/ara/sonraki, otom
 });
 
 test('şifreli oda', { skip, timeout: 60000 }, async () => {
-  const r = await api('POST', '/api/rooms', { token: U.e.token, body: { name: 'Gizli Oda', password: '1234' } });
+  const r = await api('POST', '/api/rooms', { token: U.e.token, body: { name: 'Gizli Oda' } });
   ok(r);
+  assert.equal(r.body.room.locked, false, 'oda kurulurken şifre istenmez');
   const id = r.body.room.id;
-  assert.equal(r.body.room.locked, true);
+  ok(await api('PATCH', `/api/rooms/${id}`, { token: U.e.token, body: { password: '1234' } }), 'şifre oda içinden konur');
   status(await api('POST', `/api/rooms/${id}/join`, { token: U.f.token }), 403, 'şifresiz');
   status(await api('POST', `/api/rooms/${id}/join`, { token: U.f.token, body: { password: 'yanlis' } }), 403, 'yanlış şifre');
   ok(await api('POST', `/api/rooms/${id}/join`, { token: U.f.token, body: { password: '1234' } }), 'doğru şifre');
@@ -351,9 +355,11 @@ test('WIP: kademeler, satın alma, uzatma, düşük seviye engeli, oda sınırı
   status(await api('GET', '/api/me/visitors', { token: U.g.token }), 403, 'WIP yok');
   const r1 = await api('POST', '/api/rooms', { token: U.h.token, body: { name: 'H1' } });
   ok(r1);
-  const r2 = await api('POST', '/api/rooms', { token: U.h.token, body: { name: 'H2' } });
-  ok(r2, 'WIP 2 ile 2 oda');
-  status(await api('POST', '/api/rooms', { token: U.h.token, body: { name: 'H3' } }), 409);
+  const r2 = await api('POST', '/api/rooms', { token: U.h.token, body: { name: 'H2', roomType: 'video' } });
+  ok(r2, 'sesli ve görüntülü için birer oda');
+  const again = await api('POST', '/api/rooms', { token: U.h.token, body: { name: 'H3' } });
+  status(again, 200, 'aynı türde yeni oda açılmaz');
+  assert.equal(again.body.room.id, r1.body.room.id);
   await api('POST', `/api/rooms/${r1.body.room.id}/close`, { token: U.h.token });
   await api('POST', `/api/rooms/${r2.body.room.id}/close`, { token: U.h.token });
   await sql(`UPDATE users SET coins = 10 WHERE id = $1`, [U.x.id]);
@@ -775,10 +781,44 @@ test('Keşfet akışı, banner ve duyurular', { skip, timeout: 90000 }, async ()
   assert.ok(sum.body.event >= 0);
   assert.deepEqual((await api('GET', '/api/banners')).body.banners, []);
   // oda bölgesi / şehir filtresi ve yeni koltuk düzeni
-  const room = (await api('POST', '/api/rooms', { token: a.token, body: { name: 'Altı koltuk', seatCount: 6 } }));
-  ok(room);
-  status(await api('POST', '/api/rooms', { token: a.token, body: { name: 'Yedi', seatCount: 7 } }), 400, 'desteklenmeyen düzen');
+  const fc = await register('fc');
+  status(await api('POST', '/api/rooms', { token: fc.token, body: { name: 'Yedi', seatCount: 7 } }), 400, 'desteklenmeyen düzen');
+  const six = await api('POST', '/api/rooms', { token: fc.token, body: { name: 'Altı koltuk', seatCount: 6 } });
+  status(six, 201);
+  assert.equal(six.body.room.seatCount, 6);
   status(await api('GET', '/api/rooms?region=near'), 401, 'yakındakiler giriş ister');
+});
+
+test('kalıcı oda: bir kez kur, tek adımda aç, ad/etiket sabit, yöneticiler korunur', { skip, timeout: 90000 }, async () => {
+  const own = await register('po'); const mod = await register('pm');
+  assert.deepEqual((await api('GET', '/api/rooms/mine', { token: own.token })).body.rooms, { audio: null, video: null });
+  status(await api('POST', '/api/rooms', { token: own.token, body: {} }), 400, 'ilk kurulumda ad zorunlu');
+  const first = await api('POST', '/api/rooms', { token: own.token, body: { name: 'Benim Odam', tags: ['sohbet', 'müzik'], seatCount: 9 } });
+  status(first, 201);
+  const roomId1 = first.body.room.id;
+  // yönetici ata
+  ok(await api('POST', `/api/rooms/${roomId1}/join`, { token: mod.token }));
+  ok(await api('POST', `/api/rooms/${roomId1}/members/${mod.id}/role`, { token: own.token, body: { role: 'moderator' } }));
+  const mgr = (await api('GET', `/api/rooms/${roomId1}/managers`, { token: mod.token })).body.managers;
+  assert.equal(mgr[0].role, 'owner');
+  assert.ok(mgr.some((m) => m.user.id === mod.id && m.role === 'moderator'));
+  // oda içinden ad/etiket değişir ve kalıcı olur
+  ok(await api('PATCH', `/api/rooms/${roomId1}`, { token: own.token, body: { name: 'Yeni Ad', tags: ['karaoke'] } }));
+  status(await api('PATCH', `/api/rooms/${roomId1}`, { token: mod.token, body: { name: 'Hack' } }), 403, 'moderatör adı değiştiremez');
+  // kapat ve tek adımda yeniden aç
+  ok(await api('POST', `/api/rooms/${roomId1}/close`, { token: own.token }));
+  const mine = (await api('GET', '/api/rooms/mine', { token: own.token })).body.rooms.audio;
+  assert.equal(mine.name, 'Yeni Ad'); assert.deepEqual(mine.tags, ['karaoke']); assert.equal(mine.seatCount, 9); assert.equal(mine.activeRoomId, null);
+  const reopen = await api('POST', '/api/rooms', { token: own.token, body: { name: 'Yok Sayılır' } });
+  status(reopen, 201);
+  assert.equal(reopen.body.room.name, 'Yeni Ad'); assert.equal(reopen.body.room.seatCount, 9);
+  // yönetici yeni oturumda rolünü geri alır
+  const j = await api('POST', `/api/rooms/${reopen.body.room.id}/join`, { token: mod.token });
+  assert.equal(j.body.me.role, 'moderator');
+  // görüntülü oda ayrı kurulur
+  const video = await api('POST', '/api/rooms', { token: own.token, body: { name: 'Kamera', roomType: 'video', seatCount: 4 } });
+  status(video, 201);
+  assert.equal(video.body.room.roomType, 'video');
 });
 
 test('liderlik tablosu, cüzdan geçmişi ve hesap silme', { skip, timeout: 60000 }, async () => {
