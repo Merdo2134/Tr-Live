@@ -17,6 +17,8 @@ Future<void> showGiftSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
+    // Arkası kararmaz: koltuklar ve reaksiyonlar hediye seçerken de görünür.
+    barrierColor: Colors.transparent,
     builder: (c) => _GiftSheet(roomId: roomId, members: members, recipientId: recipientId),
   );
 }
@@ -158,7 +160,8 @@ class _GiftSheetState extends State<_GiftSheet> {
     final mq = MediaQuery.of(context);
     return SafeArea(
       child: Container(
-        constraints: BoxConstraints(maxHeight: mq.size.height * 0.82),
+        // Ekranın alttan ~%45'i: koltuk bölgesini kapatmaz, sohbetin üstüne biner.
+        constraints: BoxConstraints(maxHeight: (mq.size.height * 0.45).clamp(380.0, mq.size.height * 0.6)),
         padding: EdgeInsets.fromLTRB(12, 14, 12, 10 + mq.viewInsets.bottom),
         decoration: const BoxDecoration(color: Color(0xFF0D1626), borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
         child: _loading

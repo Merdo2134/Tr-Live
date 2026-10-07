@@ -1399,6 +1399,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   }
 
   // ---------- Arayüz ----------
+  /// Koltuk avatar yarıçapı: az koltukta büyük (56dp), 8-9'da 48dp, 12+ koltukta 40dp (YoHo/Yalla ölçüleri).
+  double get _seatR => _seatCount <= 6 ? 28 : (_seatCount <= 9 ? 24 : 20);
+  bool get _seatCompact => _seatCount >= 12;
+
   Widget _seatTile(int index, Map<String, dynamic>? m) {
     if (m == null) {
       final reserved = index == 0 && _myRole != 'owner';
@@ -1433,12 +1437,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               },
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           CircleAvatar(
-            radius: 26,
+            radius: _seatR + 3,
             backgroundColor: Colors.white12,
             child: Icon(reserved ? Icons.star_border : (locked ? Icons.lock : Icons.add), color: locked ? Colors.orangeAccent : Colors.white54),
           ),
           const SizedBox(height: 4),
-          Text('${index + 1}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text('${index + 1}', style: TextStyle(color: Colors.white54, fontSize: _seatCompact ? 10 : 12)),
         ]),
       );
     }
@@ -1450,20 +1454,21 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       onTap: () => _memberSheet(m),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         if (video != null)
-          SizedBox(width: 72, height: 72, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: video))
+          SizedBox(width: _seatR * 2.8, height: _seatR * 2.8, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: video))
         else
-          UserAvatar(user: user, radius: 26, speaking: _isSpeaking(userId)),
+          // Çevresinde 3dp boşluk: konuşma/hediye halkası buraya oturur, koltuklar birbirine yapışmaz.
+          Padding(padding: const EdgeInsets.all(3), child: UserAvatar(user: user, radius: _seatR, speaking: _isSpeaking(userId))),
         const SizedBox(height: 4),
         Row(mainAxisSize: MainAxisSize.min, children: [
           if (m['role'] == 'owner') const Icon(Icons.star, size: 12, color: Colors.amber),
-          Flexible(child: Text((user?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12))),
+          Flexible(child: Text((user?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: _seatCompact ? 11 : 12))),
         ]),
         if (_room?['scoreboardEnabled'] != false)
           Container(
             margin: const EdgeInsets.only(top: 2),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
             decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(8)),
-            child: Text('💎 ${fmtNumber(_scores[userId] ?? 0)}', style: const TextStyle(fontSize: 11, color: Colors.amberAccent)),
+            child: Text('💎 ${fmtNumber(_scores[userId] ?? 0)}', style: TextStyle(fontSize: _seatCompact ? 10 : 11, color: Colors.amberAccent)),
           ),
       ]),
     );
@@ -1477,7 +1482,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final rows = seatRows(_seatCount);
     final maxCols = rows.reduce((a, b) => a > b ? a : b);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: LayoutBuilder(builder: (context, box) {
         // Her koltuk aynı genişlikte; kısa satırlar ortalanır (Figma yerleşimi).
         final cw = (box.maxWidth / maxCols).clamp(0.0, 120.0);
@@ -1485,7 +1490,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         return Column(children: [
           for (final count in rows)
             Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.only(bottom: 8),
               child: Row(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 for (var k = 0; k < count; k++)
                   Builder(builder: (_) {
@@ -1760,6 +1765,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         if (!didPop) RoomDock.minimize();
       },
       child: Scaffold(
+        // Klavye açılınca koltuk alanı yerinden oynamasın; boşluğu aşağıdaki sohbet bölgesi yönetir.
+        resizeToAvoidBottomInset: false,
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : RoomThemeBackground(
@@ -1767,6 +1774,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 imageUrl: _room?['themeImageUrl']?.toString(),
                 child: GiftRibbonOverlay(
                 roomId: widget.roomId,
+                child: Padding(
+                padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
                 child: Column(children: [
                   _roomHeader(),
                   if (_lkError != null)
@@ -1787,17 +1796,17 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                       onCancel: _myRole == 'owner' ? () => guard(context, () => Api.post('/api/pk/${_pk!['id']}/cancel')) : null,
                     ),
                   Expanded(
-                    flex: 5,
+                    flex: 40, // ekranın ~%40'ı: sahne / koltuklar
                     child: NotificationListener<ScrollNotification>(
                       onNotification: _onScrollNote,
                       child: ListView(physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()), children: [_seatGrid(), _audience()]),
                     ),
                   ),
-                  Expanded(flex: 3, child: _chatPanel()),
+                  Expanded(flex: 35, child: _chatPanel()), // ~%35: sohbet akışı
                   _inputBar(),
-                  _bottomBar(),
+                  _bottomBar(), // ~%10: alt bar
                 ]),
-              )),
+              ))),
       ),
       ),
     );
