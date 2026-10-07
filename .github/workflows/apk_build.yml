@@ -142,6 +142,7 @@ jobs:
               print("http (cleartext) izni eklendi — yalnızca test için")
           mf.write_text(s)
           print("Manifest izinleri tamam")
+          sed -i "s/org.jetbrains.kotlin.android\" version \"[^\]*\"/org.jetbrains.kotlin.android\" version \"2.2.20\"/g" mobile/android/settings.gradle || true
           PY
 
       - name: Sunucu adresini doğrula
