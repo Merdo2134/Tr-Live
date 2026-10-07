@@ -10,12 +10,14 @@ import '../services/session.dart';
 import '../services/socket_service.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/crown_icon.dart';
 import '../widgets/gift_ribbon.dart';
 import '../widgets/safety_actions.dart';
 import '../widgets/pk_banner.dart';
 import '../widgets/room_theme.dart';
 import '../widgets/seat_picker.dart';
 import 'gift_sheet.dart';
+import 'leaderboard_screen.dart';
 import 'ludo_screen.dart';
 import 'pk_sheet.dart';
 import 'music_sheet.dart';
@@ -58,6 +60,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   final _chatScroll = ScrollController();
   bool _sending = false;
   bool _chatMuted = false;
+  bool _inputOpen = false;
+  bool _roomMuted = false;
 
   // Oda içi sayı tahtası (kullanıcı → alınan toplam Coin) ve PK durumu
   final Map<String, String> _scores = {};
@@ -503,6 +507,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   // ---------- LiveKit ----------
   void _onLkChanged() {
+    if (_roomMuted) _applyRoomSound();
     if (mounted) setState(() {});
   }
 
@@ -819,6 +824,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           feature(hidden ? Icons.visibility_off : Icons.visibility, 'Oda\nGizleme', () => need(_myRole == 'owner', _toggleHidden), color: hidden ? Colors.orangeAccent : null),
           feature(Icons.mic_external_on, 'Mikrofon\nModu', () => need(_isOwnerOrCohost, _micMode)),
           feature(Icons.settings, 'Oda\nAyarları', () => need(_isOwnerOrCohost, _roomSettings)),
+          if (_myRole == 'owner') feature(Icons.power_settings_new, 'Odayı\nKapat', () => run(_closeRoom), color: Colors.redAccent),
         ];
         return DraggableScrollableSheet(
           initialChildSize: 0.62,
@@ -962,62 +968,82 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   void _openGames() => Navigator.push(context, MaterialPageRoute(builder: (_) => LudoScreen(roomId: widget.roomId, canManage: _isManager)));
 
+  /// Sohbet kartları (Figma): yüksek seviyeli kullanıcıların mesajı renkli kart, diğerleri düz.
+  Color? _bubbleColor(Map<String, dynamic>? u) {
+    final lvl = (u?['coinLevel'] as num?)?.toInt() ?? 1;
+    if (lvl >= 50) return const Color(0xCC4B1E8C);
+    if (lvl >= 20) return const Color(0xCCB86A12);
+    return null;
+  }
+
   Widget _chatPanel() {
-    return Column(children: [
-      if (_isManager)
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            style: TextButton.styleFrom(visualDensity: VisualDensity.compact, foregroundColor: Colors.white54),
-            onPressed: _clearChat,
-            icon: const Icon(Icons.cleaning_services_outlined, size: 16),
-            label: const Text('Sohbeti temizle', style: TextStyle(fontSize: 12)),
+    return _messages.isEmpty
+        ? const Center(child: Text('Henüz mesaj yok.', style: TextStyle(color: Colors.white54)))
+        : ListView.builder(
+            controller: _chatScroll,
+            padding: const EdgeInsets.fromLTRB(10, 4, 70, 4),
+            itemCount: _messages.length,
+            itemBuilder: (_, i) {
+              final m = _messages[i];
+              final u = mapOf(m['user']);
+              final color = parseColor(u?['nameColor'] as String?) ?? Colors.white;
+              final bg = _bubbleColor(u);
+              return GestureDetector(
+                onLongPress: () => _messageActions(m),
+                onTap: () {
+                  final uid = u?['id']?.toString();
+                  final mem = _members.where((x) => x['userId'] == uid);
+                  if (mem.isNotEmpty) _memberSheet(mem.first);
+                },
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 3),
+                    padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
+                    decoration: BoxDecoration(color: bg ?? Colors.black26, borderRadius: BorderRadius.circular(14)),
+                    child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      UserAvatar(user: u, radius: 16),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(mainAxisSize: MainAxisSize.min, children: [
+                            Flexible(child: Text('${u?['displayName'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 13))),
+                            const SizedBox(width: 6),
+                            _pill('${u?['coinLevel'] ?? 1}', Pal.pink, icon: Icons.star),
+                            if (u?['wipLevel'] != null) ...[const SizedBox(width: 4), _pill('WIP ${u?['wipLevel']}', Pal.amber)],
+                          ]),
+                          const SizedBox(height: 2),
+                          Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 14)),
+                        ]),
+                      ),
+                    ]),
+                  ),
+                ),
+              );
+            },
+          );
+  }
+
+  /// Yazı alanı: alttaki sohbet düğmesine basınca açılır.
+  Widget _inputBar() {
+    if (!_inputOpen) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
+      child: Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _chatCtl,
+            autofocus: true,
+            maxLength: 300,
+            enabled: !_chatMuted,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => _sendChat(),
+            decoration: InputDecoration(isDense: true, counterText: '', hintText: _chatMuted ? 'Sohbette susturuldunuz' : 'Mesaj yaz...', filled: true, fillColor: Colors.black45, border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none)),
           ),
         ),
-      Expanded(
-        child: _messages.isEmpty
-            ? const Center(child: Text('Henüz mesaj yok.', style: TextStyle(color: Colors.white54)))
-            : ListView.builder(
-                controller: _chatScroll,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                itemCount: _messages.length,
-                itemBuilder: (_, i) {
-                  final m = _messages[i];
-                  final u = mapOf(m['user']);
-                  final color = parseColor(u?['nameColor'] as String?) ?? Colors.pinkAccent.shade100;
-                  return GestureDetector(
-                    onLongPress: () => _messageActions(m),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text.rich(TextSpan(children: [
-                        TextSpan(text: '${u?['displayName'] ?? ''}: ', style: TextStyle(color: color, fontWeight: FontWeight.bold)),
-                        TextSpan(text: (m['text'] ?? '').toString()),
-                      ])),
-                    ),
-                  );
-                },
-              ),
-      ),
-      if (_chatOpen)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 8, 4),
-          child: Row(children: [
-            Expanded(
-              child: TextField(
-                controller: _chatCtl,
-                maxLength: 300,
-                enabled: !_chatMuted,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _sendChat(),
-                decoration: InputDecoration(isDense: true, counterText: '', hintText: _chatMuted ? 'Sohbette susturuldunuz' : 'Mesaj yaz...', border: const OutlineInputBorder()),
-              ),
-            ),
-            IconButton(onPressed: _sending || _chatMuted ? null : _sendChat, icon: const Icon(Icons.send)),
-          ]),
-        )
-      else
-        const Padding(padding: EdgeInsets.all(8), child: Text('Bu odada yazılı sohbet kapalı.', style: TextStyle(color: Colors.white54))),
-    ]);
+        IconButton(onPressed: _sending || _chatMuted ? null : _sendChat, icon: const Icon(Icons.send)),
+      ]),
+    );
   }
 
   void _messageActions(Map<String, dynamic> m) {
@@ -1498,45 +1524,226 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ---------- Üst başlık (Figma) ----------
+  Widget _glass({required Widget child, VoidCallback? onTap, EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 10, vertical: 6), double radius = 22}) {
+    return Material(
+      color: Colors.black38,
+      borderRadius: BorderRadius.circular(radius),
+      child: InkWell(borderRadius: BorderRadius.circular(radius), onTap: onTap, child: Padding(padding: padding, child: child)),
+    );
+  }
+
+  Widget _roomHeader() {
+    final owner = _members.where((m) => m['role'] == 'owner');
+    final ownerUser = owner.isEmpty ? null : mapOf(owner.first['user']);
+    final name = (_room?['name'] ?? widget.initialName).toString();
+    var total = BigInt.zero;
+    for (final v in _scores.values) {
+      total += BigInt.tryParse(v) ?? BigInt.zero;
+    }
+    final isOwnerHere = _room?['ownerId']?.toString() == Session.id;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(10, MediaQuery.paddingOf(context).top + 6, 10, 4),
+      child: Column(children: [
+        Row(children: [
+          Flexible(
+            child: _glass(
+              onTap: _roomInfo,
+              padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
+              radius: 28,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                UserAvatar(user: ownerUser, radius: 20),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (_room?['hidden'] == true) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.visibility_off, size: 14)),
+                      if (_room?['locked'] == true) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.lock, size: 14, color: Colors.orangeAccent)),
+                      Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+                      const Icon(Icons.arrow_drop_down, size: 18),
+                    ]),
+                    Text('ID: ${(ownerUser?['username'] ?? '').toString()}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                  ]),
+                ),
+              ]),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _glass(onTap: _membersSheet, radius: 18, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.person, size: 18), const SizedBox(width: 4), Text('${_members.length}', style: const TextStyle(fontWeight: FontWeight.w800))])),
+          const SizedBox(width: 6),
+          InkWell(
+            customBorder: const CircleBorder(),
+            onTap: _exitMenu,
+            child: const CircleAvatar(radius: 18, backgroundColor: Colors.black38, child: Icon(Icons.close, size: 20)),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        Row(children: [
+          _glass(radius: 14, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.diamond, size: 14, color: Colors.lightBlueAccent), const SizedBox(width: 4), Text(fmtNumber(total.toString()), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700))])),
+          const SizedBox(width: 6),
+          if (!isOwnerHere)
+            InkWell(
+              onTap: _toggleFavorite,
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: _fav ? Colors.orange.shade800 : Colors.orange, borderRadius: BorderRadius.circular(14)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(_fav ? Icons.star : Icons.star_border, size: 14, color: Colors.white), const SizedBox(width: 4), Text(_fav ? 'Favoride' : 'Favori', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white))]),
+              ),
+            )
+          else if (_isOwnerOrCohost)
+            InkWell(
+              onTap: _roomSettings,
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(14)),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.settings, size: 14, color: Colors.white), SizedBox(width: 4), Text('Ayarlar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white))]),
+              ),
+            ),
+          const Spacer(),
+          InkWell(
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+            child: const Padding(padding: EdgeInsets.all(4), child: CrownIcon(size: 34)),
+          ),
+        ]),
+      ]),
+    );
+  }
+
+  /// X düğmesi: Küçült / Çıkış (Figma).
+  void _exitMenu() {
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Kapat',
+      barrierColor: Colors.black87,
+      pageBuilder: (c, _, __) {
+        Widget big(IconData icon, String label, VoidCallback onTap) => InkWell(
+              onTap: onTap,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 76, height: 76, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: Icon(icon, size: 40, color: Colors.black)),
+                const SizedBox(height: 8),
+                Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white, decoration: TextDecoration.none)),
+              ]),
+            );
+        return SafeArea(
+          child: Stack(children: [
+            Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                big(Icons.close_fullscreen, 'Küçült', () {
+                  Navigator.pop(c);
+                  RoomDock.minimize();
+                }),
+                const SizedBox(height: 56),
+                big(Icons.power_settings_new, 'Çıkış', () {
+                  Navigator.pop(c);
+                  _onBack();
+                }),
+              ]),
+            ),
+            Positioned(top: 10, right: 14, child: IconButton(onPressed: () => Navigator.pop(c), icon: const CircleAvatar(backgroundColor: Colors.white24, child: Icon(Icons.close, color: Colors.white)))),
+          ]),
+        );
+      },
+    );
+  }
+
+  // ---------- Alt satır: 6 yuvarlak düğme (Figma) ----------
+  void _toggleRoomSound() {
+    setState(() => _roomMuted = !_roomMuted);
+    _applyRoomSound();
+    toast(context, _roomMuted ? 'Oda sesi kapatıldı (yalnızca sizde).' : 'Oda sesi açıldı.');
+  }
+
+  /// Uzaktaki konuşmacıların sesini bu cihazda kapatır / açar.
+  void _applyRoomSound() {
+    final room = _lk;
+    if (room == null) return;
+    for (final p in room.remoteParticipants.values) {
+      for (final pub in p.audioTrackPublications) {
+        try {
+          pub.track?.mediaStreamTrack.enabled = !_roomMuted;
+        } catch (_) {/* iz henüz hazır değil */}
+      }
+    }
+  }
+
+  void _emojiSheet() {
+    const emojis = ['😀', '😂', '🥰', '😍', '😎', '🤩', '😘', '😭', '😡', '👍', '👏', '🙏', '🔥', '💯', '🎉', '❤️', '💎', '🌹', '🎁', '👑', '🎤', '🎶', '😴', '🤔', '😅', '🥳', '😇', '🤗', '😜', '🙌', '💪', '✨'];
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          child: GridView.count(
+            shrinkWrap: true,
+            crossAxisCount: 8,
+            children: [
+              for (final e in emojis)
+                InkWell(
+                  onTap: () {
+                    Navigator.pop(c);
+                    setState(() {
+                      _inputOpen = true;
+                      _chatCtl.text += e;
+                      _chatCtl.selection = TextSelection.collapsed(offset: _chatCtl.text.length);
+                    });
+                  },
+                  child: Center(child: Text(e, style: const TextStyle(fontSize: 26))),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _roundBtn(IconData icon, String tip, VoidCallback? onTap, {Color? color, Color? bg}) => Tooltip(
+        message: tip,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: bg ?? Colors.black45, border: Border.all(color: Colors.white12)),
+            child: Icon(icon, color: color ?? Colors.white, size: 24),
+          ),
+        ),
+      );
+
   Widget _bottomBar() {
+    final queueMode = !_onSeat && _noFreeSeat && !_isManager;
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-        child: Row(children: [
-          if (_onSeat) ...[
-            IconButton.filledTonal(
-              tooltip: _micOn ? 'Mikrofonu sustur' : 'Mikrofonu aç',
-              onPressed: () {
+        padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          _roundBtn(Icons.chat_bubble_outline, 'Sohbet', () {
+            if (!_chatOpen) return toast(context, 'Bu odada yazılı sohbet kapalı.', error: true);
+            setState(() => _inputOpen = !_inputOpen);
+          }),
+          _roundBtn(Icons.sentiment_satisfied_alt, 'Emoji', _chatOpen ? _emojiSheet : null),
+          _roundBtn(_roomMuted ? Icons.volume_off : Icons.volume_up, _roomMuted ? 'Sesi aç' : 'Sesi kapat', _toggleRoomSound, color: _roomMuted ? Colors.redAccent : null),
+          if (_onSeat && _isVideo)
+            _roundBtn(_camOn ? Icons.videocam : Icons.videocam_off, 'Kamera', () {
+              setState(() => _camOn = !_camOn);
+              _syncPublish();
+            }),
+          if (_onSeat)
+            GestureDetector(
+              onLongPress: _leaveMic,
+              child: _roundBtn(_micOn ? Icons.mic : Icons.mic_off, 'Mikrofon (uzun bas: mikrofondan in)', () {
                 setState(() => _micOn = !_micOn);
                 _syncPublish();
-              },
-              icon: Icon(_micOn ? Icons.mic : Icons.mic_off),
-            ),
-            if (_isVideo) ...[
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                tooltip: _camOn ? 'Kamerayı kapat' : 'Kamerayı aç',
-                onPressed: () {
-                  setState(() => _camOn = !_camOn);
-                  _syncPublish();
-                },
-                icon: Icon(_camOn ? Icons.videocam : Icons.videocam_off),
-              ),
-            ],
-            const SizedBox(width: 8),
-            OutlinedButton(onPressed: _leaveMic, child: const Text('Mikrofondan in')),
-          ] else if (_noFreeSeat && !_isManager)
-            FilledButton.tonalIcon(
-              onPressed: _toggleQueue,
-              icon: Icon(_inQueue ? Icons.hourglass_bottom : Icons.queue),
-              label: Text(_inQueue ? 'Sıradan çık (${_queue.indexOf(Session.id) + 1}.)' : 'Sıraya gir${_queue.isEmpty ? '' : ' (${_queue.length})'}'),
+              }, color: _micOn ? Colors.greenAccent : Colors.redAccent),
             )
           else
-            FilledButton.icon(onPressed: () => _takeMic(), icon: const Icon(Icons.mic), label: const Text('Mikrofona çık')),
-          const Spacer(),
-          IconButton(tooltip: 'Oda araçları', onPressed: _openTools, icon: const Icon(Icons.apps_rounded)),
-          IconButton.filled(tooltip: 'Hediye gönder', onPressed: _members.isEmpty ? null : () => _openGifts(), icon: const Icon(Icons.card_giftcard)),
+            _roundBtn(queueMode ? (_inQueue ? Icons.hourglass_bottom : Icons.queue) : Icons.mic_none, queueMode ? (_inQueue ? 'Sıradan çık' : 'Sıraya gir') : 'Mikrofona çık', queueMode ? _toggleQueue : () => _takeMic()),
+          _roundBtn(Icons.card_giftcard, 'Hediye gönder', _members.isEmpty ? null : () => _openGifts(), color: Colors.amber),
+          _roundBtn(Icons.menu, 'Oda araçları', _openTools),
         ]),
       ),
     );
@@ -1553,33 +1760,6 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         if (!didPop) RoomDock.minimize();
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: Row(children: [
-            if (_room?['hidden'] == true) const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.visibility_off, size: 18)),
-            Flexible(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: _roomInfo,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Flexible(child: Text((_room?['name'] ?? widget.initialName).toString(), overflow: TextOverflow.ellipsis)),
-                    const Icon(Icons.arrow_drop_down),
-                  ]),
-                ),
-              ),
-            ),
-          ]),
-          leading: IconButton(tooltip: 'Odayı küçült', icon: const Icon(Icons.keyboard_arrow_down), onPressed: RoomDock.minimize),
-          actions: [
-            if (_room?['ownerId']?.toString() != Session.id)
-              IconButton(tooltip: _fav ? 'Favorilerden çıkar' : 'Favorilere ekle', icon: Icon(_fav ? Icons.star : Icons.star_border, color: _fav ? Colors.amber : null), onPressed: _toggleFavorite),
-            IconButton(tooltip: 'Odadan ayrıl', icon: const Icon(Icons.logout), onPressed: _onBack),
-            TextButton.icon(onPressed: _membersSheet, icon: const Icon(Icons.people_outline), label: Text('${_members.length}')),
-            if (_myRole == 'owner' || _myRole == 'cohost') IconButton(tooltip: 'Oda ayarları', icon: const Icon(Icons.settings), onPressed: _roomSettings),
-            if (_myRole == 'owner') IconButton(tooltip: 'Odayı kapat', icon: const Icon(Icons.power_settings_new), onPressed: _closeRoom),
-          ],
-        ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : RoomThemeBackground(
@@ -1588,6 +1768,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 child: GiftRibbonOverlay(
                 roomId: widget.roomId,
                 child: Column(children: [
+                  _roomHeader(),
                   if (_lkError != null)
                     Material(
                       color: Colors.red.shade900,
@@ -1612,8 +1793,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                       child: ListView(physics: const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()), children: [_seatGrid(), _audience()]),
                     ),
                   ),
-                  const Divider(height: 1),
                   Expanded(flex: 3, child: _chatPanel()),
+                  _inputBar(),
                   _bottomBar(),
                 ]),
               )),
