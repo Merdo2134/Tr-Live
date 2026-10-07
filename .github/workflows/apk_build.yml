@@ -56,7 +56,7 @@ jobs:
           else
             echo "Android bileşenleri eksik veya yarım; flutter create ile üretiliyor..."
             rm -rf android
-            flutter create --platforms=android --project-name "TLive" --org com.trlive .
+            flutter create --platforms=android --project-name "tr_live" --org com.trlive .
             if [ -f test/widget_test.dart ] && grep -q 'MyApp' test/widget_test.dart; then rm -f test/widget_test.dart; fi
           fi
           test -f android/app/src/main/AndroidManifest.xml
@@ -130,7 +130,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Sunucu adresi doğrulama adımı pas geçildi veya manuel tetiklendi."
+          echo "Sunucu adresi doğrulama adımı pas geçildi."
 
       - name: Bağımlılıkları indir
         shell: bash
