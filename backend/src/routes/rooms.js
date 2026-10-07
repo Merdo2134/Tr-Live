@@ -224,20 +224,20 @@ router.get('/:roomId', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const r = (await query(
     `SELECT r.id AS room_id, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags, r.chat_enabled,
-       r.is_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats,
+       r.is_hidden AS room_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats,
        (r.password_hash IS NOT NULL) AS locked, ${USER_PUBLIC_COLUMNS}
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS} WHERE r.id = $1 AND r.is_active = TRUE`,
     [roomId],
   )).rows[0];
   if (!r) throw fail('Oda bulunamadı.', 404);
   const me = await memberOf(roomId, req.user.id);
-  if (r.is_hidden && !me && r.owner_id !== req.user.id) throw fail('Oda bulunamadı.', 404);
+  if (r.room_hidden && !me && r.owner_id !== req.user.id) throw fail('Oda bulunamadı.', 404);
   const canSeeCode = me && ['owner', 'cohost'].includes(me.role);
   res.json({
     room: {
       id: r.room_id, name: r.room_name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.room_created_at,
       tags: r.tags ?? [], locked: r.locked, chatEnabled: r.chat_enabled !== false,
-      hidden: r.is_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [],
+      hidden: r.room_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [],
       ...(canSeeCode && r.join_code ? { joinCode: r.join_code } : {}),
       owner: publicUser(r, req.user.id),
     },
