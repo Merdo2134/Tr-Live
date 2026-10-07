@@ -1,0 +1,65 @@
+name: Zip ile güncelle
+
+# Kullanım (token gerekmez): depoya GitHub sitesinden "Add file > Upload files" ile TR-Live-v....zip dosyasını ANA DİZİNE yükleyin.
+# Bu iş akışı zip'i açar, projeyi içindekiyle birebir eşitler (eski/fazla dosyalar silinir), zip'i siler ve APK derlemesini başlatır.
+# Not: .github/workflows klasörü GitHub kuralı gereği buradan güncellenemez; bir iş akışı dosyası değiştiyse onu elle yükleyin.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "*.zip"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: zip-guncelle
+  cancel-in-progress: false
+
+jobs:
+  guncelle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Depoyu indir
+        uses: actions/checkout@v4
+
+      - name: Zip'i bul, aç ve projeyi eşitle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="$(ls -t ./TR-Live-v*.zip 2>/dev/null | head -1 || true)"
+          if [ -z "$ZIP" ]; then echo "Ana dizinde TR-Live-v*.zip yok; yapılacak bir şey yok."; echo "NOZIP=1" >> "$GITHUB_ENV"; exit 0; fi
+          echo "Zip: $ZIP"
+          T="$(mktemp -d)"
+          unzip -q "$ZIP" -d "$T"
+          [ -f "$T/mobile/pubspec.yaml" ] || { echo "HATA: zip beklenen yapıda değil (mobile/pubspec.yaml yok)"; exit 1; }
+          [ -f "$T/backend/package.json" ] || { echo "HATA: zip beklenen yapıda değil (backend/package.json yok)"; exit 1; }
+          # .git ve .github dışındaki her şeyi sil, zip içeriğini (.github hariç) kopyala
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.github' ! -name "$(basename "$ZIP")" -exec rm -rf {} +
+          rm -rf "$T/.github"
+          cp -a "$T/." .
+          rm -f "$ZIP" ./TR-Live-v*.zip
+          grep -m1 '^version:' mobile/pubspec.yaml | tee /tmp/ver.txt
+
+      - name: Değişiklikleri kaydet
+        if: env.NOZIP != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "Değişiklik yok."; exit 0; fi
+          VER="$(sed 's/version: *//' /tmp/ver.txt)"
+          git commit -q -m "TR Live v${VER} (zip ile güncellendi)"
+          git push
+
+      - name: APK derlemesini başlat
+        if: env.NOZIP != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh workflow run apk_build.yml --ref main || echo "APK derlemesi otomatik başlatılamadı; Actions sekmesinden 'Build Android APK' > Run workflow ile başlatın."

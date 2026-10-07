@@ -116,6 +116,37 @@ jobs:
               gradle.write_text(new)
               print(f"{gradle}: minSdk 24 yapıldı")
 
+          # 1b) Tüm eklentileri (file_picker vb.) compileSdk 36 ile derle.
+          # Eski eklentiler android-34 ile derlenir; flutter_plugin_android_lifecycle ise 36 ister ve "checkReleaseAarMetadata" hatası verir.
+          marker_txt = "// TRLIVE_COMPILE_SDK"
+          kts, grv = pathlib.Path("android/build.gradle.kts"), pathlib.Path("android/build.gradle")
+          if kts.exists():
+              t = kts.read_text()
+              if marker_txt not in t:
+                  block = (marker_txt + "\n"
+                           "subprojects {\n"
+                           "    val trliveFix: Project.() -> Unit = {\n"
+                           "        extensions.findByName(\"android\")?.withGroovyBuilder { \"compileSdkVersion\"(36) }\n"
+                           "    }\n"
+                           "    if (state.executed) trliveFix() else afterEvaluate { trliveFix() }\n"
+                           "}\n\n")
+                  kts.write_text(block + t)
+                  print("android/build.gradle.kts: compileSdk 36 zorlandı")
+          elif grv.exists():
+              t = grv.read_text()
+              if marker_txt not in t:
+                  block = (marker_txt + "\n"
+                           "subprojects {\n"
+                           "    def trliveFix = { Project pr ->\n"
+                           "        if (pr.hasProperty('android')) { pr.android.compileSdkVersion 36 }\n"
+                           "    }\n"
+                           "    if (project.state.executed) { trliveFix(project) } else { project.afterEvaluate { trliveFix(it) } }\n"
+                           "}\n\n")
+                  grv.write_text(block + t)
+                  print("android/build.gradle: compileSdk 36 zorlandı")
+          else:
+              print("UYARI: android/build.gradle(.kts) bulunamadı; compileSdk zorlanamadı")
+
           # 2) Manifest: izinler (+ isteğe bağlı http izni)
           mf = pathlib.Path("android/app/src/main/AndroidManifest.xml")
           s = mf.read_text()
