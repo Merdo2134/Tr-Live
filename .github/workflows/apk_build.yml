@@ -1,18 +1,18 @@
-name: Build Android APK
+name: Android APK'sı oluşturun
 
 on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: "Sunucu adresi (örn. https://api.siteniz.com)"
+        description: "Sunucu adresi (örn. https://siteniz.com)"
         required: false
-        default: "https://api.example.com"
+        default: "https://example.com"
       allow_http:
         description: "http:// adresine izin ver (yalnızca test için)"
         type: boolean
         default: false
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
       - "mobile/**"
       - ".github/workflows/apk_build.yml"
@@ -25,9 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      INPUT_API_URL: ${{ github.event.inputs.api_url }}
-      INPUT_ALLOW_HTTP: ${{ github.event.inputs.allow_http }}
-      REPO_API_URL: ${{ vars.API_URL }}
+      INPUT_API_URL: \${{ github.event.inputs.api_url }}
+      INPUT_ALLOW_HTTP: \${{ github.event.inputs.allow_http }}
+      REPO_API_URL: \${{ vars.API_URL }}
     steps:
       - name: Depoyu indir
         uses: actions/checkout@v4
@@ -38,31 +38,30 @@ jobs:
           set -e pipefail
           APP_PUBSPEC=""
           while IFS= read -r f; do
-            if grep -q 'sdk: flutter' "$f"; then APP_PUBSPEC="$f"; break; fi
+            if grep -q 'sdk: flutter' "\$f"; then APP_PUBSPEC="\$f"; break; fi
           done < <(find . -name pubspec.yaml \
             -not -path "*/.dart_tool/*" -not -path "*/build/*" -not -path "*/.symlinks/*" \
             -not -path "*/node_modules/*" -not -path "*/.git/*" | sort)
           
-          if [ -z "$APP_PUBSPEC" ]; then
+          if [ -z "\$APP_PUBSPEC" ]; then
             echo "::error::Depoda Flutter projesi (içinde 'sdk: flutter' geçen pubspec.yaml) bulunamadı."
             exit 1
           fi
           
-          # KRİTİK DÜZELTME: Mutlak yol yerine bağıl (relative) yol alıyoruz
-          APP_DIR="$(dirname "$APP_PUBSPEC" | sed "s|^$GITHUB_WORKSPACE/||; s|^$GITHUB_WORKSPACE||")"
-          [ "$APP_DIR" == "." ] && APP_DIR=""
+          # Dizin çakışmalarını önleyen güvenli bağıl yol (relative path) üretimi
+          APP_DIR="(dirname "APP_PUBSPEC" | sed "s|^\(GITHUB_WORKSPACE/\vert{}\vert{}; s\vert{}^\)GITHUB_WORKSPACE||")"
+          [ "\$APP_DIR" == "." ] && APP_DIR=""
           
-          APP_NAME=$(grep -E '^[[:space:]]*name:' "$APP_PUBSPEC" | sed -E "s/name:[[:space:]]*['\"]?//; s/['\"]?[[:space:]]*$//g" | tr -d '\r')
-          if ! [[ "$APP_NAME" =~ ^[a-z0-9_]+$ ]]; then 
+          APP_NAME=\$(grep -E '^[[:space:]]*name:' "\(APP_PUBSPEC" \vert{} sed -E "s/name:[[:space:]]*['\"]?//; s/['\"]?[[:space:]]*\)//g" | tr -d \('\r')\)
+          if ! [[ "\(APP_NAME" =~ ^[a-z0-9_]+\) ]]; then 
             APP_NAME="tr_live"
           fi
           
-          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
-          echo "Flutter projesi bulundu: Dizin='$APP_DIR' Paket Adı='$APP_NAME'"
+          echo "APP_DIR=\(APP_DIR" >> "\)GITHUB_ENV"
+          echo "APP_NAME=\(APP_NAME" >> "\)GITHUB_ENV"
+          echo "Flutter projesi bulundu: Dizin='\$APP_DIR' Paket Adı='\$APP_NAME'"
 
-
-           - name: Java 17 kur
+      - name: Java 17 kur
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -113,14 +112,12 @@ jobs:
 
           src = gradle_file.read_text(encoding="utf-8")
           
-          # minSdk'yi en az 24 yap
           if "minSdkVersion" in src:
               m = re.search(r"minSdkVersion\s*=?\s*(\d+)", src)
               if m and int(m.group(1)) < 24:
                   src = re.sub(r"(minSdkVersion\s*=?\s*)\d+", r"\g<1>24", src, count=1)
                   print("minSdkVersion 24 olarak güncellendi.")
 
-          # compileSdkVersion ve targetSdkVersion'ı 35 yap
           for sdk_key in ["compileSdkVersion", "targetSdkVersion", "compileSdk", "targetSdk"]:
               pattern = rf"({sdk_key}\s*=?\s*)(\d+|[A-Za-z\-_\.]+)"
               src = re.sub(pattern, rf"\g<1>35", src)
@@ -149,7 +146,6 @@ jobs:
               if add_perms:
                   s = s.replace("<application", f"{add_perms}<application", 1)
 
-              # Arka plan servis tanımlamaları
               services = ""
               if "flutter_background_task.service.ForegroundService" not in s:
                   services += '        <service android:name="com.pravera.flutter_background_task.service.ForegroundService" android:foregroundServiceType="microphone" />\n'
@@ -159,7 +155,6 @@ jobs:
               if services:
                   s = s.replace("</application>", f"{services}    </application>", 1)
 
-              # HTTP İzin Kontrolü (CleartextTraffic)
               if os.environ.get("INPUT_ALLOW_HTTP", "").lower() == "true" and "usesCleartextTraffic" not in s:
                   s = s.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
                   print("HTTP (cleartext) izni eklendi.")
@@ -205,7 +200,7 @@ jobs:
         working-directory: \${{ env.APP_DIR }}
         run: |
           set -e pipefail
-          flutter build apk --release --no-shrink --target-platform android-arm64 --dart-define=API_URL="\${{ env.API_URL }}" | tee build.log
+          flutter build apk --release --no-shrink --target-platform android-arm64 --dart-define=API_URL="\${{{ env.API_URL }}" | tee build.log
           ls -la build/app/outputs/flutter-apk/
 
       - name: Özet
