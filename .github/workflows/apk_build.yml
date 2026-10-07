@@ -88,126 +88,140 @@ jobs:
 
       - name: Android ayarlarını düzelt (minSdk 24, izinler)
         shell: bash
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: \${{ env.APP_DIR }}
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os, re, pathlib, sys
+          set -e pipefail
+          python3 - << 'EOF'
+          import os
+          import re
+          from pathlib import Path
 
-          # 1) minSdk: build.gradle.kts ve build.gradle ikisini de destekler
-          gradle = None
-          for name in ("android/app/build.gradle.kts", "android/app/build.gradle"):
-              if os.path.exists(name):
-                  gradle = pathlib.Path(name); break
-          if gradle is None:
-              sys.exit("HATA: android/app/build.gradle(.kts) bulunamadı")
-          src = gradle.read_text()
-          new, n = re.subn(r"(minSdk(?:Version)?)(\s*=?\s*)flutter\.minSdkVersion", r"\g<1>\g<2>24", src)
-          if n == 0:
-              m = re.search(r"minSdk(?:Version)?\s*=?\s*(\d+)", src)
-              if m and int(m.group(1)) >= 24:
-                  print(f"minSdk zaten {m.group(1)}")
-              elif m:
-                  new = re.sub(r"(minSdk(?:Version)?)(\s*=?\s*)\d+", r"\g<1>\g<2>24", src, count=1)
-                  n = 1
-              else:
-                  print("UYARI: minSdk satırı bulunamadı; Flutter varsayılanı kullanılacak")
-                  if n:
-            # compileSdkVersion ve targetSdkVersion kalıplarını güvenli regex gruplarıyla yakala
-            # Değişken (flutter.compileSdkVersion) veya statik sayı (34) fark etmeksizin 35'e yükselt
-            for sdk_key in ["compileSdkVersion", "targetSdkVersion"]:
-                pattern = rf"({sdk_key}\s+)(?:\d+|[a-zA-Z\.]+)"
-                new = re.sub(pattern, rf"\g<1>35", new)
-            
-            # Güncellenmiş içeriği dosyaya atomik olarak yaz ve logla
-            gradle_file.write_text(new, encoding="utf-8")
-            print(f"[SUCCESS] {gradle.name}: Android SDK bileşenleri (minSdkVersion: 24, compile/targetSdk: 35) başarıyla optimize edildi.")
+          # 1) minSdk, compileSdk ve targetSdk Güncelleme
+          gradle_file = None
+          for name in ["android/app/build.gradle.kts", "android/app/build.gradle"]:
+              if Path(name).exists():
+                  gradle_file = Path(name)
+                  break
 
-          # 2) Manifest: izinler (+ isteğe bağlı http izni)
-          mf = pathlib.Path("android/app/src/main/AndroidManifest.xml")
-          s = mf.read_text()
-          perms = ["INTERNET", "RECORD_AUDIO", "CAMERA", "MODIFY_AUDIO_SETTINGS", "ACCESS_NETWORK_STATE", "BLUETOOTH_CONNECT",
-                   "WAKE_LOCK", "POST_NOTIFICATIONS", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-                   "FOREGROUND_SERVICE_SPECIAL_USE", "SYSTEM_ALERT_WINDOW", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"]
-          add = "".join(f'    <uses-permission android:name="android.permission.{p}"/>\n' for p in perms if f'android.permission.{p}"' not in s)
-          if add:
-              s = s.replace("<application", add + "    <application", 1)
-          # Arka plan (ön plan servisi) ve diğer uygulamaların üzerinde balon: servis bildirimleri
-          if "xmlns:tools" not in s:
-              s = s.replace("<manifest ", '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
-          services = ""
-          if "flutter_foreground_task.service.ForegroundService" not in s:
-              services += '        <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="microphone|mediaPlayback" android:exported="false" tools:replace="android:foregroundServiceType"/>\n'
-          if "OverlayService" not in s:
-              services += ('        <service android:name="flutter.overlay.window.flutter_overlay_window.OverlayService" android:exported="false" android:foregroundServiceType="specialUse" tools:replace="android:foregroundServiceType">\n'
-                           '            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Oda sesini ve yüzen balonu arka planda göstermek"/>\n'
-                           '        </service>\n')
-          if services:
-              s = s.replace("</application>", services + "    </application>", 1)
-          if os.environ.get("INPUT_ALLOW_HTTP", "").lower() == "true" and "usesCleartextTraffic" not in s:
-              s = s.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
-              print("http (cleartext) izni eklendi — yalnızca test için")
-          mf.write_text(s)
-          print("Manifest izinleri tamam")
-          PY
+          if gradle_file is None:
+              print("HATA: build.gradle(.kts) dosyası bulunamadı!")
+              exit(1)
+
+          src = gradle_file.read_text(encoding="utf-8")
+          
+          # minSdk'yi en az 24 yap
+          if "minSdkVersion" in src:
+              m = re.search(r"minSdkVersion\s*=?\s*(\d+)", src)
+              if m and int(m.group(1)) < 24:
+                  src = re.sub(r"(minSdkVersion\s*=?\s*)\d+", r"\g<1>24", src, count=1)
+                  print("minSdkVersion 24 olarak güncellendi.")
+
+          # compileSdkVersion ve targetSdkVersion'ı 35 yap (Güvenli RegEx)
+          for sdk_key in ["compileSdkVersion", "targetSdkVersion", "compileSdk", "targetSdk"]:
+              pattern = rf"({sdk_key}\s*=?\s*)(\d+|[A-Za-z\-_\.]+)"
+              src = re.sub(pattern, rf"\g<1>35", src)
+
+          gradle_file.write_text(src, encoding="utf-8")
+          print(f"[BAŞARILI] {gradle_file.name} Android SDK bileşenleri güncellendi (minSdk: 24, compile/targetSdk: 35).")
+
+          # 2) Manifest İzinleri ve Ayarları
+          manifest_path = Path("android/app/src/main/AndroidManifest.xml")
+          if manifest_path.exists():
+              s = manifest_path.read_text(encoding="utf-8")
+              
+              perms = [
+                  "INTERNET", "RECORD_AUDIO", "CAMERA", "MODIFY_AUDIO_SETTINGS", 
+                  "ACCESS_NETWORK_STATE", "BLUETOOTH", "CONNECT", "WAKE_LOCK", 
+                  "POST_NOTIFICATIONS", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MICROPHONE", 
+                  "FOREGROUND_SERVICE_CONNECTED_DEVICE", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+              ]
+              
+              add_perms = ""
+              for p in perms:
+                  perm_string = f'<uses-permission android:name="android.permission.{p}" />'
+                  if perm_string not in s:
+                      add_perms += f"    {perm_string}\n"
+              
+              if add_perms:
+                  s = s.replace("<application", f"{add_perms}<application", 1)
+
+              # Arka plan servis tanımlamaları
+              services = ""
+              if "flutter_background_task.service.ForegroundService" not in s:
+                  services += '        <service android:name="com.pravera.flutter_background_task.service.ForegroundService" android:foregroundServiceType="microphone" />\n'
+              if "OverlayService" not in s:
+                  services += '        <service android:name="flutter.overlay.window.flutter_overlay_window.OverlayService" android:exported="false" android:foregroundServiceType="specialUse">\n            <property android:name="android.app.PROPERTY_SPECIAL_USE_FOS_SUBTYPE" android:value="Ui"/ >\n        </service>\n'
+              
+              if services:
+                  s = s.replace("</application>", f"{services}    </application>", 1)
+
+              # HTTP İzin Kontrolü (CleartextTraffic)
+              if os.environ.get("INPUT_ALLOW_HTTP", "").lower() == "true" and "usesCleartextTraffic" not in s:
+                  s = s.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+                  print("HTTP (cleartext) izni eklendi.")
+
+              manifest_path.write_text(s, encoding="utf-8")
+              print("AndroidManifest.xml izinleri başarıyla tanımlandı.")
+          EOF
 
       - name: Sunucu adresini doğrula
         shell: bash
         run: |
-          set -euo pipefail
-          API_URL="${INPUT_API_URL:-}"
-          [ -n "$API_URL" ] || API_URL="${REPO_API_URL:-}"
-          [ -n "$API_URL" ] || API_URL="https://api.example.com"
-          if ! printf '%s' "$API_URL" | grep -qE '^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$'; then
-            echo "::error::Sunucu adresi geçersiz: $API_URL"; exit 1
+          set -e pipefail
+          API_URL="\${INPUT_API_URL:-}"
+          [ -n "\(API_URL" ] \vert{}\vert{} API_URL="\){REPO_API_URL:-}"
+          [ -n "\$API_URL" ] || API_URL="https://example.com"
+          
+          if ! [[ "\$API_URL" =~ ^https?://[A-Za-z0-9.-]+ ]]; then
+             echo "::error::Sunucu adresi geçersiz: \$API_URL"
+             exit 1
           fi
-          if printf '%s' "$API_URL" | grep -q '^http://' && [ "${INPUT_ALLOW_HTTP:-false}" != "true" ]; then
-            echo "::error::Android http:// adreslerini varsayılan olarak engeller. https kullanın ya da 'allow_http' kutusunu işaretleyin (yalnızca test)."
-            exit 1
+          
+          if [[ "\(API_URL" == http://* ]] && [ "\){INPUT_ALLOW_HTTP}" != "true" ]; then
+             echo "::error::Android http:// adreslerini varsayılan olarak engeller. 'allow_http' kullanın."
+             exit 1
           fi
-          echo "API_URL=$API_URL" >> "$GITHUB_ENV"
-          echo "Sunucu adresi: $API_URL"
+          echo "API_URL=\(API_URL" >> "\)GITHUB_ENV"
+          echo "Sunucu adresi doğrulandı: \$API_URL"
 
       - name: Bağımlılıkları indir
         shell: bash
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: \${{ env.APP_DIR }}
         run: flutter pub get
 
       - name: Kod analizi (bilgi amaçlı, derlemeyi durdurmaz)
         shell: bash
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: \${{ env.APP_DIR }}
         run: |
           flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee analyze.log || true
-          echo "Hata sayısı: $(grep -c ' error • ' analyze.log || true)"
+          echo "Hata sayısı: \$(grep -c 'error' analyze.log || true)"
 
       - name: APK derle
         shell: bash
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: \${{ env.APP_DIR }}
         run: |
-          set -euo pipefail
-          # arm64: bugünkü telefonların neredeyse tamamı; tek dosya, küçük boyut. Debug anahtarıyla imzalanır (test/yan yükleme için).
-          flutter build apk --release --no-shrink --target-platform android-arm64 \
-            --dart-define=API_URL="$API_URL" 2>&1 | tee build.log
+          set -e pipefail
+          flutter build apk --release --no-shrink --target-platform android-arm64 --dart-define=API_URL="\${{ env.API_URL }}" | tee build.log
           ls -la build/app/outputs/flutter-apk/
 
       - name: Özet
         if: success()
         shell: bash
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: \${{ env.APP_DIR }}
         run: |
-          APK="$(ls build/app/outputs/flutter-apk/*.apk | head -1)"
+          APK=\$(ls build/app/outputs/flutter-apk/*.apk | head -n 1)
           {
-            echo "### APK hazır ✅"
-            echo "- Dosya: \`$(basename "$APK")\` ($(du -h "$APK" | cut -f1))"
-            echo "- Sunucu adresi: \`$API_URL\`"
-            echo "- Aşağıdaki **Artifacts** bölümünden \`tr-live-apk\` dosyasını indirin, zip'ten çıkarıp yükleyin."
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "### APK Hazır ✅"
+            echo " * Dosya: \`$(basename "$APK")\` ((du -h "APK" | cut -f1))"
+            echo " * Sunucu Adresi: \`${{ env.API_URL }}\`"
+            echo " * Aşağıdaki **Artifacts** bölümünden \`tr-live-apk\` dosyasını indirin, zip'ten çıkarıp yükleyin."
+          } >> "\$GITHUB_STEP_SUMMARY"
 
       - name: APK'yı çıktı olarak paylaş
         uses: actions/upload-artifact@v4
         with:
           name: tr-live-apk
-          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/*.apk
+          path: \${{ env.APP_DIR }}/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -217,7 +231,8 @@ jobs:
         with:
           name: build-logs
           path: |
-            ${{ env.APP_DIR }}/build.log
-            ${{ env.APP_DIR }}/analyze.log
+            \${{ env.APP_DIR }}/build.log
+            \${{ env.APP_DIR }}/analyze.log
           if-no-files-found: ignore
           retention-days: 7
+  
