@@ -32,34 +32,43 @@ jobs:
       - name: Depoyu indir
         uses: actions/checkout@v4
 
-      - name: Flutter projesini bul (pubspec.yaml nerede olursa olsun)
+            - name: Flutter projesini bul (pubspec.yaml nerede olursa olsun)
         shell: bash
         run: |
           set -e pipefail
-          APP_PUBSPEC=""
-          while IFS= read -r f; do
-            if grep -q 'sdk: flutter' "\$f"; then APP_PUBSPEC="\$f"; break; fi
-          done < <(find . -name pubspec.yaml \
-            -not -path "*/.dart_tool/*" -not -path "*/build/*" -not -path "*/.symlinks/*" \
-            -not -path "*/node_modules/*" -not -path "*/.git/*" | sort)
           
-          if [ -z "\$APP_PUBSPEC" ]; then
-            echo "::error::Depoda Flutter projesi (içinde 'sdk: flutter' geçen pubspec.yaml) bulunamadı."
+          # Depodaki pubspec.yaml dosyasını bul (Gereksiz klasörleri filtrele)
+          APP_PUBSPEC=$(find . -name "pubspec.yaml" \
+            -not -path "*/.dart_tool/*" \
+            -not -path "*/build/*" \
+            -not -path "*/.symlinks/*" \
+            -not -path "*/node_modules/*" \
+            -not -path "*/.git/*" | sort | head -n 1)
+
+          if [ -z "$APP_PUBSPEC" ]; then
+            echo "::error::Depoda Flutter projesi (pubspec.yaml) bulunamadı."
             exit 1
           fi
-          
-          # Güvenli bağıl yol (relative path) üretimi
-          APP_DIR=(dirname "APP_PUBSPEC" | sed "s|^\(GITHUB_WORKSPACE/\vert{}\vert{}; s\vert{}^\)GITHUB_WORKSPACE||")
-          [ "\$APP_DIR" == "." ] && APP_DIR=""
-          
-          APP_NAME=\$(grep -E '^[[:space:]]*name:' "\(APP_PUBSPEC" \vert{} sed -E "s/name:[[:space:]]*['\"]?//; s/['\"]?[[:space:]]*\)//g" | tr -d \('\r')\)
-          if ! [[ "\(APP_NAME" =~ ^[a-z0-9_]+\) ]]; then 
+
+          # Dizin yolunu temizle ve bağıl yola çevir
+          DIR_NAME=$(dirname "$APP_PUBSPEC")
+          CLEAN_DIR=${DIR_NAME#./}
+          if [ "$CLEAN_DIR" = "." ] || [ "$CLEAN_DIR" = "$DIR_NAME" ]; then
+            APP_DIR=""
+          else
+            APP_DIR="$CLEAN_DIR"
+          fi
+
+          # Proje adını pubspec.yaml içinden güvenle oku
+          APP_NAME=$(grep -E "^name:" "$APP_PUBSPEC" | awk '{print $2}' | tr -d "'\"" | tr -d '\r')
+          if [ -z "$APP_NAME" ]; then
             APP_NAME="tr_live"
           fi
-          
-          echo "APP_DIR=\(APP_DIR" >> "\)GITHUB_ENV"
-          echo "APP_NAME=\(APP_NAME" >> "\)GITHUB_ENV"
-          echo "Flutter projesi bulundu: Dizin='\$APP_DIR' Paket Adı='\$APP_NAME'"
+
+          # Environment variable olarak kaydet
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
+          echo "Flutter projesi bulundu: Dizin='$APP_DIR' Paket Adı='$APP_NAME'"
 
       - name: Java 17 kur
         uses: actions/setup-java@v4
