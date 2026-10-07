@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+node_modules/
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+*.log
+backend/uploads/
+mobile/android/app/google-services.json
+mobile/ios/Runner/GoogleService-Info.plist
+
+backend/node_modules/
+mobile/android/local.properties
