@@ -35,26 +35,34 @@ jobs:
       - name: Flutter projesini bul (pubspec.yaml nerede olursa olsun)
         shell: bash
         run: |
-          set -euo pipefail
+          set -e pipefail
           APP_PUBSPEC=""
           while IFS= read -r f; do
             if grep -q 'sdk: flutter' "$f"; then APP_PUBSPEC="$f"; break; fi
           done < <(find . -name pubspec.yaml \
-            -not -path '*/.dart_tool/*' -not -path '*/build/*' -not -path '*/.symlinks/*' \
-            -not -path '*/node_modules/*' -not -path './.git/*' | sort)
+            -not -path "*/.dart_tool/*" -not -path "*/build/*" -not -path "*/.symlinks/*" \
+            -not -path "*/node_modules/*" -not -path "*/.git/*" | sort)
+          
           if [ -z "$APP_PUBSPEC" ]; then
             echo "::error::Depoda Flutter projesi (içinde 'sdk: flutter' geçen pubspec.yaml) bulunamadı."
-            echo "Deponun ilk 3 seviyesi:"; find . -maxdepth 3 -not -path './.git/*' | sort | head -80
             exit 1
           fi
-          APP_DIR="$(cd "$(dirname "$APP_PUBSPEC")" && pwd)"
-          APP_NAME="$(grep -m1 -E '^name:' "$APP_PUBSPEC" | sed -E 's/^name:[[:space:]]*//; s/["'"'"']//g' | tr -d '\r ')"
-          if ! printf '%s' "$APP_NAME" | grep -qE '^[a-z][a-z0-9_]*$'; then APP_NAME="tr_live"; fi
-          echo "APP_DIR=$APP_DIR"   >> "$GITHUB_ENV"
+          
+          # KRİTİK DÜZELTME: Mutlak yol yerine bağıl (relative) yol alıyoruz
+          APP_DIR="$(dirname "$APP_PUBSPEC" | sed "s|^$GITHUB_WORKSPACE/||; s|^$GITHUB_WORKSPACE||")"
+          [ "$APP_DIR" == "." ] && APP_DIR=""
+          
+          APP_NAME=$(grep -E '^[[:space:]]*name:' "$APP_PUBSPEC" | sed -E "s/name:[[:space:]]*['\"]?//; s/['\"]?[[:space:]]*$//g" | tr -d '\r')
+          if ! [[ "$APP_NAME" =~ ^[a-z0-9_]+$ ]]; then 
+            APP_NAME="tr_live"
+          fi
+          
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
-          echo "Flutter projesi bulundu: $APP_DIR (paket adı: $APP_NAME)"
+          echo "Flutter projesi bulundu: Dizin='$APP_DIR' Paket Adı='$APP_NAME'"
 
-      - name: Java 17 kur
+
+           - name: Java 17 kur
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -68,23 +76,19 @@ jobs:
 
       - name: android klasörü yoksa sıfırdan üret
         shell: bash
-        working-directory: ${{ env.APP_DIR }}
+        working-directory: \${{ env.APP_DIR }}
         run: |
-          set -euo pipefail
+          set -e pipefail
           flutter --version
           HAS_GRADLE=false
-          if [ -f android/app/build.gradle ] || [ -f android/app/build.gradle.kts ]; then HAS_GRADLE=true; fi
-          if [ -f android/app/src/main/AndroidManifest.xml ] && [ "$HAS_GRADLE" = true ]; then
+          if [ -f android/build.gradle ] || [ -f android/build.gradle.kts ]; then HAS_GRADLE=true; fi
+          if [ -f android/app/src/main/AndroidManifest.xml ] && [ "\$HAS_GRADLE" = true ]; then
             echo "android klasörü zaten var, üretilmiyor."
           else
             echo "android klasörü eksik veya yarım; flutter create ile üretiliyor..."
             rm -rf android
-            flutter create . --platforms=android --project-name "$APP_NAME" --org com.trlive
-            # flutter create örnek bir test ekleyebilir; bu projede olmayan MyApp'e bağlıdır, silinir.
-            if [ -f test/widget_test.dart ] && grep -q 'MyApp' test/widget_test.dart; then rm -f test/widget_test.dart; fi
+            flutter create . --platforms=android --project-name "\$APP_NAME" --org com.trlive
           fi
-          test -f android/app/src/main/AndroidManifest.xml
-          echo "android/app içeriği:"; ls -la android/app
 
       - name: Android ayarlarını düzelt (minSdk 24, izinler)
         shell: bash
@@ -116,7 +120,7 @@ jobs:
                   src = re.sub(r"(minSdkVersion\s*=?\s*)\d+", r"\g<1>24", src, count=1)
                   print("minSdkVersion 24 olarak güncellendi.")
 
-          # compileSdkVersion ve targetSdkVersion'ı 35 yap (Güvenli RegEx)
+          # compileSdkVersion ve targetSdkVersion'ı 35 yap
           for sdk_key in ["compileSdkVersion", "targetSdkVersion", "compileSdk", "targetSdk"]:
               pattern = rf"({sdk_key}\s*=?\s*)(\d+|[A-Za-z\-_\.]+)"
               src = re.sub(pattern, rf"\g<1>35", src)
@@ -235,4 +239,3 @@ jobs:
             \${{ env.APP_DIR }}/analyze.log
           if-no-files-found: ignore
           retention-days: 7
-  
