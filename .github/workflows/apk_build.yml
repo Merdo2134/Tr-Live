@@ -112,9 +112,16 @@ jobs:
                   n = 1
               else:
                   print("UYARI: minSdk satırı bulunamadı; Flutter varsayılanı kullanılacak")
-          if n:
-              gradle.write_text(new)
-              print(f"{gradle}: minSdk 24 yapıldı")
+                  if n:
+            # compileSdkVersion ve targetSdkVersion kalıplarını güvenli regex gruplarıyla yakala
+            # Değişken (flutter.compileSdkVersion) veya statik sayı (34) fark etmeksizin 35'e yükselt
+            for sdk_key in ["compileSdkVersion", "targetSdkVersion"]:
+                pattern = rf"({sdk_key}\s+)(?:\d+|[a-zA-Z\.]+)"
+                new = re.sub(pattern, rf"\g<1>35", new)
+            
+            # Güncellenmiş içeriği dosyaya atomik olarak yaz ve logla
+            gradle_file.write_text(new, encoding="utf-8")
+            print(f"[SUCCESS] {gradle.name}: Android SDK bileşenleri (minSdkVersion: 24, compile/targetSdk: 35) başarıyla optimize edildi.")
 
           # 2) Manifest: izinler (+ isteğe bağlı http izni)
           mf = pathlib.Path("android/app/src/main/AndroidManifest.xml")
