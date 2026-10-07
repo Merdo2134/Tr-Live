@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart' as overlay;
+import 'package:flutter_foreground_task/flutter_foreground_task.dart' hide NotificationVisibility;
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'error_log.dart';
 import 'room_dock.dart';
