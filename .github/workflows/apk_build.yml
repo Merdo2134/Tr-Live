@@ -48,8 +48,8 @@ jobs:
             exit 1
           fi
           
-          # Dizin çakışmalarını önleyen güvenli bağıl yol (relative path) üretimi
-          APP_DIR="(dirname "APP_PUBSPEC" | sed "s|^\(GITHUB_WORKSPACE/\vert{}\vert{}; s\vert{}^\)GITHUB_WORKSPACE||")"
+          # Güvenli bağıl yol (relative path) üretimi
+          APP_DIR=(dirname "APP_PUBSPEC" | sed "s|^\(GITHUB_WORKSPACE/\vert{}\vert{}; s\vert{}^\)GITHUB_WORKSPACE||")
           [ "\$APP_DIR" == "." ] && APP_DIR=""
           
           APP_NAME=\$(grep -E '^[[:space:]]*name:' "\(APP_PUBSPEC" \vert{} sed -E "s/name:[[:space:]]*['\"]?//; s/['\"]?[[:space:]]*\)//g" | tr -d \('\r')\)
@@ -168,15 +168,19 @@ jobs:
         run: |
           set -e pipefail
           API_URL="\${INPUT_API_URL:-}"
-          [ -n "\(API_URL" ] \vert{}\vert{} API_URL="\){REPO_API_URL:-}"
-          [ -n "\$API_URL" ] || API_URL="https://example.com"
+          if [ -z "\$API_URL" ]; then
+            API_URL="\${REPO_API_URL:-}"
+          fi
+          if [ -z "\$API_URL" ]; then
+            API_URL="https://example.com"
+          fi
           
           if ! [[ "\$API_URL" =~ ^https?://[A-Za-z0-9.-]+ ]]; then
              echo "::error::Sunucu adresi geçersiz: \$API_URL"
              exit 1
           fi
           
-          if [[ "\(API_URL" == http://* ]] && [ "\){INPUT_ALLOW_HTTP}" != "true" ]; then
+          if [[ "\(API_URL" == http://* ]] && [ "\)INPUT_ALLOW_HTTP" != "true" ]; then
              echo "::error::Android http:// adreslerini varsayılan olarak engeller. 'allow_http' kullanın."
              exit 1
           fi
@@ -200,7 +204,7 @@ jobs:
         working-directory: \${{ env.APP_DIR }}
         run: |
           set -e pipefail
-          flutter build apk --release --no-shrink --target-platform android-arm64 --dart-define=API_URL="\${{{ env.API_URL }}" | tee build.log
+          flutter build apk --release --no-shrink --target-platform android-arm64 --dart-define=API_URL="\${{ env.API_URL }}" | tee build.log
           ls -la build/app/outputs/flutter-apk/
 
       - name: Özet
