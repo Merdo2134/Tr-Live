@@ -23,16 +23,22 @@ export const configJson = (cfg) => ({
 });
 
 // Yayıncının dönem içindeki yayın süresi (sn) ve aldığı Diamond (kendine gönderilenler hariç).
+// Yalnızca ONAYLI yayıncılar için ve yayıncı onayından SONRAKİ süre/hediyeler sayılır; yayıncı olmayan kullanıcı maaş hedefi biriktiremez
+// (Diamond'larını yalnızca bozdurabilir). Ajansa katılma tarihi etkilemez.
 export async function hostMetrics(userId, start, end, run = query) {
+  const b = (await run(`SELECT approved_at FROM broadcasters WHERE user_id = $1 AND status = 'approved'`, [userId])).rows[0];
+  if (!b) return { seconds: 0, diamonds: 0n };
+  // approved_at boşsa (eski kayıt) dönem başı kullanılır.
+  const from = b.approved_at && new Date(b.approved_at) > new Date(start) ? new Date(b.approved_at).toISOString() : start;
   const sec = (await run(
     `SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (LEAST(COALESCE(ended_at, NOW()), $3::timestamptz) - GREATEST(started_at, $2::timestamptz)))), 0)::bigint AS s
      FROM mic_sessions WHERE user_id = $1 AND started_at < $3::timestamptz AND COALESCE(ended_at, NOW()) > $2::timestamptz`,
-    [userId, start, end],
+    [userId, from, end],
   )).rows[0].s;
   const dia = (await run(
     `SELECT COALESCE(SUM(coin_amount), 0) AS d FROM gift_transactions
      WHERE receiver_id = $1 AND sender_id <> $1 AND created_at >= $2::timestamptz AND created_at < $3::timestamptz`,
-    [userId, start, end],
+    [userId, from, end],
   )).rows[0].d;
   return { seconds: Number(sec), diamonds: BigInt(dia) };
 }
