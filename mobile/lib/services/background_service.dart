@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart' hide NotificationVisibility;
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'error_log.dart';
@@ -142,14 +142,14 @@ class BackgroundService with WidgetsBindingObserver {
   // ---------- Yüzen balon ----------
   Future<void> _showBubble() async {
     try {
-          if (!RoomDock.isOpen || !await FlutterOverlayWindow.isPermissionGranted()) return;
-          if (await FlutterOverlayWindow.isActive()) return;
-          await FlutterOverlayWindow.showOverlay(
+      if (!RoomDock.isOpen || !await FlutterOverlayWindow.isPermissionGranted()) return;
+      if (await FlutterOverlayWindow.isActive()) return;
+      await FlutterOverlayWindow.showOverlay(
         enableDrag: true,
         overlayTitle: 'TR Live',
         overlayContent: '$_roomName odasındasınız',
         flag: OverlayFlag.defaultFlag,
-              visibility: NotificationVisibility.visibilityPublic,
+        visibility: NotificationVisibility.visibilityPublic,
         positionGravity: PositionGravity.auto,
         height: 190,
         width: 190,
@@ -161,7 +161,7 @@ class BackgroundService with WidgetsBindingObserver {
 
   Future<void> _hideBubble() async {
     try {
-         if (await FlutterOverlayWindow.isActive()) await FlutterOverlayWindow.closeOverlay();
+      if (await FlutterOverlayWindow.isActive()) await FlutterOverlayWindow.closeOverlay();
     } catch (e, s) {
       ErrorLog.add('Balon kapatılamadı', e, s);
     }

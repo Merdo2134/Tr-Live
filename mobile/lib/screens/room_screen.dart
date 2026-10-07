@@ -1607,12 +1607,42 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               ),
             ),
           const Spacer(),
+          _viewerClub(),
           InkWell(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
             child: const Padding(padding: EdgeInsets.all(4), child: CrownIcon(size: 34)),
           ),
         ]),
       ]),
+    );
+  }
+
+  /// İzleyici kulübesi: odadaki en yüksek seviyeli ilk 3 kullanıcı, üst üste binen yuvarlak ikonlar.
+  Widget _viewerClub() {
+    final ownerId = _room?['ownerId']?.toString();
+    final list = _members.where((m) => m['userId']?.toString() != ownerId).toList()
+      ..sort((a, b) => (((mapOf(b['user'])?['coinLevel']) as num?) ?? 0).compareTo(((mapOf(a['user'])?['coinLevel']) as num?) ?? 0));
+    final top = list.take(3).toList();
+    if (top.isEmpty) return const SizedBox.shrink();
+    return InkWell(
+      onTap: _membersSheet,
+      borderRadius: BorderRadius.circular(20),
+      child: SizedBox(
+        width: 24.0 * top.length + 12,
+        height: 36,
+        child: Stack(children: [
+          for (var i = top.length - 1; i >= 0; i--)
+            Positioned(
+              left: 24.0 * i,
+              top: 2,
+              child: Container(
+                padding: const EdgeInsets.all(1.5),
+                decoration: const BoxDecoration(color: Colors.amber, shape: BoxShape.circle),
+                child: UserAvatar(user: mapOf(top[i]['user']), radius: 14),
+              ),
+            ),
+        ]),
+      ),
     );
   }
 

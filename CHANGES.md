@@ -1,5 +1,8 @@
 # Değişiklik ve inceleme raporu
 
+## v2.17.1 — İzleyici kulübesi
+- Oda başlığının sağında, odadaki en yüksek seviyeli ilk 3 kullanıcının üst üste binen altın çerçeveli avatarları görünür; dokununca üye listesi açılır.
+
 ## v2.17 — Oda içi ekran mekaniği (YoHo / Yalla ölçüleri)
 - **Dikey bölünme:** üst başlık (~%15) · koltuk sahnesi (~%40) · canlı sohbet (~%35) · alt bar (~%10). Sahne ve sohbet oransal (flex 40 / 35) olduğundan her telefon boyunda aynı düzen korunur.
 - **Klavye:** `resizeToAvoidBottomInset: false`; klavye açılınca koltuklar yukarı fırlamaz, yer sohbet bölgesinden alınır.
