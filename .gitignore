@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .env
 .env.*
 !.env.example
@@ -14,3 +15,7 @@ mobile/ios/Runner/GoogleService-Info.plist
 
 backend/node_modules/
 mobile/android/local.properties
+=======
+TR-Live-v*/
+Temiz-Proje/
+>>>>>>> 9277ef3 (Guncellemeler)
