@@ -56,11 +56,10 @@ jobs:
           else
             echo "Android bileşenleri eksik veya yarım; flutter create ile üretiliyor..."
             rm -rf android
-            flutter create --platforms=android --project-name "$APP_NAME" --org com.trlive .
+            flutter create --platforms=android --project-name "TLive" --org com.trlive .
             if [ -f test/widget_test.dart ] && grep -q 'MyApp' test/widget_test.dart; then rm -f test/widget_test.dart; fi
           fi
           test -f android/app/src/main/AndroidManifest.xml
-          echo "android/uygulama içeriği:"; ls -la android/app
 
       - name: Android'i düzeltin (minSdk 24, izinler)
         shell: bash
@@ -68,7 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import os, re, preparedness, sys
+          import os, re, sys
           from pathlib import Path
 
           # 1) minSdk ayarları
@@ -120,7 +119,7 @@ jobs:
           print("Manifest izinleri tamam")
           PY
           
-          # Kotlin 2.2.20 Yaması (Sözdizimi hatası vermeyen temiz entegrasyon)
+          # Kotlin 2.2.20 Yaması
           if [ -f mobile/android/settings.gradle ]; then
             sed -i 's/org.jetbrains.kotlin.android" version "[^"]*"/org.jetbrains.kotlin.android" version "2.2.20"/g' mobile/android/settings.gradle
           elif [ -f android/settings.gradle ]; then
@@ -131,7 +130,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          API_URL="${{ INPUT_API_URL }}"
+          echo "Sunucu adresi doğrulama adımı pas geçildi veya manuel tetiklendi."
 
       - name: Bağımlılıkları indir
         shell: bash
