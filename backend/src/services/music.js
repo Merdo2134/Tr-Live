@@ -1,4 +1,7 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { query, tx } from '../database.js';
+import { config } from '../config.js';
 import { hub } from '../realtime.js';
 import { positionAt, hasEnded } from '../music_logic.js';
 
@@ -61,6 +64,20 @@ export async function clearRoomMusic(roomId, run = query) {
   await run(`DELETE FROM room_music WHERE room_id = $1`, [roomId]);
 }
 
+/** Süresi dolmuş, hiçbir odada çalmayan/sırada olmayan geçici parçaları ve dosyalarını siler. */
+export async function purgeTempTracks() {
+  const r = await query(
+    `DELETE FROM music_tracks t WHERE t.is_temp AND t.expires_at < NOW()
+       AND NOT EXISTS (SELECT 1 FROM room_music m WHERE m.track_id = t.id)
+       AND NOT EXISTS (SELECT 1 FROM room_music_queue q WHERE q.track_id = t.id)
+     RETURNING t.url`,
+  );
+  for (const row of r.rows) {
+    try { await fs.unlink(path.join(config.uploadDir, 'music', path.basename(row.url))); } catch (_) { /* dosya zaten yok */ }
+  }
+  return r.rowCount;
+}
+
 // Biten şarkıları 2 sn'de bir kontrol eder; yeniden başlatmaya dayanıklıdır (durum veritabanındadır).
 export function startMusicTicker() {
   const timer = setInterval(async () => {
@@ -75,5 +92,7 @@ export function startMusicTicker() {
     }
   }, 2000);
   timer.unref();
+  const purge = setInterval(() => purgeTempTracks().catch((e) => console.error('Geçici müzik temizliği hatası:', e.message)), 10 * 60e3);
+  purge.unref();
   return timer;
 }

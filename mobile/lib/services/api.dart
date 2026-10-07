@@ -40,10 +40,10 @@ class Api {
     return url.startsWith('http') ? url : '$baseUrl$url';
   }
 
-  static Future<Map<String, dynamic>> _send(Future<http.Response> Function() request) async {
+  static Future<Map<String, dynamic>> _send(Future<http.Response> Function() request, {Duration? timeout}) async {
     http.Response r;
     try {
-      r = await request().timeout(_timeout);
+      r = await request().timeout(timeout ?? _timeout);
     } on TimeoutException {
       throw ApiException('Sunucu yanıt vermedi. Lütfen tekrar deneyin.');
     } catch (_) {
@@ -81,4 +81,8 @@ class Api {
   /// Ham görsel yükleme (png / jpeg / webp).
   static Future<Map<String, dynamic>> putBytes(String path, Uint8List bytes, String contentType) =>
       _send(() => http.put(_uri(path), headers: _headers(contentType), body: bytes));
+
+  /// Ham dosya gönderimi (POST) — büyük dosyalar için uzun zaman aşımı.
+  static Future<Map<String, dynamic>> postBytes(String path, Uint8List bytes, String contentType, {Map<String, String>? query}) =>
+      _send(() => http.post(_uri(path, query), headers: _headers(contentType), body: bytes), timeout: const Duration(minutes: 3));
 }

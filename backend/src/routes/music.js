@@ -1,4 +1,9 @@
 import { Router } from 'express';
+import express from 'express';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { config } from '../config.js';
 import { query, tx } from '../database.js';
 import { requireAuth } from '../auth.js';
 import { fail, uuid } from '../http.js';
@@ -31,12 +36,66 @@ router.get('/music/tracks', async (req, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase();
   const r = await query(
     `SELECT id, title, artist, url, cover_url, duration_ms FROM music_tracks
-     WHERE is_active = TRUE AND ($1 = '' OR lower(title) LIKE $2 ESCAPE '\\' OR lower(COALESCE(artist, '')) LIKE $2 ESCAPE '\\')
+     WHERE is_active = TRUE AND is_temp = FALSE AND ($1 = '' OR lower(title) LIKE $2 ESCAPE '\\' OR lower(COALESCE(artist, '')) LIKE $2 ESCAPE '\\')
      ORDER BY title LIMIT 50`,
     [q, `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`],
   );
   res.json({ tracks: r.rows.map(trackJson) });
 });
+
+
+// ---- Telefondan odaya müzik yükleme (Zula/Yoho tarzı "yerel müzik") ----
+const AUDIO_TYPES = { 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/flac': 'flac' };
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+const TEMP_TRACK_TTL_HOURS = 12;
+const MAX_TEMP_PER_USER = 5;
+
+/** Dosyanın gerçekten ses olduğunu ilk baytlarından doğrular; istemcinin bildirdiği türe güvenmez. */
+export function detectAudio(buf) {
+  if (buf.length < 12) return null;
+  if (buf.toString('ascii', 0, 3) === 'ID3') return 'audio/mpeg';
+  if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) {
+    const layer = (buf[1] >> 1) & 3; // 0 = ADTS (AAC), 1-3 = MPEG katmanları
+    return layer === 0 ? 'audio/aac' : 'audio/mpeg';
+  }
+  if (buf.toString('ascii', 4, 8) === 'ftyp') return 'audio/mp4';
+  if (buf.toString('ascii', 0, 4) === 'OggS') return 'audio/ogg';
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE') return 'audio/wav';
+  if (buf.toString('ascii', 0, 4) === 'fLaC') return 'audio/flac';
+  return null;
+}
+
+router.post('/rooms/:roomId/music/upload',
+  userLimit('music_upload', 10, 10 * 60e3),
+  express.raw({ type: () => true, limit: MAX_AUDIO_BYTES }),
+  async (req, res) => {
+    const roomId = uuid(req.params.roomId, 'Oda');
+    const member = await context(roomId, req.user.id);
+    if (!MUSIC_MANAGERS.includes(member.role) && member.microphone !== true) throw fail('Müzik çalmak için mikrofonda olmalısınız.', 403);
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || !buf.length) throw fail('Müzik dosyası gönderilmedi.');
+    const kind = detectAudio(buf);
+    if (!kind) throw fail('Desteklenmeyen ses dosyası (mp3, m4a, aac, ogg, wav, flac).');
+    const durationMs = Math.floor(Number(req.query.durationMs));
+    if (!Number.isFinite(durationMs) || durationMs < 1000 || durationMs > 7200000) throw fail('Şarkı süresi geçersiz.');
+    const title = String(req.query.title ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 120) || 'Adsız parça';
+    const artist = String(req.query.artist ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 120) || null;
+
+    const mine = (await query(`SELECT COUNT(*)::int AS n FROM music_tracks WHERE is_temp AND created_by = $1 AND expires_at > NOW()`, [req.user.id])).rows[0].n;
+    if (mine >= MAX_TEMP_PER_USER) throw fail(`Aynı anda en fazla ${MAX_TEMP_PER_USER} yüklenmiş parçanız olabilir. Biri bitince tekrar deneyin.`, 409);
+
+    const dir = path.join(config.uploadDir, 'music');
+    await fs.mkdir(dir, { recursive: true });
+    const name = `${crypto.randomUUID()}.${AUDIO_TYPES[kind]}`;
+    await fs.writeFile(path.join(dir, name), buf);
+    const t = (await query(
+      `INSERT INTO music_tracks(title, artist, url, duration_ms, license_note, created_by, is_temp, owner_room_id, expires_at, size_bytes)
+       VALUES($1,$2,$3,$4,'Kullanıcı cihazından (geçici)',$5,TRUE,$6, NOW() + make_interval(hours => $7::int), $8)
+       RETURNING id, title, artist, url, cover_url, duration_ms`,
+      [title, artist, `/uploads/music/${name}`, durationMs, req.user.id, roomId, TEMP_TRACK_TTL_HOURS, buf.length],
+    )).rows[0];
+    res.status(201).json({ track: trackJson(t) });
+  });
 
 router.get('/rooms/:roomId/music', async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
@@ -52,7 +111,7 @@ router.post('/rooms/:roomId/music/queue', userLimit('music_queue', 20, 60e3), as
 
   await tx(async (c) => {
     await c.query(`SELECT id FROM rooms WHERE id = $1 FOR UPDATE`, [roomId]); // sıra sınırı yarışını önler
-    const track = (await c.query(`SELECT id FROM music_tracks WHERE id = $1 AND is_active = TRUE`, [trackId])).rows[0];
+    const track = (await c.query(`SELECT id FROM music_tracks WHERE id = $1 AND is_active = TRUE AND (owner_room_id IS NULL OR owner_room_id = $2)`, [trackId, roomId])).rows[0];
     if (!track) throw fail('Şarkı bulunamadı.', 404);
     const counts = (await c.query(
       `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE added_by = $2)::int AS mine FROM room_music_queue WHERE room_id = $1`, [roomId, req.user.id],
@@ -88,7 +147,7 @@ router.post('/rooms/:roomId/music/play', userLimit('music_ctl', 40, 60e3), async
   const trackId = req.body?.trackId ? uuid(req.body.trackId, 'Şarkı') : null;
 
   if (trackId) {
-    const t = (await query(`SELECT id FROM music_tracks WHERE id = $1 AND is_active = TRUE`, [trackId])).rows[0];
+    const t = (await query(`SELECT id FROM music_tracks WHERE id = $1 AND is_active = TRUE AND (owner_room_id IS NULL OR owner_room_id = $2)`, [trackId, roomId])).rows[0];
     if (!t) throw fail('Şarkı bulunamadı.', 404);
     await query(
       `INSERT INTO room_music(room_id, track_id, status, position_ms, updated_at, controlled_by) VALUES($1,$2,'playing',0,NOW(),$3)
