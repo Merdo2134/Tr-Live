@@ -1690,7 +1690,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 decoration: BoxDecoration(color: _fav ? Colors.orange.shade800 : Colors.orange, borderRadius: BorderRadius.circular(14)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(_fav ? Icons.star : Icons.star_border, size: 14, color: Colors.white), const SizedBox(width: 4), Text(_fav ? 'Favoride' : 'Favori', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white))]),
               ),
-            )
+            ),
           const Spacer(),
           _glass(onTap: _membersSheet, radius: 14, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.person, size: 14), const SizedBox(width: 3), Text('${_members.length}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800))])),
           const SizedBox(width: 6),

@@ -1,5 +1,8 @@
 # Değişiklik ve inceleme raporu
 
+## v2.18.1 — Derleme düzeltmesi
+- `room_screen.dart` başlık satırında Favori düğmesinden sonra eksik virgül (Dart: "Expected 'else' or comma") giderildi.
+
 ## v2.18.0 — Sabit koltuk çerçevesi, kimlikler, elmas bozdurma, giriş şeridi
 - **Koltuk kayması (YoHo gibi sabit):** Kayma/küçülmenin nedeni konuşma halkasının avatarın etrafına boşluk+çerçeve ekleyip hücreyi büyütmesiydi. Artık her koltuk sabit boyutlu bir çerçevedir (avatar yuvası, isim satırı, elmas rozeti yeri hep ayrılı); konuşma halkası aynı boyutlu saydam bir bindirmedir. Oturma/kalkma/konuşma hiçbir koltuğu oynatmaz. Avatar 56/48/40 dp, aralık 8 dp. Başlık ile mikrofonlar arasındaki boşluk daraltıldı.
 - **Oda ayarları tek yerde:** Başlıktaki "Ayarlar" rozeti ve araçlardaki "Oda Ayarları" kaldırıldı; oda adına dokununca açılan pencerede (ad, etiket, yöneticiler + "Oda ayarları" satırı) toplandı.
