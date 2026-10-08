@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, tx } from '../database.js';
 import { requireAuth } from '../auth.js';
+import { noteTask } from '../services/daily.js';
 import { userLimit } from '../firewall.js';
 import { fail, uuid, uuidArray, positiveInt, oneOf } from '../http.js';
 import { publicUser } from '../views.js';
@@ -205,6 +206,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
     hub.broadcastGlobal(ribbon);
   }
 
+  noteTask(senderId, 'gift');
   res.json({
     gift: giftJson(result.gift), quantity: result.quantity, totalCoins: result.totalCoins.toString(),
     balance: String(result.balance), transactions: result.transactions, ribbon,

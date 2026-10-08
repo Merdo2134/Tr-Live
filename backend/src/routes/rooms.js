@@ -16,6 +16,7 @@ import { scoreboardOf } from '../services/scoreboard.js';
 import { queueOf, broadcastQueue, removeFromQueue, notifyNext } from '../services/micqueue.js';
 import { cleanPublic } from '../safe_text.js';
 import crypto from 'node:crypto';
+import { noteTask } from '../services/daily.js';
 import { newRoomNumber } from '../services/ids.js';
 
 export const router = Router();
@@ -304,6 +305,7 @@ router.post('/:roomId/join', requireAuth, userLimit('room_join', 40, 60e3), asyn
     );
   }
   const me = await memberOf(roomId, userId);
+  noteTask(userId, 'join_room');
   res.json({
     room: roomJson(room, { showCode: ['owner', 'cohost'].includes(me.role) }),
     me: { role: me.role, microphone: me.microphone, seatIndex: me.seat_index },
@@ -461,6 +463,7 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
   await setCanPublish(roomId, userId, true);
   await removeFromQueue(roomId, userId);
   hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId, seatIndex, microphone: true });
+  noteTask(userId, 'mic');
   res.json({ ok: true, seatIndex });
 });
 

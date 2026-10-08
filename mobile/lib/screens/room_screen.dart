@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../widgets/entrance_strip.dart';
+import '../widgets/lucky_bag.dart';
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import '../services/api.dart';
@@ -74,6 +75,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   bool get _isVideo => _room?['roomType'] == 'video';
   final EntranceQueue _entrance = EntranceQueue();
+  final List<Map<String, dynamic>> _bags = []; // bu odadaki açık şanslı çantalar
+  Map<String, dynamic>? _globalBag; // süper çanta duyurusu (tüm odalarda)
+  Timer? _globalBagTimer;
   int get _seatCount => (_room?['seatCount'] as num?)?.toInt() ?? 8;
   String get _myRole => (_me['role'] ?? 'user').toString();
   bool get _onSeat => _me['microphone'] == true;
@@ -120,6 +124,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   void dispose() {
     _beat?.cancel();
     _entrance.dispose();
+    _globalBagTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     if (RoomDock.exitHandler == _onBack) RoomDock.exitHandler = null;
     _sub?.cancel();
@@ -188,6 +193,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         _pk = mapOf(pk['pk']);
       });
     } catch (_) {/* ek özellikler yüklenemese de oda çalışır */}
+    try {
+      final lb = await Api.get('/api/rooms/${widget.roomId}/lucky-bags');
+      if (mounted) setState(() => _bags..clear()..addAll(listOf(lb['bags'])));
+    } catch (_) {}
     try {
       final q = await Api.get('/api/rooms/${widget.roomId}/mic/queue');
       final ownerId = _room?['ownerId']?.toString();
@@ -430,6 +439,27 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         break;
       case 'room_chat_cleared':
         setState(() => _messages.clear());
+        break;
+      case 'lucky_bag_new':
+        final nb = mapOf(e['bag']);
+        if (nb != null && e['roomId']?.toString() == widget.roomId) setState(() => _bags.add(nb));
+        break;
+      case 'lucky_bag_claimed':
+        setState(() {
+          final i = _bags.indexWhere((b) => b['id'] == e['bagId']);
+          if (i >= 0) {
+            _bags[i] = {..._bags[i], 'claimed': e['claimed']};
+            if (e['done'] == true) _bags.removeAt(i);
+          }
+        });
+        break;
+      case 'lucky_bag_ended':
+        setState(() => _bags.removeWhere((b) => b['id'] == e['bagId']));
+        break;
+      case 'lucky_bag_global':
+        _globalBagTimer?.cancel();
+        setState(() => _globalBag = e);
+        _globalBagTimer = Timer(const Duration(seconds: 7), () { if (mounted) setState(() => _globalBag = null); });
         break;
       case 'room_member_joined':
         final u = mapOf(e['user']);
@@ -807,11 +837,6 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           toast(context, 'Bu aracı kullanma yetkiniz yok.', error: true);
         }
 
-        void soon(String what) {
-          Navigator.pop(sheet);
-          toast(context, '$what çok yakında.');
-        }
-
         Widget feature(IconData icon, String label, VoidCallback onTap, {Color? color}) => InkWell(
               borderRadius: BorderRadius.circular(14),
               onTap: onTap,
@@ -838,7 +863,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           feature(Icons.share, 'Yayını\nPaylaş', () => run(_shareRoom)),
           feature(Icons.graphic_eq, 'Efekt\nve Ses', () => run(_effectsAndSound)),
           feature(chatOn ? Icons.speaker_notes_off : Icons.chat, chatOn ? 'Sohbet\nYasağı' : 'Sohbeti\nAç', () => need(_isOwnerOrCohost, () => _patchRoom({'chatEnabled': !chatOn})), color: chatOn ? null : Colors.greenAccent),
-          feature(Icons.task_alt, 'Günlük\nGörev', () => soon('Günlük görevler')),
+          feature(Icons.task_alt, 'Günlük\nGörev', () => run(() => showDailySheet(context))),
           feature(Icons.library_music, 'Müzik\nSeç', () => run(_openMusic)),
           feature(Icons.cleaning_services, 'Sohbet\nTemizleme', () => need(_isManager, _clearChat)),
           feature(locked ? Icons.lock : Icons.lock_open, 'Oda\nKilidi', () => need(_myRole == 'owner', _roomPassword), color: locked ? Colors.orangeAccent : null),
@@ -863,7 +888,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               Wrap(spacing: 18, runSpacing: 4, children: [
                 if (_myRole == 'owner') feature(Icons.sports_mma, 'PK', () => pkFree ? run(() => showPkChallengeSheet(context, roomId: widget.roomId)) : toast(context, 'Zaten bir PK sürüyor.', error: true), color: Colors.redAccent),
                 feature(Icons.casino, 'Oyunlar\n(Ludo)', () => run(_openGames), color: Colors.lightBlueAccent),
-                feature(Icons.redeem, 'Şanslı\nÇanta', () => soon('Şanslı çanta'), color: Colors.redAccent),
+                feature(Icons.redeem, 'Şanslı\nÇanta', () => run(() => showBagSend(context, widget.roomId)), color: Colors.redAccent),
               ]),
               const SizedBox(height: 10),
               const Text('Temel Araçlar', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
@@ -1926,6 +1951,52 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 ]),
               ),
                 Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.36, child: EntranceStrip(queue: _entrance)),
+                if (_bags.isNotEmpty)
+                  Positioned(
+                    right: 8,
+                    top: MediaQuery.sizeOf(context).height * 0.26,
+                    child: Column(children: [
+                      for (final b in _bags)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: InkWell(
+                            onTap: () => showBagClaim(context, widget.roomId, b),
+                            borderRadius: BorderRadius.circular(14),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                              decoration: BoxDecoration(color: b['kind'] == 'super' ? Colors.amber.shade800 : Colors.red.shade700, borderRadius: BorderRadius.circular(14)),
+                              child: Column(children: [
+                                Text(b['kind'] == 'super' ? '⭐' : '🧧', style: const TextStyle(fontSize: 22)),
+                                Text('${b['claimed']}/${b['slots']}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                              ]),
+                            ),
+                          ),
+                        ),
+                    ]),
+                  ),
+                if (_globalBag != null)
+                  Positioned(
+                    left: 10,
+                    right: 10,
+                    top: MediaQuery.paddingOf(context).top + 92,
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(colors: [Color(0xFF9C6A00), Color(0xFFFFD54A), Color(0xFF9C6A00)]),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: const [BoxShadow(color: Colors.amber, blurRadius: 14)],
+                        ),
+                        child: Text(
+                          '⭐ ${(mapOf(_globalBag!['sender'])?['displayName'] ?? '')} süper şanslı çanta gönderdi! ${fmtNumber(_globalBag!['totalCoins'])} Coin • "${_globalBag!['roomName']}" odasında',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Color(0xFF3A2500), fontWeight: FontWeight.w800, fontSize: 13),
+                        ),
+                      ),
+                    ),
+                  ),
                 ]))),
       ),
       ),

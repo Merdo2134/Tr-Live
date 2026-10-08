@@ -8,6 +8,7 @@ import { hub } from '../realtime.js';
 import { cleanLine, containsBanned, looksLikeFlood } from '../text_safety.js';
 import { canManage } from '../room_permissions.js';
 import { featuresFor } from '../services/wip.js';
+import { noteTask } from '../services/daily.js';
 import { loadPublicRow } from '../services/users.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 
@@ -40,6 +41,7 @@ router.post('/:roomId/messages', userLimit('chat10s', 8, 10e3), userLimit('chat1
   const row = await loadPublicRow(req.user.id);
   const message = { id: m.id, roomId, user: publicUser(row, null), text: body, createdAt: m.created_at };
   hub.broadcastRoom(roomId, { type: 'room_message', ...message });
+  noteTask(req.user.id, 'chat');
   res.status(201).json({ message });
 });
 

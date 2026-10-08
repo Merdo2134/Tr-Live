@@ -1,5 +1,10 @@
 # Değişiklik ve inceleme raporu
 
+## v2.19.0 — Günlük Görev ve Şanslı Çanta
+- **Günlük Görev** (araçlar > Günlük Görev): 4 görev (odaya gir, mikrofona otur, 5 mesaj yaz, hediye gönder). Her görev 10 XP; günün tüm görevleri bitince seri ilerler, 1-6. günlerde +50 XP, **7. gün 1.000 Coin**. Gün aksatılırsa seri sıfırlanır. Gün, Türkiye saatine göre (gece 00:00) değişir.
+- **Şanslı Çanta** (araçlar > Şanslı Çanta): Normal 3.000/6.000/9.000 Coin = 10/20/30 kişilik, 120 sn. **Süper** 30.000/60.000/90.000 Coin = 50 kişilik, 60 sn; gönderen not yazar, açmak isteyenler notu sohbete bir kez yazdıktan sonra açabilir; duyuru tüm odalarda altın şerit olarak görünür. Pay rastgele bölünür (herkese en az bir pay), kendi çantanı açamazsın, kişi başı bir kez. Süre dolunca dağıtılmayan Coin göndericiye iade edilir. Aynı anda tek açık çanta gönderilebilir.
+- Ayarlar tek yerde: `backend/src/services/rewards_config.js`. Migrasyon 016. Cüzdan geçmişinde yeni işlem türleri.
+
 ## v2.18.1 — Derleme düzeltmesi
 - `room_screen.dart` başlık satırında Favori düğmesinden sonra eksik virgül (Dart: "Expected 'else' or comma") giderildi.
 

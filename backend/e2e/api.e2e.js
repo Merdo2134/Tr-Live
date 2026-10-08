@@ -908,3 +908,39 @@ test('kimlik: kullanıcı ID, oda numarası, elmas bozdurma 5/1', { skip, timeou
   const c0 = await coins(ex);
   assert.ok(c0 >= 4n);
 });
+
+test('şanslı çanta ve günlük görev', { skip, timeout: 60000 }, async () => {
+  const s = await register(`bs${Date.now() % 100000}`);
+  const c1 = await register(`bc${Date.now() % 100000}`);
+  const rm = await api('POST', '/api/rooms', { token: s.token, body: { name: 'Çanta Odası', seatCount: 8, roomType: 'audio' } });
+  ok(rm, 'oda');
+  const room = rm.body.room.id;
+  ok(await api('POST', `/api/rooms/${room}/join`, { token: c1.token, body: {} }), 'katıl');
+  await sql('UPDATE users SET coins = 100000 WHERE id=$1', [s.id]);
+  // normal çanta: 3000 coin, 10 kişilik
+  const bag = await api('POST', `/api/rooms/${room}/lucky-bags`, { token: s.token, body: { tier: 'n3' } });
+  ok(bag, 'çanta');
+  assert.equal(await coins(s), 97000n);
+  status(await api('POST', `/api/rooms/${room}/lucky-bags`, { token: s.token, body: { tier: 'n3' } }), 409, 'ikinci açık çanta');
+  status(await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: s.token }), 403, 'kendi çantası');
+  const cl = await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: c1.token });
+  ok(cl, 'aç');
+  assert.ok(BigInt(cl.body.amount) > 0n);
+  status(await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: c1.token }), 409, 'ikinci kez');
+  // süre dolunca kalan iade edilir
+  await sql(`UPDATE lucky_bags SET expires_at = NOW() - INTERVAL '1 second' WHERE id=$1`, [bag.body.bag.id]);
+  for (let i = 0; i < 30 && (await coins(s)) + BigInt(cl.body.amount) !== 100000n; i += 1) await new Promise((r) => setTimeout(r, 1000)); // sunucu zamanlayıcısı (10 sn) iade eder
+  assert.equal((await coins(s)) + BigInt(cl.body.amount), 100000n);
+  // süper çanta: not yazmadan açılamaz
+  await sql('UPDATE users SET coins = 100000 WHERE id=$1', [s.id]);
+  const sb = await api('POST', `/api/rooms/${room}/lucky-bags`, { token: s.token, body: { tier: 's30', note: 'merhaba herkese' } });
+  ok(sb, 'süper');
+  status(await api('POST', `/api/lucky-bags/${sb.body.bag.id}/claim`, { token: c1.token }), 403, 'not yok');
+  ok(await api('POST', `/api/rooms/${room}/messages`, { token: c1.token, body: { text: 'merhaba herkese' } }), 'not');
+  ok(await api('POST', `/api/lucky-bags/${sb.body.bag.id}/claim`, { token: c1.token }), 'süper aç');
+  // günlük görev: sohbet + odaya giriş ilerlemesi
+  const d = await api('GET', '/api/me/daily', { token: c1.token });
+  ok(d, 'görev');
+  assert.ok(d.body.tasks.find((t) => t.key === 'join_room').done);
+  assert.equal(d.body.tasks.length, 4);
+});

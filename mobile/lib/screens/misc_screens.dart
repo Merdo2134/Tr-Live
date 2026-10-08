@@ -23,6 +23,10 @@ class WalletScreen extends StatelessWidget {
     'dealer_credit': 'Bayi yüklemesi',
     'admin_adjustment': 'Yönetici düzenlemesi',
     'diamond_exchange': 'Elmas bozdurma',
+    'lucky_bag_sent': 'Şanslı çanta gönderildi',
+    'lucky_bag_received': 'Şanslı çanta kazancı',
+    'lucky_bag_refund': 'Şanslı çanta iadesi',
+    'daily_bonus': 'Günlük görev ödülü',
   };
 
   /// 5 Elmas = 1 Coin.
