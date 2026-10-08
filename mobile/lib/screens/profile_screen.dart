@@ -108,7 +108,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ListTile(leading: const Icon(Icons.workspace_premium), title: const Text('WIP üyelik'), subtitle: Text(p['wip'] == null ? 'Aktif üyelik yok' : (mapOf(p['wip'])?['name'] ?? '').toString()), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const WipScreen())),
             ListTile(leading: const Icon(Icons.inventory_2_outlined), title: const Text('Envanter'), subtitle: const Text('Çerçeve, giriş efekti ve rozetler'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const InventoryScreen())),
             ListTile(leading: const Icon(Icons.block), title: const Text('Engellenen kullanıcılar'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const BlockedUsersScreen())),
-            ListTile(leading: const Icon(Icons.receipt_long), title: const Text('Cüzdan geçmişi'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const WalletScreen())),
+            ListTile(leading: const Icon(Icons.receipt_long), title: const Text('Cüzdan ve Elmas Bozdurma'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const WalletScreen())),
             ListTile(
               leading: const Icon(Icons.podcasts),
               title: const Text('Ajans ve yayıncı'),

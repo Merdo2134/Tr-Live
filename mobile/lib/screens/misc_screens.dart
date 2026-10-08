@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api.dart';
+import '../services/session.dart';
 import '../services/error_log.dart';
 import '../widgets/common.dart';
 import 'user_screens.dart';
@@ -21,32 +22,106 @@ class WalletScreen extends StatelessWidget {
     'wip_purchase': 'WIP satın alma',
     'dealer_credit': 'Bayi yüklemesi',
     'admin_adjustment': 'Yönetici düzenlemesi',
+    'diamond_exchange': 'Elmas bozdurma',
   };
+
+  /// 5 Elmas = 1 Coin.
+  static Future<void> _exchange(BuildContext context, String diamonds, Future<void> Function() reload) async {
+    final have = BigInt.tryParse(diamonds) ?? BigInt.zero;
+    final ctl = TextEditingController();
+    final amount = await showDialog<String>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) {
+          final n = BigInt.tryParse(ctl.text.trim()) ?? BigInt.zero;
+          final valid = n >= BigInt.from(5) && n % BigInt.from(5) == BigInt.zero && n <= have;
+          return AlertDialog(
+            title: const Text('Elmas Bozdur'),
+            content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Elmasın: ${fmtNumber(diamonds)} 💎   •   Oran: 5 Elmas = 1 Coin'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(labelText: 'Bozdurulacak elmas (5 ve katları)'),
+                onChanged: (_) => setS(() {}),
+              ),
+              const SizedBox(height: 8),
+              Text(valid ? 'Alacağın: ${n ~/ BigInt.from(5)} Coin' : 'Geçerli bir miktar gir.', style: const TextStyle(color: Colors.white70)),
+              Align(alignment: Alignment.centerLeft, child: TextButton(onPressed: () => setS(() => ctl.text = (have - have % BigInt.from(5)).toString()), child: const Text('Hepsi'))),
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c), child: const Text('Vazgeç')),
+              FilledButton(onPressed: valid ? () => Navigator.pop(c, n.toString()) : null, child: const Text('Bozdur')),
+            ],
+          );
+        },
+      ),
+    );
+    ctl.dispose();
+    if (amount == null || !context.mounted) return;
+    final r = await guard(context, () => Api.post('/api/me/diamonds/exchange', {'diamonds': amount}));
+    if (r == null || !context.mounted) return;
+    toast(context, '${r['exchangedCoins']} Coin hesabına eklendi.');
+    await Session.refresh();
+    await reload();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Cüzdan geçmişi')),
-      body: AsyncBody<List<Map<String, dynamic>>>(
-        load: () async => listOf((await Api.get('/api/me/wallet'))['transactions']),
-        builder: (context, items, reload) => items.isEmpty
-            ? const Center(child: Text('Henüz işlem yok.'))
-            : RefreshIndicator(
-                onRefresh: reload,
-                child: ListView(children: [
-                  for (final t in items)
-                    ListTile(
-                      leading: Icon((t['diamondAmount'].toString() != '0') ? Icons.diamond : Icons.monetization_on, color: (t['diamondAmount'].toString() != '0') ? Colors.cyanAccent : Colors.amber),
-                      title: Text(_types[t['type']] ?? t['type'].toString()),
-                      subtitle: Text('${t['description'] ?? ''}\n${_date(t['createdAt'])}'),
-                      isThreeLine: true,
-                      trailing: Text(
-                        t['diamondAmount'].toString() != '0' ? '+${fmtNumber(t['diamondAmount'])} 💎' : '${fmtNumber(t['coinAmount'])} Coin',
-                        style: TextStyle(color: t['coinAmount'].toString().startsWith('-') ? Colors.redAccent : Colors.greenAccent, fontWeight: FontWeight.bold),
+      appBar: AppBar(title: const Text('Cüzdan')),
+      body: AsyncBody<Map<String, dynamic>>(
+        load: () async {
+          final tx = listOf((await Api.get('/api/me/wallet'))['transactions']);
+          final me = mapOf((await Api.get('/api/me'))['user']) ?? {};
+          return {'tx': tx, 'coins': me['coins'] ?? '0', 'diamonds': me['diamonds'] ?? '0', 'broadcaster': me['broadcasterStatus'] == 'approved'};
+        },
+        builder: (context, data, reload) {
+          final items = listOf(data['tx']);
+          final isBroadcaster = data['broadcaster'] == true;
+          return RefreshIndicator(
+            onRefresh: reload,
+            child: ListView(children: [
+              Card(
+                margin: const EdgeInsets.all(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(children: [
+                    Row(children: [
+                      Expanded(child: Column(children: [const Text('Coin'), Text(fmtNumber(data['coins']), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.amber))])),
+                      Expanded(child: Column(children: [const Text('Elmas'), Text('${fmtNumber(data['diamonds'])} 💎', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.cyanAccent))])),
+                    ]),
+                    const SizedBox(height: 10),
+                    if (isBroadcaster)
+                      const Text('Onaylı yayıncı: elmaslar maaş sistemiyle ödenir, bozdurulamaz.', style: TextStyle(color: Colors.white60, fontSize: 12))
+                    else
+                      FilledButton.icon(
+                        onPressed: () => _exchange(context, data['diamonds'].toString(), reload),
+                        icon: const Icon(Icons.swap_horiz),
+                        label: const Text('Elmas Bozdur (5 💎 = 1 Coin)'),
                       ),
-                    ),
-                ]),
+                  ]),
+                ),
               ),
+              if (items.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('Henüz işlem yok.'))),
+              for (final t in items)
+                ListTile(
+                  leading: Icon((t['diamondAmount'].toString() != '0') ? Icons.diamond : Icons.monetization_on, color: (t['diamondAmount'].toString() != '0') ? Colors.cyanAccent : Colors.amber),
+                  title: Text(_types[t['type']] ?? t['type'].toString()),
+                  subtitle: Text('${t['description'] ?? ''}\n${_date(t['createdAt'])}'),
+                  isThreeLine: true,
+                  trailing: Text(
+                    t['type'] == 'diamond_exchange'
+                        ? '${t['coinAmount']} Coin'
+                        : (t['diamondAmount'].toString() != '0' ? '+${fmtNumber(t['diamondAmount'])} 💎' : '${fmtNumber(t['coinAmount'])} Coin'),
+                    style: TextStyle(color: t['coinAmount'].toString().startsWith('-') ? Colors.redAccent : Colors.greenAccent, fontWeight: FontWeight.bold),
+                  ),
+                ),
+            ]),
+          );
+        },
       ),
     );
   }

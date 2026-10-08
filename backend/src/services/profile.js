@@ -67,6 +67,7 @@ export async function loadProfile(viewerId, targetId) {
   const b = broadcaster.rows[0];
   const profile = {
     id: u.id,
+    publicId: u.public_id ?? null,
     username: u.username,
     displayName: u.display_name,
     avatarUrl: u.avatar_url,

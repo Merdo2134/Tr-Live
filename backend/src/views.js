@@ -3,7 +3,7 @@
 export const HIDDEN_NAME = 'Gizli Kullanıcı';
 
 // "u" takma adlı users tablosu ile kullanılır.
-export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.display_name, u.avatar_url, u.is_hidden,
+export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.public_id, u.display_name, u.avatar_url, u.is_hidden,
   u.coin_level, u.gift_level, uw.level AS wip_level, wt.features AS wip_features`;
 export const USER_PUBLIC_JOINS = `LEFT JOIN user_wip uw ON uw.user_id = u.id AND uw.is_active = TRUE AND uw.expires_at > NOW()
   LEFT JOIN wip_tiers wt ON wt.level = uw.level`;
@@ -13,12 +13,13 @@ export function publicUser(row, viewerId = null) {
   const hidden = Boolean(row.is_hidden) && row.id !== viewerId;
   if (hidden) {
     return {
-      id: row.id, username: HIDDEN_NAME, displayName: HIDDEN_NAME, avatarUrl: null,
+      id: row.id, publicId: null, username: HIDDEN_NAME, displayName: HIDDEN_NAME, avatarUrl: null,
       coinLevel: row.coin_level, giftLevel: row.gift_level, wipLevel: null, nameColor: null, isHidden: true,
     };
   }
   return {
     id: row.id,
+    publicId: row.public_id ?? null,
     username: row.username,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,
@@ -33,6 +34,7 @@ export function publicUser(row, viewerId = null) {
 export function selfUser(row) {
   return {
     id: row.id,
+    publicId: row.public_id ?? null,
     username: row.username,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,

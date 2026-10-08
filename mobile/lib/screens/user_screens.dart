@@ -71,7 +71,7 @@ class ProfileHeader extends StatelessWidget {
             user: {'displayName': p['displayName'], 'wipLevel': wip?['level'], 'nameColor': features?['nameColor']},
             style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
           ),
-          if (!hidden) Text('@${p['username']}', style: const TextStyle(color: Colors.white54)),
+          if (!hidden) Text('@${p['username']}  •  ID: ${p['publicId'] ?? '-'}', style: const TextStyle(color: Colors.white54)),
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 4, children: [
             Chip(label: Text('Seviye ${p['coinLevel']}'), avatar: const Icon(Icons.monetization_on, size: 16, color: Colors.amber), visualDensity: VisualDensity.compact),

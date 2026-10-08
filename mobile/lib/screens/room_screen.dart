@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../widgets/entrance_strip.dart';
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import '../services/api.dart';
@@ -72,6 +73,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   bool get _chatOpen => _room?['chatEnabled'] != false || _isManager;
 
   bool get _isVideo => _room?['roomType'] == 'video';
+  final EntranceQueue _entrance = EntranceQueue();
   int get _seatCount => (_room?['seatCount'] as num?)?.toInt() ?? 8;
   String get _myRole => (_me['role'] ?? 'user').toString();
   bool get _onSeat => _me['microphone'] == true;
@@ -117,6 +119,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     _beat?.cancel();
+    _entrance.dispose();
     WidgetsBinding.instance.removeObserver(this);
     if (RoomDock.exitHandler == _onBack) RoomDock.exitHandler = null;
     _sub?.cancel();
@@ -433,6 +436,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         if (u != null && !_members.any((m) => m['userId'] == u['id'])) {
           setState(() => _members.add({'userId': u['id'], 'role': 'user', 'microphone': false, 'seatIndex': null, 'user': u}));
         }
+        if (u != null && u['id']?.toString() != Session.id && GiftRibbonOverlay.effectsOn) _entrance.add(u);
         break;
       case 'room_member_left':
         setState(() => _members.removeWhere((m) => m['userId'] == e['userId']));
@@ -640,7 +644,21 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               const SizedBox(height: 6),
               Text(((_room?['tags'] as List?) ?? const []).isEmpty ? 'Etiket yok' : '#${((_room?['tags'] as List).join('  #'))}'),
             ],
-            const SizedBox(height: 16),
+            if ((_room?['roomNumber'] ?? '').toString().isNotEmpty)
+              Padding(padding: const EdgeInsets.only(top: 8), child: Text('Oda ID: ${_room!['roomNumber']}', style: const TextStyle(color: Colors.white70))),
+            if (canEdit)
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.settings),
+                title: const Text('Oda ayarları (kilit, gizleme, tema…)'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.pop(c, false);
+                  WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _roomSettings(); });
+                },
+              ),
+            const SizedBox(height: 8),
             const Text('Oda yöneticileri', style: TextStyle(fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             for (final m in managers)
@@ -685,7 +703,11 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (n == null || n == _seatCount || !mounted) return;
     if (n < _seatCount && !await confirm(context, 'Koltuk sayısı $n olacak. Fazla koltuklardakiler dinleyiciye iner. Devam edilsin mi?', action: 'Değiştir')) return;
     if (!mounted) return;
-    if (await _patchRoom({'seatCount': n}) && mounted) toast(context, 'Mikrofon modu: $n mikrofon.');
+    if (await _patchRoom({'seatCount': n}) && mounted) {
+      setState(() => _room = {...?_room, 'seatCount': n});
+      toast(context, 'Mikrofon modu: $n mikrofon.');
+      await _loadMembers(); // taşan koltuktakiler dinleyiciye inmiş olabilir
+    }
   }
 
   Future<void> _shareRoom() async {
@@ -823,7 +845,6 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           feature(Icons.palette, 'Özel\nTemalar', () => need(_isOwnerOrCohost, _roomThemes)),
           feature(hidden ? Icons.visibility_off : Icons.visibility, 'Oda\nGizleme', () => need(_myRole == 'owner', _toggleHidden), color: hidden ? Colors.orangeAccent : null),
           feature(Icons.mic_external_on, 'Mikrofon\nModu', () => need(_isOwnerOrCohost, _micMode)),
-          feature(Icons.settings, 'Oda\nAyarları', () => need(_isOwnerOrCohost, _roomSettings)),
           if (_myRole == 'owner') feature(Icons.power_settings_new, 'Odayı\nKapat', () => run(_closeRoom), color: Colors.redAccent),
         ];
         return DraggableScrollableSheet(
@@ -1085,6 +1106,49 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   /// Oda içi kullanıcı kartı (Figma): büyük avatar, rozetler, Yakın Arkadaşlarım, Madalyalar, yetkiye göre işlem düğmeleri.
   /// Yönetim düğmeleri yalnızca yetkisi olana görünür; normal kullanıcı yalnızca Etiketle / Hediye / Takip görür.
+  /// Kendi koltuğuma dokununca (Zula gibi): koltuğu sessize al / koltuktan kalk / iptal.
+  void _selfSeatSheet(Map<String, dynamic> m, int index) {
+    final user = mapOf(m['user']);
+    final roleName = const {'owner': 'Oda Sahibi', 'cohost': 'Yardımcı', 'admin': 'Yönetici'}[(m['role'] ?? '').toString()] ?? 'Üye';
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: UserAvatar(user: user, radius: 22),
+            title: Text((user?['displayName'] ?? '').toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text('Koltuk #${index + 1} • $roleName'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.pop(c);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: Session.id)));
+            },
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: Icon(_micOn ? Icons.mic_off : Icons.mic),
+            title: Text(_micOn ? 'Koltuğu sessize al' : 'Sesi aç'),
+            onTap: () {
+              Navigator.pop(c);
+              setState(() => _micOn = !_micOn);
+              _syncPublish();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.redAccent),
+            title: const Text('Koltuktan Kalk', style: TextStyle(color: Colors.redAccent)),
+            onTap: () {
+              Navigator.pop(c);
+              _leaveMic();
+            },
+          ),
+          ListTile(leading: const Icon(Icons.close), title: const Text('İptal'), onTap: () => Navigator.pop(c)),
+        ]),
+      ),
+    );
+  }
+
   void _memberSheet(Map<String, dynamic> m) {
     final userId = m['userId'].toString();
     final user = mapOf(m['user']);
@@ -1139,7 +1203,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             final medals = listOf(card?['medals']);
             var following = profile?['isFollowing'] == true;
             final family = mapOf(profile?['family']);
-            final username = (profile?['username'] ?? user?['username'] ?? '').toString();
+            final username = (profile?['publicId'] ?? user?['publicId'] ?? profile?['username'] ?? user?['username'] ?? '').toString();
             return StatefulBuilder(
               builder: (context, setS) => SafeArea(
                 child: Padding(
@@ -1403,74 +1467,107 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   double get _seatR => _seatCount <= 6 ? 28 : (_seatCount <= 9 ? 24 : 20);
   bool get _seatCompact => _seatCount >= 12;
 
+  // Sabit koltuk çerçevesi (YoHo/Zula gibi): hücrenin boyutu hiçbir durumda değişmez; oturma, konuşma ses halkası,
+  // video, isim ve elmas rozeti yalnızca bu çerçevenin İÇİNE çizilir. Böylece koltuklar kaymaz/küçülmez.
+  double get _seatSlot => _seatR * 2 + 8;
+  double get _seatNameH => _seatCompact ? 14 : 16;
+  double get _seatScoreH => 17;
+  bool get _scoreOn => _room?['scoreboardEnabled'] != false;
+  double get _seatCellH => _seatSlot + 2 + _seatNameH + (_scoreOn ? _seatScoreH + 2 : 0);
+
+  Widget _seatFrame({required Widget slot, required Widget name, Widget? score, VoidCallback? onTap}) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: SizedBox(
+        height: _seatCellH,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(width: _seatSlot, height: _seatSlot, child: slot),
+          const SizedBox(height: 2),
+          SizedBox(height: _seatNameH, child: Center(child: name)),
+          if (_scoreOn) ...[const SizedBox(height: 2), SizedBox(height: _seatScoreH, child: Center(child: score ?? const SizedBox.shrink()))],
+        ]),
+      ),
+    );
+  }
+
+  void _emptySeatTap(int index, bool reserved, bool locked) {
+    if (reserved) return;
+    if (index == 0) {
+      _takeMic(0); // oda sahibi kendi koltuğuna geri döner
+    } else if (_canSeatManage) {
+      showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (c) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(leading: const Icon(Icons.mic), title: const Text('Bu koltuğa otur'), onTap: () { Navigator.pop(c); _takeMic(index); }),
+            ListTile(
+              leading: Icon(locked ? Icons.lock_open : Icons.lock),
+              title: Text(locked ? 'Koltuğun kilidini aç' : 'Koltuğu kilitle'),
+              onTap: () { Navigator.pop(c); _lockSeat(index, !locked); },
+            ),
+          ]),
+        ),
+      );
+    } else if (locked) {
+      toast(context, 'Bu koltuk kilitli.', error: true);
+    } else {
+      _takeMic(index);
+    }
+  }
+
   Widget _seatTile(int index, Map<String, dynamic>? m) {
     if (m == null) {
       final reserved = index == 0 && _myRole != 'owner';
       final locked = _lockedSeats.contains(index);
-      return InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: reserved
-            ? null
-            : () {
-                if (index == 0) {
-                  _takeMic(0); // oda sahibi kendi koltuğuna geri döner
-                } else if (_canSeatManage) {
-                  showModalBottomSheet<void>(
-                    context: context,
-                    showDragHandle: true,
-                    builder: (c) => SafeArea(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        ListTile(leading: const Icon(Icons.mic), title: const Text('Bu koltuğa otur'), onTap: () { Navigator.pop(c); _takeMic(index); }),
-                        ListTile(
-                          leading: Icon(locked ? Icons.lock_open : Icons.lock),
-                          title: Text(locked ? 'Koltuğun kilidini aç' : 'Koltuğu kilitle'),
-                          onTap: () { Navigator.pop(c); _lockSeat(index, !locked); },
-                        ),
-                      ]),
-                    ),
-                  );
-                } else if (locked) {
-                  toast(context, 'Bu koltuk kilitli.', error: true);
-                } else {
-                  _takeMic(index);
-                }
-              },
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          CircleAvatar(
-            radius: _seatR + 3,
+      return _seatFrame(
+        onTap: () => _emptySeatTap(index, reserved, locked),
+        slot: Center(
+          child: CircleAvatar(
+            radius: _seatR,
             backgroundColor: Colors.white12,
             child: Icon(reserved ? Icons.star_border : (locked ? Icons.lock : Icons.add), color: locked ? Colors.orangeAccent : Colors.white54),
           ),
-          const SizedBox(height: 4),
-          Text('${index + 1}', style: TextStyle(color: Colors.white54, fontSize: _seatCompact ? 10 : 12)),
-        ]),
+        ),
+        name: Text('${index + 1}', style: TextStyle(color: Colors.white54, fontSize: _seatCompact ? 10 : 12)),
       );
     }
     final userId = m['userId'].toString();
     final user = mapOf(m['user']);
     final video = _isVideo ? _videoFor(userId) : null;
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () => _memberSheet(m),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+    final speaking = _isSpeaking(userId);
+    final isMe = userId == Session.id;
+    return _seatFrame(
+      onTap: () => isMe ? _selfSeatSheet(m, index) : _memberSheet(m),
+      slot: Stack(alignment: Alignment.center, children: [
         if (video != null)
-          SizedBox(width: _seatR * 2.8, height: _seatR * 2.8, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: video))
+          SizedBox(width: _seatR * 2, height: _seatR * 2, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: video))
         else
-          // Çevresinde 3dp boşluk: konuşma/hediye halkası buraya oturur, koltuklar birbirine yapışmaz.
-          Padding(padding: const EdgeInsets.all(3), child: UserAvatar(user: user, radius: _seatR, speaking: _isSpeaking(userId))),
-        const SizedBox(height: 4),
-        Row(mainAxisSize: MainAxisSize.min, children: [
-          if (m['role'] == 'owner') const Icon(Icons.star, size: 12, color: Colors.amber),
-          Flexible(child: Text((user?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: _seatCompact ? 11 : 12))),
-        ]),
-        if (_room?['scoreboardEnabled'] != false)
-          Container(
-            margin: const EdgeInsets.only(top: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(8)),
-            child: Text('💎 ${fmtNumber(_scores[userId] ?? 0)}', style: TextStyle(fontSize: _seatCompact ? 10 : 11, color: Colors.amberAccent)),
+          UserAvatar(user: user, radius: _seatR),
+        // Konuşma halkası: sabit boyutlu bindirme; konuşmasa da yer kaplar (saydam), düzeni değiştirmez.
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              decoration: BoxDecoration(
+                shape: video != null ? BoxShape.rectangle : BoxShape.circle,
+                borderRadius: video != null ? BorderRadius.circular(14) : null,
+                border: Border.all(color: speaking ? Colors.greenAccent : Colors.transparent, width: 2.5),
+              ),
+            ),
           ),
+        ),
       ]),
+      name: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (m['role'] == 'owner') const Icon(Icons.star, size: 12, color: Colors.amber),
+        Flexible(child: Text((user?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: _seatCompact ? 11 : 12))),
+      ]),
+      score: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(8)),
+        child: Text('💎 ${fmtNumber(_scores[userId] ?? 0)}', style: TextStyle(fontSize: _seatCompact ? 10 : 11, color: Colors.amberAccent)),
+      ),
     );
   }
 
@@ -1482,7 +1579,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final rows = seatRows(_seatCount);
     final maxCols = rows.reduce((a, b) => a > b ? a : b);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
       child: LayoutBuilder(builder: (context, box) {
         // Her koltuk aynı genişlikte; kısa satırlar ortalanır (Figma yerleşimi).
         final cw = (box.maxWidth / maxCols).clamp(0.0, 120.0);
@@ -1548,7 +1645,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     }
     final isOwnerHere = _room?['ownerId']?.toString() == Session.id;
     return Padding(
-      padding: EdgeInsets.fromLTRB(10, MediaQuery.paddingOf(context).top + 6, 10, 4),
+      padding: EdgeInsets.fromLTRB(10, MediaQuery.paddingOf(context).top + 4, 10, 0),
       child: Column(children: [
         Row(children: [
           Flexible(
@@ -1567,22 +1664,20 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                       Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
                       const Icon(Icons.arrow_drop_down, size: 18),
                     ]),
-                    Text('ID: ${(ownerUser?['username'] ?? '').toString()}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                    Text('ID: ${(_room?['roomNumber'] ?? ownerUser?['publicId'] ?? '').toString()}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white70)),
                   ]),
                 ),
               ]),
             ),
           ),
-          const SizedBox(width: 8),
-          _glass(onTap: _membersSheet, radius: 18, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.person, size: 18), const SizedBox(width: 4), Text('${_members.length}', style: const TextStyle(fontWeight: FontWeight.w800))])),
-          const SizedBox(width: 6),
+          const Spacer(),
           InkWell(
             customBorder: const CircleBorder(),
             onTap: _exitMenu,
             child: const CircleAvatar(radius: 18, backgroundColor: Colors.black38, child: Icon(Icons.close, size: 20)),
           ),
         ]),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Row(children: [
           _glass(radius: 14, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.diamond, size: 14, color: Colors.lightBlueAccent), const SizedBox(width: 4), Text(fmtNumber(total.toString()), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700))])),
           const SizedBox(width: 6),
@@ -1596,21 +1691,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(_fav ? Icons.star : Icons.star_border, size: 14, color: Colors.white), const SizedBox(width: 4), Text(_fav ? 'Favoride' : 'Favori', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white))]),
               ),
             )
-          else if (_isOwnerOrCohost)
-            InkWell(
-              onTap: _roomSettings,
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(14)),
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.settings, size: 14, color: Colors.white), SizedBox(width: 4), Text('Ayarlar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white))]),
-              ),
-            ),
           const Spacer(),
+          _glass(onTap: _membersSheet, radius: 14, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.person, size: 14), const SizedBox(width: 3), Text('${_members.length}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800))])),
+          const SizedBox(width: 6),
           _viewerClub(),
           InkWell(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
-            child: const Padding(padding: EdgeInsets.all(4), child: CrownIcon(size: 34)),
+            child: const Padding(padding: EdgeInsets.all(2), child: CrownIcon(size: 24)),
           ),
         ]),
       ]),
@@ -1804,7 +1891,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 imageUrl: _room?['themeImageUrl']?.toString(),
                 child: GiftRibbonOverlay(
                 roomId: widget.roomId,
-                child: Padding(
+                child: Stack(fit: StackFit.expand, children: [
+                Padding(
                 padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
                 child: Column(children: [
                   _roomHeader(),
@@ -1836,7 +1924,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                   _inputBar(),
                   _bottomBar(), // ~%10: alt bar
                 ]),
-              ))),
+              ),
+                Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.36, child: EntranceStrip(queue: _entrance)),
+                ]))),
       ),
       ),
     );

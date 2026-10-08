@@ -16,6 +16,7 @@ import { scoreboardOf } from '../services/scoreboard.js';
 import { queueOf, broadcastQueue, removeFromQueue, notifyNext } from '../services/micqueue.js';
 import { cleanPublic } from '../safe_text.js';
 import crypto from 'node:crypto';
+import { newRoomNumber } from '../services/ids.js';
 
 export const router = Router();
 
@@ -26,7 +27,7 @@ const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_ALPHABET[b %
 
 // showCode: davet kodunu yalnızca oda sahibi / yardımcı sahip görür.
 const roomJson = (r, { showCode = false } = {}) => ({
-  id: r.id, name: r.name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.created_at,
+  id: r.id, roomNumber: r.room_number ?? null, name: r.name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.created_at,
   tags: r.tags ?? [], locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled !== false,
   hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false, lockedSeats: r.locked_seats ?? [],
   ...(showCode && r.join_code ? { joinCode: r.join_code } : {}),
@@ -59,7 +60,7 @@ router.get('/', optionalAuth, async (req, res) => {
   const region = ['tr', 'other', 'friends', 'near'].includes(req.query.region) ? req.query.region : null;
   if ((region === 'friends' || region === 'near') && !req.user) throw fail('Arkadaşları görmek için giriş yapın.', 401);
   const r = await query(
-    `SELECT r.id AS room_id, r.theme_image_url, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
+    `SELECT r.id AS room_id, r.room_number, r.theme_image_url, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
        (r.password_hash IS NOT NULL) AS locked, r.theme, ${USER_PUBLIC_COLUMNS},
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id) AS member_count,
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.microphone = TRUE) AS mic_count
@@ -79,7 +80,7 @@ router.get('/', optionalAuth, async (req, res) => {
   // Kullanıcı sütunlarındaki "id" (= sahip kimliği) oda kimliğiyle karışmasın diye oda alanları takma adla alınır.
   res.json({
     rooms: r.rows.map((x) => ({
-      id: x.room_id, name: x.room_name, roomType: x.room_type, seatCount: x.seat_count, ownerId: x.owner_id, createdAt: x.room_created_at,
+      id: x.room_id, roomNumber: x.room_number ?? null, name: x.room_name, roomType: x.room_type, seatCount: x.seat_count, ownerId: x.owner_id, createdAt: x.room_created_at,
       memberCount: x.member_count, micCount: x.mic_count, tags: x.tags ?? [], locked: x.locked, theme: x.theme ?? 'default', themeImageUrl: x.theme_image_url ?? null,
       owner: publicUser(x, req.user?.id ?? null),
     })),
@@ -89,7 +90,7 @@ router.get('/', optionalAuth, async (req, res) => {
 // ---------- Kalıcı oda ----------
 // Kullanıcı sesli ve görüntülü için birer kez oda kurar (ad, etiketler, koltuk düzeni, tema). Sonraki "oda aç"lar bu bilgilerle
 // tek adımda açar; ad ve etiketler yalnızca oda içinden (oda adına dokunarak) değiştirilir.
-const profileJson = (p) => ({ roomType: p.room_type, name: p.name, tags: p.tags ?? [], seatCount: p.seat_count, theme: p.theme });
+const profileJson = (p) => ({ roomNumber: p.room_number ?? null, roomType: p.room_type, name: p.name, tags: p.tags ?? [], seatCount: p.seat_count, theme: p.theme });
 
 async function profileOf(userId, roomType, run = query) {
   return (await run(`SELECT * FROM room_profiles WHERE owner_id = $1 AND room_type = $2`, [userId, roomType])).rows[0] || null;
@@ -102,8 +103,8 @@ async function openFromProfile(userId, profile, hidden) {
     const existing = (await c.query(`SELECT * FROM rooms WHERE owner_id = $1 AND room_type = $2 AND is_active = TRUE ORDER BY created_at DESC LIMIT 1`, [userId, profile.room_type])).rows[0];
     if (existing) return { room: existing, created: false };
     const r = (await c.query(
-      `INSERT INTO rooms(name, room_type, seat_count, owner_id, tags, is_hidden, join_code, theme) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [profile.name, profile.room_type, profile.seat_count, userId, profile.tags, hidden, hidden ? await uniqueCode((t, p) => c.query(t, p)) : null, profile.theme],
+      `INSERT INTO rooms(name, room_type, seat_count, owner_id, tags, is_hidden, join_code, theme, room_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [profile.name, profile.room_type, profile.seat_count, userId, profile.tags, hidden, hidden ? await uniqueCode((t, p) => c.query(t, p)) : null, profile.theme, profile.room_number ?? await newRoomNumber((t, p) => c.query(t, p))],
     )).rows[0];
     await c.query(`INSERT INTO room_members(room_id, user_id, role, microphone, seat_index) VALUES($1,$2,'owner',TRUE,0)`, [r.id, userId]);
     // Onaylı yayıncı ise yayın oturumu başlar (süre istatistikleri için).
@@ -138,9 +139,9 @@ router.post('/', requireAuth, userLimit('room_create', 20, 3600e3), async (req, 
     if (!SUPPORTED_SEATS.has(seatCount)) throw fail('Geçersiz koltuk sayısı.');
     const theme = req.body?.theme === undefined ? 'default' : oneOf(req.body.theme, THEMES, 'Tema');
     profile = (await query(
-      `INSERT INTO room_profiles(owner_id, room_type, name, tags, seat_count, theme) VALUES($1,$2,$3,$4,$5,$6)
+      `INSERT INTO room_profiles(owner_id, room_type, name, tags, seat_count, theme, room_number) VALUES($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (owner_id, room_type) DO UPDATE SET updated_at = room_profiles.updated_at RETURNING *`,
-      [userId, roomType, name, tags, seatCount, theme],
+      [userId, roomType, name, tags, seatCount, theme, await newRoomNumber()],
     )).rows[0];
   }
   const { room, created } = await openFromProfile(userId, profile, req.body?.hidden === true);
@@ -223,7 +224,7 @@ router.get('/hosts/:userId/favorite', requireAuth, async (req, res) => {
 router.get('/:roomId', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const r = (await query(
-    `SELECT r.id AS room_id, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags, r.chat_enabled,
+    `SELECT r.id AS room_id, r.room_number, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags, r.chat_enabled,
        r.is_hidden AS room_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats,
        (r.password_hash IS NOT NULL) AS locked, ${USER_PUBLIC_COLUMNS}
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS} WHERE r.id = $1 AND r.is_active = TRUE`,
@@ -235,7 +236,7 @@ router.get('/:roomId', requireAuth, async (req, res) => {
   const canSeeCode = me && ['owner', 'cohost'].includes(me.role);
   res.json({
     room: {
-      id: r.room_id, name: r.room_name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.room_created_at,
+      id: r.room_id, roomNumber: r.room_number ?? null, name: r.room_name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.room_created_at,
       tags: r.tags ?? [], locked: r.locked, chatEnabled: r.chat_enabled !== false,
       hidden: r.room_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [],
       ...(canSeeCode && r.join_code ? { joinCode: r.join_code } : {}),

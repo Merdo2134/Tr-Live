@@ -5,6 +5,7 @@ import { hashPassword, checkPassword, signToken, passwordRules, liftBan } from '
 import { banExpired, banMessage } from '../staff_logic.js';
 import { fail, text } from '../http.js';
 import { selfUser } from '../views.js';
+import { newPublicId } from '../services/ids.js';
 import { ipLimit, loginGuard, clientIp } from '../firewall.js';
 
 export const router = Router();
@@ -21,9 +22,10 @@ router.post('/register', ipLimit('register', 5, 3600e3), async (req, res) => {
   const displayName = cleanPublic(text(req.body?.displayName || username, 'Ad', { min: 1, max: 60 }), 'Ad');cleanPublic(username, 'Kullanıcı adı');
   const passwordHash = await hashPassword(password);
   try {
+    const publicId = await newPublicId();
     const r = await query(
-      `INSERT INTO users(username, display_name, password_hash) VALUES($1,$2,$3) RETURNING *`,
-      [username, displayName, passwordHash],
+      `INSERT INTO users(username, display_name, password_hash, public_id) VALUES($1,$2,$3,$4) RETURNING *`,
+      [username, displayName, passwordHash, publicId],
     );
     res.status(201).json({ token: signToken(r.rows[0]), user: selfUser(r.rows[0]) });
   } catch (error) {

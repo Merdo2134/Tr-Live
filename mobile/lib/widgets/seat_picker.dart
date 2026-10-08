@@ -83,7 +83,7 @@ List<int> seatRows(int n) {
 
 /// Oda içinde "Mikrofon Modu" penceresi: koltuk sayısını seçtirir. Seçilen sayıyı döndürür.
 Future<int?> showMicModeSheet(BuildContext context, {required int current}) {
-  const modes = [2, 5, 8, 9, 12, 15, 20];
+  const modes = [2, 4, 5, 6, 8, 9, 12, 15, 20];
   final list = modes.contains(current) ? modes : [...modes, current]..sort();
   return showModalBottomSheet<int>(
     context: context,

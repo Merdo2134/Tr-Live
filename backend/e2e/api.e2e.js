@@ -890,3 +890,21 @@ test('oda sahibi çıkınca oda kapanır', { skip, timeout: 60000 }, async () =>
   const ms = await sql(`SELECT COUNT(*)::int AS n FROM room_music WHERE room_id = $1`, [roomId]);
   assert.equal(ms.rows[0].n, 0, 'oda kapanınca müzik durumu temizlenir');
 });
+
+test('kimlik: kullanıcı ID, oda numarası, elmas bozdurma 5/1', { skip, timeout: 60000 }, async () => {
+  const me = await api('GET', '/api/me', { token: U.a.token });
+  ok(me, 'me');
+  assert.match(String(me.body.user?.publicId ?? me.body.publicId), /^\d{8}$/);
+  const rm = await api('POST', '/api/rooms', { token: U.a.token, body: { name: 'Kimlik Oda', seatCount: 8 } });
+  assert.match(String(rm.body.room.roomNumber), /^\d{7}$/);
+  const ex = await register(`ex${Date.now() % 100000}`);
+  await sql('UPDATE users SET diamonds = 23 WHERE id=$1', [ex.id]);
+  status(await api('POST', '/api/me/diamonds/exchange', { token: ex.token, body: { diamonds: 7 } }), 400, '5 katı değil');
+  status(await api('POST', '/api/me/diamonds/exchange', { token: ex.token, body: { diamonds: 25 } }), 409, 'yetersiz');
+  const r = await api('POST', '/api/me/diamonds/exchange', { token: ex.token, body: { diamonds: 20 } });
+  ok(r, 'bozdur');
+  assert.equal(await diamonds(ex), 3n);
+  assert.equal(r.body.exchangedCoins, '4');
+  const c0 = await coins(ex);
+  assert.ok(c0 >= 4n);
+});

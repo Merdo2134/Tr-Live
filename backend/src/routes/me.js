@@ -12,6 +12,7 @@ import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js'
 import { config } from '../config.js';
 import { cleanPublic } from '../safe_text.js';
 import { hub } from '../realtime.js';
+import { userLimit } from '../firewall.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -139,6 +140,29 @@ router.post('/kyc/request', async (req, res) => {
   const r = await query(`UPDATE users SET kyc_status = 'pending' WHERE id = $1 AND kyc_status IN ('none','rejected') RETURNING kyc_status`, [req.user.id]);
   if (!r.rowCount) throw fail('Kimlik doğrulama başvurunuz zaten var veya onaylı.', 409);
   res.json({ ok: true, kycStatus: 'pending' });
+});
+
+// Elmas bozdurma: 5 Elmas = 1 Coin. Onaylı yayıncılar maaş sistemiyle ödendiği için bozduramaz.
+export const DIAMONDS_PER_COIN = 5n;
+router.post('/diamonds/exchange', userLimit('diamond_exchange', 20, 10 * 60e3), async (req, res) => {
+  const raw = req.body?.diamonds;
+  if (!/^\d{1,12}$/.test(String(raw ?? ''))) throw fail('Geçerli bir elmas miktarı girin.');
+  const diamonds = BigInt(raw);
+  if (diamonds < DIAMONDS_PER_COIN || diamonds % DIAMONDS_PER_COIN !== 0n) throw fail('Miktar 5 ve katları olmalı (5 Elmas = 1 Coin).');
+  const coins = diamonds / DIAMONDS_PER_COIN;
+  const out = await tx(async (c) => {
+    const u = (await c.query(`SELECT coins, diamonds FROM users WHERE id = $1 FOR UPDATE`, [req.user.id])).rows[0];
+    const b = (await c.query(`SELECT 1 FROM broadcasters WHERE user_id = $1 AND status = 'approved'`, [req.user.id])).rowCount;
+    if (b) throw fail('Onaylı yayıncılar elmasları maaş sistemiyle alır; bozdurma yapılamaz.', 403);
+    if (BigInt(u.diamonds) < diamonds) throw fail('Yeterli elmasınız yok.', 409);
+    const n = (await c.query(`UPDATE users SET diamonds = diamonds - $2, coins = coins + $3, updated_at = NOW() WHERE id = $1 RETURNING coins, diamonds`, [req.user.id, diamonds.toString(), coins.toString()])).rows[0];
+    await c.query(
+      `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, diamond_amount, description) VALUES($1,'diamond_exchange',$2,$3,$4)`,
+      [req.user.id, coins.toString(), (-diamonds).toString(), `${diamonds} Elmas → ${coins} Coin`],
+    );
+    return n;
+  });
+  res.json({ ok: true, coins: String(out.coins), diamonds: String(out.diamonds), exchangedCoins: coins.toString() });
 });
 
 router.get('/wallet', async (req, res) => {

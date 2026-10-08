@@ -1,5 +1,16 @@
 # Değişiklik ve inceleme raporu
 
+## v2.18.0 — Sabit koltuk çerçevesi, kimlikler, elmas bozdurma, giriş şeridi
+- **Koltuk kayması (YoHo gibi sabit):** Kayma/küçülmenin nedeni konuşma halkasının avatarın etrafına boşluk+çerçeve ekleyip hücreyi büyütmesiydi. Artık her koltuk sabit boyutlu bir çerçevedir (avatar yuvası, isim satırı, elmas rozeti yeri hep ayrılı); konuşma halkası aynı boyutlu saydam bir bindirmedir. Oturma/kalkma/konuşma hiçbir koltuğu oynatmaz. Avatar 56/48/40 dp, aralık 8 dp. Başlık ile mikrofonlar arasındaki boşluk daraltıldı.
+- **Oda ayarları tek yerde:** Başlıktaki "Ayarlar" rozeti ve araçlardaki "Oda Ayarları" kaldırıldı; oda adına dokununca açılan pencerede (ad, etiket, yöneticiler + "Oda ayarları" satırı) toplandı.
+- **Mikrofon modu:** 4 ve 6 koltuk seçenekleri eklendi (sunucu zaten destekliyordu); değişince yerel durum anında güncellenir ve üyeler yeniden yüklenir.
+- **Koltuktan Kalk:** Mikrofondayken kendi koltuğuna dokununca Zula'daki gibi sayfa açılır (Koltuk #n • rol, Koltuğu sessize al, Koltuktan Kalk, İptal; üst satır profile gider).
+- **Başlık:** Oda kapatma/çıkış X en sağ üstte; taç küçüldü (24); üye sayısı ikinci satıra taşındı.
+- **Kimlikler:** Her kullanıcıya 8 haneli benzersiz ID (`publicId`); yönetici hesabında ID `admin`. Her kalıcı odaya 7 haneli değişmez oda numarası (`roomNumber`; oda temaları/ödülleri için). Mevcut kayıtlar migrasyon 015 ile doldurulur. Oda başlığında ve oda bilgisinde gösterilir.
+- **Elmas bozdurma:** `POST /api/me/diamonds/exchange` — 5 Elmas = 1 Coin (5 ve katları), tek işlemde kilitli, cüzdan kaydı tutulur. Onaylı yayıncılar bozduramaz (maaş alır). Arayüz: Profil > Cüzdan ve Elmas Bozdurma.
+- **Oda giriş efekti:** WIP 1–5 için ayrı tasarımlı, odanın ortasından geçen şerit (renk, parıltı, süre WIP ile artar; WIP 5 kırmızı-altın taçlı). Girişler sıraya alınır. WIP 5 renkli ismi kırmızı (#FF2B2B).
+- Varsayımlar: oran 5 Elmas = 1 Coin; onaylı yayıncı bozdurmaz (kolay değiştirilir).
+
 ## v2.17.5 — APK derleme kökten düzeltme + tokensiz güncelleme
 - **APK (checkReleaseAarMetadata):** `flutter_plugin_android_lifecycle` compileSdk 36 ister, `file_picker` ise android-34 ile derleniyordu. `apk_build.yml` artık `android/build.gradle(.kts)` başına tüm alt projeleri compileSdk 36'ya zorlayan bir blok ekliyor (tekrar çalışsa da bir kez eklenir). Böylece bu ve benzeri eklenti uyumsuzlukları kökten kapanır.
 - **Güncelleme (token gerekmez):** yeni `.github/workflows/zip_ile_guncelle.yml`. Depoya GitHub sitesinden (Add file > Upload files) `TR-Live-v....zip` dosyasını ana dizine yüklemek yeter; iş akışı zip'i açar, projeyi birebir eşitler, zip'i siler ve APK derlemesini başlatır. `.github/workflows` klasörü GitHub kuralı gereği buradan güncellenemez; iş akışı dosyaları değiştiyse elle yüklenir.
