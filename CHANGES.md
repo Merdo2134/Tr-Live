@@ -1,5 +1,15 @@
 # Değişiklik ve inceleme raporu
 
+## v2.20.0 — Sabit koltuk sahnesi, yeni oda başlığı, çanta tasarımı
+- **Koltuklar kaymaz (YoHo mantığı):** Sahne artık kaydırılmaz. Avatar boyutu, sahne yüksekliği ve genişliğine göre hesaplanır; her koltuk modu (2…20) ekrana sığar. 3 satıra kadar elmas rozeti, daha fazla satırda gizli. Az koltuklu üst satır Figma'daki gibi geniş aralıklı ortalanır. Hızlı dikey fling hâlâ odayı değiştirir; sahne oynamaz. İzleyiciler artık sahnede değil, üstteki izleyici sayısından açılan listede.
+- **Oda başlığı (Figma):** kapak fotoğraflı oda rozeti + başlık + `ID:oda numarası`; sağ üstte izleyici sayısı ve en sağda çıkış X; alt satırda elmas toplamı, favori ve **taç = Katkı Listesi** (24 Saat / Toplam sekmeleri, ilk 3 kürsü, 4+ liste).
+- **Oda kartı:** başlığa dokununca kapak, başlık, Oda Duyurusu, Oda İsim Kartı (renkli etiketler), yöneticiler. Oda sahibi/yardımcı **Düzenle** ile kapak resmi, başlık, duyuru, etiketler (en fazla 3) değiştirir, oda sahibi yönetici siler. Bilgiler kalıcı odaya da kaydedilir (migrasyon 017).
+- **İzleyiciler** penceresi Figma'ya uygun yeniden tasarlandı.
+- **Şanslı çanta:** Normal çanta süresiz/hemen açılır. Süper çanta Figma'daki pembe kartta 60 sn geri sayar, bitince **AÇ** olur (geri sayımda not sohbete yazılır), sonra 120 sn açılabilir. Odada sol üstte kırmızı zarf (rozet=açık çanta), oda listesinde 🧧 işareti. Süper çanta duyurusu ve global hediye şeridi artık sağdan sola kayan şerit olarak tüm odalarda ve ana ekranda görünür.
+- **Giriş şeridi:** WIP giriş şeridi kendi girişinde de gösterilir.
+- **Mikrofon modu:** seçim sonrası sunucudaki gerçek koltuk sayısı yeniden okunur ve üyeler yenilenir; liste Figma'daki gibi 2/5/8/9/12/15/20.
+- Not: global hediye şeridi yalnızca alıcı başına en az `GLOBAL_GIFT_MIN_COINS` (varsayılan 1000) Coin'lik hediyelerde çıkar; küçük hediyelerde çıkmaz. Render ortam değişkeniyle değiştirilebilir.
+
 ## v2.19.0 — Günlük Görev ve Şanslı Çanta
 - **Günlük Görev** (araçlar > Günlük Görev): 4 görev (odaya gir, mikrofona otur, 5 mesaj yaz, hediye gönder). Her görev 10 XP; günün tüm görevleri bitince seri ilerler, 1-6. günlerde +50 XP, **7. gün 1.000 Coin**. Gün aksatılırsa seri sıfırlanır. Gün, Türkiye saatine göre (gece 00:00) değişir.
 - **Şanslı Çanta** (araçlar > Şanslı Çanta): Normal 3.000/6.000/9.000 Coin = 10/20/30 kişilik, 120 sn. **Süper** 30.000/60.000/90.000 Coin = 50 kişilik, 60 sn; gönderen not yazar, açmak isteyenler notu sohbete bir kez yazdıktan sonra açabilir; duyuru tüm odalarda altın şerit olarak görünür. Pay rastgele bölünür (herkese en az bir pay), kendi çantanı açamazsın, kişi başı bir kez. Süre dolunca dağıtılmayan Coin göndericiye iade edilir. Aynı anda tek açık çanta gönderilebilir.

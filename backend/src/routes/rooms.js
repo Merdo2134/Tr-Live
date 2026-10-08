@@ -17,6 +17,8 @@ import { queueOf, broadcastQueue, removeFromQueue, notifyNext } from '../service
 import { cleanPublic } from '../safe_text.js';
 import crypto from 'node:crypto';
 import { noteTask } from '../services/daily.js';
+import express from 'express';
+import { saveUpload, removeUpload, IMAGE_TYPES } from '../services/images.js';
 import { newRoomNumber } from '../services/ids.js';
 
 export const router = Router();
@@ -28,7 +30,7 @@ const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_ALPHABET[b %
 
 // showCode: davet kodunu yalnızca oda sahibi / yardımcı sahip görür.
 const roomJson = (r, { showCode = false } = {}) => ({
-  id: r.id, roomNumber: r.room_number ?? null, name: r.name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.created_at,
+  id: r.id, roomNumber: r.room_number ?? null, announcement: r.announcement ?? '', coverUrl: r.cover_url ?? null, name: r.name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.created_at,
   tags: r.tags ?? [], locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled !== false,
   hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false, lockedSeats: r.locked_seats ?? [],
   ...(showCode && r.join_code ? { joinCode: r.join_code } : {}),
@@ -61,7 +63,8 @@ router.get('/', optionalAuth, async (req, res) => {
   const region = ['tr', 'other', 'friends', 'near'].includes(req.query.region) ? req.query.region : null;
   if ((region === 'friends' || region === 'near') && !req.user) throw fail('Arkadaşları görmek için giriş yapın.', 401);
   const r = await query(
-    `SELECT r.id AS room_id, r.room_number, r.theme_image_url, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
+    `SELECT r.id AS room_id, r.room_number, r.cover_url, r.announcement, r.theme_image_url,
+       (SELECT COUNT(*)::int FROM lucky_bags lb WHERE lb.room_id = r.id AND lb.status = 'open' AND lb.expires_at > NOW()) AS bag_count, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
        (r.password_hash IS NOT NULL) AS locked, r.theme, ${USER_PUBLIC_COLUMNS},
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id) AS member_count,
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.microphone = TRUE) AS mic_count
@@ -81,7 +84,7 @@ router.get('/', optionalAuth, async (req, res) => {
   // Kullanıcı sütunlarındaki "id" (= sahip kimliği) oda kimliğiyle karışmasın diye oda alanları takma adla alınır.
   res.json({
     rooms: r.rows.map((x) => ({
-      id: x.room_id, roomNumber: x.room_number ?? null, name: x.room_name, roomType: x.room_type, seatCount: x.seat_count, ownerId: x.owner_id, createdAt: x.room_created_at,
+      id: x.room_id, roomNumber: x.room_number ?? null, coverUrl: x.cover_url ?? null, bagCount: x.bag_count, name: x.room_name, roomType: x.room_type, seatCount: x.seat_count, ownerId: x.owner_id, createdAt: x.room_created_at,
       memberCount: x.member_count, micCount: x.mic_count, tags: x.tags ?? [], locked: x.locked, theme: x.theme ?? 'default', themeImageUrl: x.theme_image_url ?? null,
       owner: publicUser(x, req.user?.id ?? null),
     })),
@@ -91,7 +94,7 @@ router.get('/', optionalAuth, async (req, res) => {
 // ---------- Kalıcı oda ----------
 // Kullanıcı sesli ve görüntülü için birer kez oda kurar (ad, etiketler, koltuk düzeni, tema). Sonraki "oda aç"lar bu bilgilerle
 // tek adımda açar; ad ve etiketler yalnızca oda içinden (oda adına dokunarak) değiştirilir.
-const profileJson = (p) => ({ roomNumber: p.room_number ?? null, roomType: p.room_type, name: p.name, tags: p.tags ?? [], seatCount: p.seat_count, theme: p.theme });
+const profileJson = (p) => ({ roomNumber: p.room_number ?? null, announcement: p.announcement ?? '', coverUrl: p.cover_url ?? null, roomType: p.room_type, name: p.name, tags: p.tags ?? [], seatCount: p.seat_count, theme: p.theme });
 
 async function profileOf(userId, roomType, run = query) {
   return (await run(`SELECT * FROM room_profiles WHERE owner_id = $1 AND room_type = $2`, [userId, roomType])).rows[0] || null;
@@ -104,8 +107,8 @@ async function openFromProfile(userId, profile, hidden) {
     const existing = (await c.query(`SELECT * FROM rooms WHERE owner_id = $1 AND room_type = $2 AND is_active = TRUE ORDER BY created_at DESC LIMIT 1`, [userId, profile.room_type])).rows[0];
     if (existing) return { room: existing, created: false };
     const r = (await c.query(
-      `INSERT INTO rooms(name, room_type, seat_count, owner_id, tags, is_hidden, join_code, theme, room_number) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [profile.name, profile.room_type, profile.seat_count, userId, profile.tags, hidden, hidden ? await uniqueCode((t, p) => c.query(t, p)) : null, profile.theme, profile.room_number ?? await newRoomNumber((t, p) => c.query(t, p))],
+      `INSERT INTO rooms(name, room_type, seat_count, owner_id, tags, is_hidden, join_code, theme, room_number, announcement, cover_url) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [profile.name, profile.room_type, profile.seat_count, userId, profile.tags, hidden, hidden ? await uniqueCode((t, p) => c.query(t, p)) : null, profile.theme, profile.room_number ?? await newRoomNumber((t, p) => c.query(t, p)), profile.announcement ?? null, profile.cover_url ?? null],
     )).rows[0];
     await c.query(`INSERT INTO room_members(room_id, user_id, role, microphone, seat_index) VALUES($1,$2,'owner',TRUE,0)`, [r.id, userId]);
     // Onaylı yayıncı ise yayın oturumu başlar (süre istatistikleri için).
@@ -225,7 +228,7 @@ router.get('/hosts/:userId/favorite', requireAuth, async (req, res) => {
 router.get('/:roomId', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const r = (await query(
-    `SELECT r.id AS room_id, r.room_number, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags, r.chat_enabled,
+    `SELECT r.id AS room_id, r.room_number, r.cover_url, r.announcement, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags, r.chat_enabled,
        r.is_hidden AS room_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats,
        (r.password_hash IS NOT NULL) AS locked, ${USER_PUBLIC_COLUMNS}
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS} WHERE r.id = $1 AND r.is_active = TRUE`,
@@ -237,7 +240,7 @@ router.get('/:roomId', requireAuth, async (req, res) => {
   const canSeeCode = me && ['owner', 'cohost'].includes(me.role);
   res.json({
     room: {
-      id: r.room_id, roomNumber: r.room_number ?? null, name: r.room_name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.room_created_at,
+      id: r.room_id, roomNumber: r.room_number ?? null, coverUrl: r.cover_url ?? null, announcement: r.announcement ?? '', name: r.room_name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.room_created_at,
       tags: r.tags ?? [], locked: r.locked, chatEnabled: r.chat_enabled !== false,
       hidden: r.room_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [],
       ...(canSeeCode && r.join_code ? { joinCode: r.join_code } : {}),
@@ -324,6 +327,7 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   const b = req.body ?? {};
   if (b.name !== undefined) set('name', cleanPublic(text(b.name, 'Oda adı', { min: 2, max: 60, required: true }), 'Oda adı'));
   if (b.tags !== undefined) set('tags', cleanTags(b.tags));
+  if (b.announcement !== undefined) set('announcement', cleanPublic(text(b.announcement ?? '', 'Duyuru', { min: 0, max: 200 }), 'Duyuru') || null);
   if (b.chatEnabled !== undefined) { if (typeof b.chatEnabled !== 'boolean') throw fail('chatEnabled true/false olmalı.'); set('chat_enabled', b.chatEnabled); }
   if (b.theme !== undefined) set('theme', oneOf(b.theme, THEMES, 'Tema'));
   let newSeats = null;
@@ -363,10 +367,10 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   values.push(roomId);
   const r = (await query(`UPDATE rooms SET ${sets.join(', ')} WHERE id = $${values.length} RETURNING *`, values)).rows[0];
   // Kalıcı oda bilgisi (ad, etiket, tema) bir sonraki açılış için saklanır.
-  if (b.name !== undefined || b.tags !== undefined || b.theme !== undefined || newSeats !== null) {
+  if (b.name !== undefined || b.tags !== undefined || b.theme !== undefined || b.announcement !== undefined || newSeats !== null) {
     await query(
-      `UPDATE room_profiles SET name = $3, tags = $4, theme = $5, seat_count = $6, updated_at = NOW() WHERE owner_id = $1 AND room_type = $2`,
-      [r.owner_id, r.room_type, r.name, r.tags ?? [], r.theme, r.seat_count],
+      `UPDATE room_profiles SET name = $3, tags = $4, theme = $5, seat_count = $6, announcement = $7, updated_at = NOW() WHERE owner_id = $1 AND room_type = $2`,
+      [r.owner_id, r.room_type, r.name, r.tags ?? [], r.theme, r.seat_count, r.announcement],
     );
   }
   // Koltuk sayısı azaldıysa taşan koltuklardakiler dinleyiciye iner (mikrofonları kapanır).
@@ -384,9 +388,53 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   hub.broadcastRoom(roomId, {
     type: 'room_settings', roomId, name: r.name, tags: r.tags, locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled,
     theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, hidden: r.is_hidden,
-    seatCount: r.seat_count, lockedSeats: r.locked_seats ?? [],
+    seatCount: r.seat_count, lockedSeats: r.locked_seats ?? [], announcement: r.announcement ?? '', coverUrl: r.cover_url ?? null,
   });
   res.json({ room: roomJson(r, { showCode: true }) });
+});
+
+// Oda kapak fotoğrafı (oda sahibi / yardımcı sahip).
+router.put('/:roomId/cover', requireAuth, userLimit('room_cover', 10, 10 * 60e3), express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const before = await activeRoom(roomId);
+  const me = await memberOf(roomId, req.user.id);
+  if (!me || !['owner', 'cohost'].includes(me.role)) throw fail('Kapak fotoğrafını yalnızca oda sahibi ve yardımcı sahip değiştirebilir.', 403);
+  const url = await saveUpload(req);
+  await query(`UPDATE rooms SET cover_url = $2 WHERE id = $1`, [roomId, url]);
+  await query(`UPDATE room_profiles SET cover_url = $3, updated_at = NOW() WHERE owner_id = $1 AND room_type = $2`, [before.owner_id, before.room_type, url]);
+  await removeUpload(before.cover_url);
+  hub.broadcastRoom(roomId, { type: 'room_settings', roomId, name: before.name, tags: before.tags, locked: Boolean(before.password_hash), chatEnabled: before.chat_enabled,
+    theme: before.theme, themeImageUrl: before.theme_image_url, scoreboardEnabled: before.scoreboard_enabled, hidden: before.is_hidden,
+    seatCount: before.seat_count, lockedSeats: before.locked_seats ?? [], announcement: before.announcement ?? '', coverUrl: url });
+  res.json({ url });
+});
+
+// Yönetici silme: odada olmasa da kalıcı yönetici listesinden çıkarır (yalnızca oda sahibi).
+router.delete('/:roomId/staff/:userId', requireAuth, userLimit('moderate', 60, 60e3), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const targetId = uuid(req.params.userId, 'Kullanıcı');
+  const room = await activeRoom(roomId);
+  if (room.owner_id !== req.user.id) throw fail('Yöneticileri yalnızca oda sahibi çıkarabilir.', 403);
+  await query(`DELETE FROM room_staff WHERE owner_id = $1 AND room_type = $2 AND user_id = $3`, [room.owner_id, room.room_type, targetId]);
+  const upd = await query(`UPDATE room_members SET role = 'user' WHERE room_id = $1 AND user_id = $2 AND role IN ('moderator','cohost')`, [roomId, targetId]);
+  if (upd.rowCount) hub.broadcastRoom(roomId, { type: 'room_role_changed', roomId, userId: targetId, role: 'user' });
+  res.json({ ok: true });
+});
+
+// Katkı listesi: odaya en çok hediye gönderenler (24 saat / toplam).
+router.get('/:roomId/contributions', requireAuth, async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  await activeRoom(roomId);
+  const day = req.query.range === 'day';
+  const r = await query(
+    `SELECT ${USER_PUBLIC_COLUMNS}, g.total
+     FROM (SELECT sender_id, SUM(coin_amount)::bigint AS total FROM gift_transactions
+           WHERE room_id = $1 AND ($2::boolean = FALSE OR created_at > NOW() - INTERVAL '24 hours')
+           GROUP BY sender_id ORDER BY total DESC LIMIT 50) g
+     JOIN users u ON u.id = g.sender_id ${USER_PUBLIC_JOINS} ORDER BY g.total DESC`,
+    [roomId, day],
+  );
+  res.json({ contributions: r.rows.map((x) => ({ user: publicUser(x, req.user.id), total: String(x.total) })) });
 });
 
 router.post('/:roomId/leave', requireAuth, async (req, res) => {

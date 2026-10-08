@@ -42,7 +42,7 @@ Future<void> showBagSend(BuildContext context, String roomId) async {
               ]),
               if (t.$2) ...[
                 const SizedBox(height: 10),
-                const Text('Süper çanta: tüm odalarda duyurulur, 60 sn açılır; açmak isteyenler önce aşağıdaki notu sohbete yazar.', style: TextStyle(color: Colors.amberAccent, fontSize: 12)),
+                const Text('Süper çanta: tüm odalarda duyurulur; 60 sn geri sayım sonunda açılır. Açmak isteyenler geri sayım sırasında bu notu sohbete bir kez yazar.', style: TextStyle(color: Colors.amberAccent, fontSize: 12)),
                 TextField(controller: noteCtl, maxLength: 100, decoration: const InputDecoration(labelText: 'Çanta notu')),
               ],
               const SizedBox(height: 8),
@@ -66,9 +66,9 @@ Future<void> showBagSend(BuildContext context, String roomId) async {
   noteCtl.dispose();
 }
 
-/// Çantayı açma penceresi (geri sayım, not, aç).
+/// Çantayı açma penceresi (Figma: pembe kart, büyük yuvarlak düğme: geri sayım → AÇ).
 Future<void> showBagClaim(BuildContext context, String roomId, Map<String, dynamic> bag) {
-  return showDialog<void>(context: context, builder: (c) => _ClaimDialog(roomId: roomId, bag: bag));
+  return showDialog<void>(context: context, barrierColor: Colors.black54, builder: (c) => _ClaimDialog(roomId: roomId, bag: bag));
 }
 
 class _ClaimDialog extends StatefulWidget {
@@ -81,8 +81,10 @@ class _ClaimDialog extends StatefulWidget {
 
 class _ClaimDialogState extends State<_ClaimDialog> {
   Timer? _t;
-  int _left = 0;
+  int _toOpen = 0; // açılmasına kalan saniye (süper çanta geri sayımı)
+  int _left = 1 << 30; // kapanmasına kalan saniye
   bool _noteSent = false;
+  bool _busy = false;
   String? _won;
 
   Map<String, dynamic> get _b => widget.bag;
@@ -96,10 +98,17 @@ class _ClaimDialogState extends State<_ClaimDialog> {
     _t = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
+  int _secsTo(dynamic iso) {
+    final d = DateTime.tryParse((iso ?? '').toString())?.toLocal();
+    return d == null ? 0 : d.difference(DateTime.now()).inSeconds;
+  }
+
   void _tick() {
-    final end = DateTime.tryParse((_b['expiresAt'] ?? '').toString())?.toLocal();
-    final left = end == null ? 0 : end.difference(DateTime.now()).inSeconds;
-    if (mounted) setState(() => _left = left < 0 ? 0 : left);
+    if (!mounted) return;
+    setState(() {
+      _toOpen = _super ? _secsTo(_b['opensAt']).clamp(0, 3600) : 0;
+      _left = _secsTo(_b['expiresAt']);
+    });
   }
 
   @override
@@ -109,51 +118,160 @@ class _ClaimDialogState extends State<_ClaimDialog> {
   }
 
   Future<void> _sendNote() async {
+    setState(() => _busy = true);
     final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/messages', {'text': (_b['note'] ?? '').toString()}));
-    if (r != null && mounted) setState(() => _noteSent = true);
+    if (mounted) setState(() { _busy = false; if (r != null) _noteSent = true; });
   }
 
   Future<void> _open() async {
+    setState(() => _busy = true);
     final r = await guard(context, () => Api.post('/api/lucky-bags/${_b['id']}/claim'));
-    if (r != null && mounted) setState(() { _won = r['amount'].toString(); _b['mine'] = _won; });
+    if (mounted) setState(() { _busy = false; if (r != null) { _won = r['amount'].toString(); _b['mine'] = _won; } });
   }
+
+  String _mmss(int s) => '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
     final sender = mapOf(_b['sender']);
     final expired = _left <= 0;
-    return AlertDialog(
-      title: Text(_super ? '⭐ Süper Şanslı Çanta' : '🧧 Şanslı Çanta'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        UserAvatar(user: sender, radius: 26),
-        const SizedBox(height: 6),
-        Text('${sender?['displayName'] ?? ''} gönderdi', style: const TextStyle(fontWeight: FontWeight.w700)),
-        Text('${fmtNumber(_b['totalCoins'])} Coin • ${_b['claimed']}/${_b['slots']} kişi açtı', style: const TextStyle(color: Colors.white70)),
-        const SizedBox(height: 8),
-        if (_won != null)
-          Text('🎉 ${fmtNumber(_won)} Coin kazandın!', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.amber))
-        else if (expired)
-          const Text('Süre doldu.', style: TextStyle(color: Colors.redAccent))
-        else
-          Text('Kalan süre: $_left sn', style: const TextStyle(fontWeight: FontWeight.w700)),
-        if (_super && _won == null && !expired) ...[
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(10)),
-            child: Text('Not: "${_b['note']}"', textAlign: TextAlign.center),
+    final counting = _super && _toOpen > 0 && _won == null;
+    final needNote = _super && !_noteSent && _won == null && !expired;
+    final canOpen = _won == null && !expired && !counting && !needNote && !_busy;
+    final big = _won != null ? '🎉' : (expired ? 'Bitti' : (counting ? _mmss(_toOpen) : (needNote ? 'AÇ' : 'AÇ')));
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+      child: Stack(clipBehavior: Clip.none, children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 26),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white70, width: 2),
+            gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFF4D6D), Color(0xFFE8258A)]),
+            boxShadow: const [BoxShadow(color: Color(0x88FF2D75), blurRadius: 24)],
           ),
-          const SizedBox(height: 6),
-          const Text('Çantayı açmak için bu notu sohbete bir kez yaz.', style: TextStyle(color: Colors.white60, fontSize: 12)),
-        ],
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.all(3),
+              decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white70),
+              child: UserAvatar(user: sender, radius: 42),
+            ),
+            const SizedBox(height: 10),
+            const Divider(color: Colors.white38, height: 1),
+            const SizedBox(height: 8),
+            UserName(user: sender),
+            const SizedBox(height: 6),
+            Text(_super ? 'Süper şanslı çanta gönderdi' : 'Şanslı çanta gönderdi', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white)),
+            const SizedBox(height: 4),
+            const Divider(color: Colors.white38, height: 1),
+            const SizedBox(height: 18),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Text('🪙', style: TextStyle(fontSize: 38)),
+              const SizedBox(width: 8),
+              Text(fmtNumber(_b['totalCoins']), style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w800, color: Colors.white)),
+            ]),
+            Text('${_b['claimed']}/${_b['slots']} kişi açtı', style: const TextStyle(color: Colors.white70)),
+            if (_super && !expired && _won == null) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(12)),
+                child: Column(children: [
+                  Text('"${_b['note']}"', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  if (!_noteSent)
+                    FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFFE8258A)),
+                      onPressed: _busy ? null : _sendNote,
+                      child: const Text('Notu sohbete gönder'),
+                    )
+                  else
+                    const Text('✓ Not gönderildi', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                ]),
+              ),
+            ],
+            const SizedBox(height: 18),
+            GestureDetector(
+              onTap: canOpen ? _open : null,
+              child: Container(
+                width: 132,
+                height: 132,
+                padding: const EdgeInsets.all(9),
+                decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x66FFFFFF)),
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: canOpen ? const [Color(0xFFFFF59D), Color(0xFFFFF176)] : const [Color(0xFFFFF9C4), Color(0xFFFFECB3)]),
+                  ),
+                  child: Text(big, style: TextStyle(fontSize: _won != null ? 44 : (counting ? 34 : 38), fontWeight: FontWeight.w900, color: const Color(0xFF8A1560))),
+                ),
+              ),
+            ),
+            if (_won != null) ...[
+              const SizedBox(height: 10),
+              Text('${fmtNumber(_won)} Coin kazandın!', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
+            ] else if (counting) ...[
+              const SizedBox(height: 8),
+              const Text('Süre bitince açılır', style: TextStyle(color: Colors.white70)),
+            ] else if (expired) ...[
+              const SizedBox(height: 8),
+              const Text('Çantanın süresi doldu', style: TextStyle(color: Colors.white70)),
+            ],
+          ]),
+        ),
+        Positioned(right: -6, top: -6, child: InkWell(customBorder: const CircleBorder(), onTap: () => Navigator.pop(context), child: const CircleAvatar(radius: 16, backgroundColor: Colors.black54, child: Icon(Icons.close, size: 18, color: Colors.white)))),
       ]),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Kapat')),
-        if (_won == null && !expired) ...[
-          if (_super && !_noteSent) OutlinedButton(onPressed: _sendNote, child: const Text('Notu gönder')),
-          FilledButton(onPressed: (_super && !_noteSent) ? null : _open, child: const Text('Çantayı Aç')),
-        ],
-      ],
+    );
+  }
+}
+
+/// Odada çanta varken görünen küçük kırmızı zarf (rozet = açık çanta sayısı).
+class BagEnvelope extends StatelessWidget {
+  final int count;
+  final bool isSuper;
+  final VoidCallback? onTap;
+  final double size;
+  const BagEnvelope({super.key, required this.count, this.isSuper = false, this.onTap, this.size = 44});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: size + 10,
+        height: size + 8,
+        child: Stack(clipBehavior: Clip.none, children: [
+          Positioned(
+            left: 0,
+            bottom: 0,
+            child: Container(
+              width: size * 0.82,
+              height: size,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: isSuper ? const [Color(0xFFFFC107), Color(0xFFFF8F00)] : const [Color(0xFFFF4040), Color(0xFFD50000)]),
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 2))],
+              ),
+              child: Align(alignment: const Alignment(0, -0.1), child: Container(width: size * 0.3, height: size * 0.3, decoration: const BoxDecoration(color: Color(0xFFFFE082), shape: BoxShape.circle))),
+            ),
+          ),
+          if (count > 0)
+            Positioned(
+              right: 0,
+              top: 0,
+              child: Container(
+                width: 22,
+                height: 22,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: Colors.red, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                child: Text('$count', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.white)),
+              ),
+            ),
+        ]),
+      ),
     );
   }
 }

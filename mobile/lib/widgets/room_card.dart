@@ -18,7 +18,9 @@ class RoomCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final owner = room['owner'] is Map ? Map<String, dynamic>.from(room['owner'] as Map) : null;
     final themeImg = room['themeImageUrl'] as String?;
-    final image = Api.absoluteUrl(themeImg != null && themeImg.isNotEmpty ? themeImg : owner?['avatarUrl'] as String?);
+    final cover = room['coverUrl'] as String?;
+    final image = Api.absoluteUrl(cover != null && cover.isNotEmpty ? cover : (themeImg != null && themeImg.isNotEmpty ? themeImg : owner?['avatarUrl'] as String?));
+    final bags = (room['bagCount'] as num?)?.toInt() ?? 0;
     final tags = room['tags'] is List ? (room['tags'] as List).map((e) => e.toString()).toList() : <String>[];
     final isVideo = room['roomType'] == 'video';
     final count = room['memberCount'] ?? 0;
@@ -54,7 +56,9 @@ class RoomCard extends StatelessWidget {
                         gradient: LinearGradient(colors: isVideo ? const [Pal.purple, Pal.pink] : const [Color(0xFFFF7A18), Color(0xFFFF4A1C)]),
                       ),
                     ),
-                    if (room['locked'] == true) ...[const Spacer(), const Icon(Icons.lock, size: 18, color: Pal.amber)],
+                    const Spacer(),
+                    if (bags > 0) const Padding(padding: EdgeInsets.only(right: 4), child: Text('🧧', style: TextStyle(fontSize: 18))),
+                    if (room['locked'] == true) const Icon(Icons.lock, size: 18, color: Pal.amber),
                   ]),
                 ),
                 Positioned(

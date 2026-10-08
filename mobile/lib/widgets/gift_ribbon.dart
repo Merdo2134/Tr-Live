@@ -50,7 +50,9 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   void _onEvent(Map<String, dynamic> e) {
     if (!GiftRibbonOverlay.effectsOn) return;
     final type = e['type'];
-    if (type == 'global_gift_ribbon') {
+    if (type == 'lucky_bag_global') {
+      _enqueue(e); // süper çanta duyurusu: tüm odalarda ve ana ekranda
+    } else if (type == 'global_gift_ribbon') {
       // Aynı odadaysak zaten room_gift ile göstereceğiz.
       if (widget.roomId != null && e['roomId'] == widget.roomId) return;
       _enqueue(e);
@@ -124,7 +126,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     }
     final e = _queue.removeAt(0);
     if (mounted) setState(() => _current = e);
-    _timer = Timer(const Duration(seconds: 4), _next);
+    _timer = Timer(const Duration(milliseconds: 5200), _next);
   }
 
   void _showEntrance(Map<String, dynamic> e, Map<String, dynamic> effect) {
@@ -143,11 +145,41 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       widget.child,
       if (_anim != null) _buildAnim(),
       if (_entrance != null) _buildEntrance(top),
-      if (_current != null) Positioned(top: top, left: 12, right: 12, child: _buildRibbon(_current!)),
+      if (_current != null) Positioned(top: top, left: 0, right: 0, child: _SlideStrip(key: ObjectKey(_current), child: _buildRibbon(_current!))),
     ]);
   }
 
+  Widget _buildBagRibbon(Map<String, dynamic> e) {
+    final sender = mapOf(e['sender']);
+    return IgnorePointer(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [Color(0x009C6A00), Color(0xFFFFB300), Color(0xFFFFE082), Color(0xFFFFB300), Color(0x009C6A00)]),
+            boxShadow: const [BoxShadow(color: Colors.amber, blurRadius: 14)],
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Text('🧧', style: TextStyle(fontSize: 22)),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                '${sender?['displayName'] ?? 'Biri'} süper şanslı çanta gönderdi! ${fmtNumber(e['totalCoins'])} Coin • "${e['roomName'] ?? ''}"',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF3A2500), fontSize: 13),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _buildRibbon(Map<String, dynamic> e) {
+    if (e['type'] == 'lucky_bag_global') return _buildBagRibbon(e);
     final gift = mapOf(e['gift']) ?? {};
     final sender = mapOf(e['sender']);
     final receivers = e['receivers'] is List ? (e['receivers'] as List) : const [];
@@ -160,10 +192,9 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       child: Material(
         color: Colors.transparent,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [Color(0xFFFF4081), Color(0xFF7C4DFF)]),
-            borderRadius: BorderRadius.circular(24),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(colors: [Color(0x00FF4081), Color(0xFFFF4081), Color(0xFF7C4DFF), Color(0x007C4DFF)]),
           ),
           child: Row(children: [
             if (icon != null) Image.network(icon, width: 32, height: 32, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard)) else const Icon(Icons.card_giftcard),
@@ -208,6 +239,44 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
           ),
         ]),
       ),
+    );
+  }
+}
+
+
+/// Şeridi sağdan sola kaydırarak geçirir (giriş → bekleme → çıkış).
+class _SlideStrip extends StatefulWidget {
+  final Widget child;
+  const _SlideStrip({super.key, required this.child});
+  @override
+  State<_SlideStrip> createState() => _SlideStripState();
+}
+
+class _SlideStripState extends State<_SlideStrip> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 5000))..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, child) {
+        final t = _c.value;
+        double dx = 0;
+        if (t < 0.12) {
+          dx = (1 - Curves.easeOutCubic.transform(t / 0.12)) * w;
+        } else if (t > 0.88) {
+          dx = -Curves.easeInCubic.transform((t - 0.88) / 0.12) * w;
+        }
+        return Transform.translate(offset: Offset(dx, 0), child: child);
+      },
+      child: widget.child,
     );
   }
 }

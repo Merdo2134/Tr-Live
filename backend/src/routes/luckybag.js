@@ -32,13 +32,13 @@ async function bagJson(b, viewerId, c = { query }) {
   const mine = (await c.query(`SELECT amount FROM lucky_bag_claims WHERE bag_id = $1 AND user_id = $2`, [b.id, viewerId])).rows[0];
   return {
     id: b.id, roomId: b.room_id, kind: b.kind, tier: b.tier, totalCoins: String(b.total_coins), slots: b.slots, claimed: b.claimed_count,
-    status: b.status, note: b.kind === 'super' ? b.note : null, expiresAt: b.expires_at, sender: publicUser(sender, null),
+    status: b.status, note: b.kind === 'super' ? b.note : null, expiresAt: b.expires_at, opensAt: b.opens_at ?? b.created_at, sender: publicUser(sender, null),
     mine: mine ? String(mine.amount) : null,
   };
 }
 
 router.get('/lucky-bags/config', (req, res) => {
-  res.json({ tiers: Object.entries(BAG_TIERS).map(([id, t]) => ({ id, kind: t.kind, totalCoins: t.total, slots: t.slots, seconds: t.seconds })) });
+  res.json({ tiers: Object.entries(BAG_TIERS).map(([id, t]) => ({ id, kind: t.kind, totalCoins: t.total, slots: t.slots, countdown: t.countdown, window: t.window })) });
 });
 
 router.get('/rooms/:roomId/lucky-bags', async (req, res) => {
@@ -72,9 +72,9 @@ router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), 
     if (open) throw fail('Açık bir çantanız zaten var; süresi dolunca yenisini gönderebilirsiniz.', 409);
     await c.query(`UPDATE users SET coins = coins - $2, updated_at = NOW() WHERE id = $1`, [userId, String(tier.total)]);
     const bag = (await c.query(
-      `INSERT INTO lucky_bags(room_id, sender_id, kind, tier, total_coins, slots, amounts, note, expires_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8, NOW() + make_interval(secs => $9::int)) RETURNING *`,
-      [roomId, userId, tier.kind, req.body.tier, String(tier.total), tier.slots, splitBag(tier.total, tier.slots).map(String), note, String(tier.seconds)],
+      `INSERT INTO lucky_bags(room_id, sender_id, kind, tier, total_coins, slots, amounts, note, opens_at, expires_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8, NOW() + make_interval(secs => $9::int), NOW() + make_interval(secs => $10::int)) RETURNING *`,
+      [roomId, userId, tier.kind, req.body.tier, String(tier.total), tier.slots, splitBag(tier.total, tier.slots).map(String), note, tier.countdown, tier.countdown + tier.window],
     )).rows[0];
     await c.query(
       `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'lucky_bag_sent',$2,$3,$4)`,
@@ -99,6 +99,7 @@ router.post('/lucky-bags/:id/claim', userLimit('lucky_claim', 30, 60e3), async (
     if (b.status !== 'open' || new Date(b.expires_at) <= new Date()) throw fail('Bu çantanın süresi doldu.', 410);
     if (b.claimed_count >= b.slots) throw fail('Çanta tükendi.', 410);
     if (b.sender_id === userId) throw fail('Kendi çantanızı açamazsınız.', 403);
+    if (b.opens_at && new Date(b.opens_at) > new Date()) throw fail('Geri sayım bitince açılır.', 425);
     if (!(await c.query(`SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2`, [b.room_id, userId])).rowCount) throw fail('Çantayı açmak için odada olmalısınız.', 403);
     if ((await c.query(`SELECT 1 FROM lucky_bag_claims WHERE bag_id = $1 AND user_id = $2`, [id, userId])).rowCount) throw fail('Bu çantayı zaten açtınız.', 409);
     if (b.kind === 'super') {

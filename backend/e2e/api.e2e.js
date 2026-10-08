@@ -935,6 +935,8 @@ test('şanslı çanta ve günlük görev', { skip, timeout: 60000 }, async () =>
   await sql('UPDATE users SET coins = 100000 WHERE id=$1', [s.id]);
   const sb = await api('POST', `/api/rooms/${room}/lucky-bags`, { token: s.token, body: { tier: 's30', note: 'merhaba herkese' } });
   ok(sb, 'süper');
+  status(await api('POST', `/api/lucky-bags/${sb.body.bag.id}/claim`, { token: c1.token }), 425, 'geri sayım bitmeden açılmaz');
+  await sql(`UPDATE lucky_bags SET opens_at = NOW() - INTERVAL '1 second' WHERE id=$1`, [sb.body.bag.id]);
   status(await api('POST', `/api/lucky-bags/${sb.body.bag.id}/claim`, { token: c1.token }), 403, 'not yok');
   ok(await api('POST', `/api/rooms/${room}/messages`, { token: c1.token, body: { text: 'merhaba herkese' } }), 'not');
   ok(await api('POST', `/api/lucky-bags/${sb.body.bag.id}/claim`, { token: c1.token }), 'süper aç');
@@ -943,4 +945,13 @@ test('şanslı çanta ve günlük görev', { skip, timeout: 60000 }, async () =>
   ok(d, 'görev');
   assert.ok(d.body.tasks.find((t) => t.key === 'join_room').done);
   assert.equal(d.body.tasks.length, 4);
+  // oda kartı: duyuru, katkı listesi, yönetici silme
+  const up = await api('PATCH', `/api/rooms/${room}`, { token: s.token, body: { announcement: 'Hoş geldiniz' } });
+  ok(up, 'duyuru');
+  assert.equal(up.body.room.announcement, 'Hoş geldiniz');
+  const ct = await api('GET', `/api/rooms/${room}/contributions?range=total`, { token: c1.token });
+  ok(ct, 'katkı');
+  assert.ok(Array.isArray(ct.body.contributions));
+  status(await api('DELETE', `/api/rooms/${room}/staff/${c1.id}`, { token: c1.token }), 403, 'yalnız sahip yönetici siler');
+  ok(await api('DELETE', `/api/rooms/${room}/staff/${c1.id}`, { token: s.token }), 'yönetici sil');
 });
