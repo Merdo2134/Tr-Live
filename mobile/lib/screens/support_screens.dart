@@ -79,7 +79,9 @@ class _CoinsCenterScreenState extends State<CoinsCenterScreen> {
       body: AsyncBody<Map<String, dynamic>>(
         key: ValueKey(_v),
         load: () async {
-          await Session.refresh();
+          try {
+            await Session.refresh();
+          } catch (_) {/* bakiye eski görünse de paketler açılsın */}
           final r = await Api.get('/api/store/coin-packages');
           return {'packages': listOf(r['packages'])};
         },
@@ -100,7 +102,7 @@ class _CoinsCenterScreenState extends State<CoinsCenterScreen> {
                     builder: (_, __, ___) => Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                       const Icon(Icons.monetization_on, color: Colors.amber, size: 46),
                       const SizedBox(width: 10),
-                      Text(fmtNumber(Session.coins), style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w800)),
+                      Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text(fmtNumber(Session.coins), style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w800)))),
                     ]),
                   ),
                 ]),
@@ -179,7 +181,7 @@ class CustomerServiceScreen extends StatelessWidget {
                   child: Row(children: [
                     Container(width: 38, height: 38, decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)), child: Icon(t[1] as IconData, color: const Color(0xFFFFEB3B), size: 22)),
                     const SizedBox(width: 10),
-                    Expanded(child: Text(t[0] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+                    Expanded(child: Text(t[0] as String, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, height: 1.15))),
                   ]),
                 ),
               ),

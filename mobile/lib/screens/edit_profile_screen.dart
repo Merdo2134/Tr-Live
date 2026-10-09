@@ -128,7 +128,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             UserAvatar(user: me, radius: 36),
             const SizedBox(width: 16),
             Expanded(
-              child: Wrap(spacing: 8, children: [
+              child: Wrap(spacing: 8, runSpacing: 8, children: [
                 OutlinedButton.icon(onPressed: _uploading ? null : () => _upload(false), icon: const Icon(Icons.photo_camera), label: const Text('Fotoğraf')),
                 OutlinedButton.icon(onPressed: _uploading ? null : () => _upload(true), icon: const Icon(Icons.panorama), label: const Text('Kapak')),
                 OutlinedButton.icon(onPressed: _uploading ? null : _uploadAnimated, icon: const Icon(Icons.gif_box), label: const Text('Hareketli (WIP 5)')),
@@ -149,14 +149,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ]),
         const SizedBox(height: 8),
         const Text('Cinsiyet'),
-        Wrap(spacing: 8, children: [
+        Wrap(spacing: 8, runSpacing: 8, children: [
           for (final e in const {'male': 'Erkek', 'female': 'Kadın', 'other': 'Diğer'}.entries)
             ChoiceChip(label: Text(e.value), selected: _gender == e.key, onSelected: (_) => setState(() => _gender = e.key)),
           ChoiceChip(label: const Text('Belirtmek istemiyorum'), selected: _gender == null, onSelected: (_) => setState(() => _gender = null)),
         ]),
         const SizedBox(height: 12),
         const Text('Bana kimler özel mesaj gönderebilir?'),
-        Wrap(spacing: 8, children: [
+        Wrap(spacing: 8, runSpacing: 8, children: [
           for (final e in const {'everyone': 'Herkes', 'following': 'Takip ettiklerim', 'nobody': 'Hiç kimse'}.entries)
             ChoiceChip(label: Text(e.value), selected: _whoCanDm == e.key, onSelected: (_) => setState(() => _whoCanDm = e.key)),
         ]),

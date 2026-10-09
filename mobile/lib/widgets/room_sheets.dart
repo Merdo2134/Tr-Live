@@ -142,7 +142,7 @@ class _ContributionsState extends State<_Contributions> {
     final u = mapOf(row['user']);
     return Expanded(
       child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
-        Text(rank == 1 ? '👑' : '🥈', style: TextStyle(fontSize: rank == 1 ? 26 : 20)),
+        Text(const {1: '👑', 2: '🥈', 3: '🥉'}[rank] ?? '', style: TextStyle(fontSize: rank == 1 ? 26 : 20)),
         Container(
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.amber, width: 2.5)),
@@ -175,7 +175,7 @@ class _ContributionsState extends State<_Contributions> {
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(8)),
           child: Row(children: [
-            _tab('24 Saat.', !_total, () { if (_total) { _total = false; _load(); } }),
+            _tab('24 Saat', !_total, () { if (_total) { _total = false; _load(); } }),
             _tab('Toplam', _total, () { if (!_total) { _total = true; _load(); } }),
           ]),
         ),
@@ -187,7 +187,7 @@ class _ContributionsState extends State<_Contributions> {
         Expanded(
           child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 16), children: [
             SizedBox(
-              height: 190,
+              height: 226, // 1. sıradaki taç + büyük avatar + ad + puan büyük yazı boyutunda da sığsın
               child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 _podium(rows.length > 1 ? rows[1] : null, 2, 150),
                 _podium(rows[0], 1, 190),
@@ -220,8 +220,10 @@ class _ContributionsState extends State<_Contributions> {
 
 String fmtCompact(dynamic v) {
   final n = BigInt.tryParse(v.toString()) ?? BigInt.zero;
-  if (n >= BigInt.from(1000000)) return '${(n.toInt() / 1000000).toStringAsFixed(1)}M';
-  if (n >= BigInt.from(1000)) return '${(n.toInt() / 1000).toStringAsFixed(n >= BigInt.from(100000) ? 0 : 1)}K';
+  // Türkçe ondalık ayırıcı virgül: 1,5K (1.5K okuyan 1500 sanır).
+  if (n >= BigInt.from(1000000000)) return '${(n.toDouble() / 1000000000).toStringAsFixed(1).replaceAll('.', ',')}B';
+  if (n >= BigInt.from(1000000)) return '${(n.toDouble() / 1000000).toStringAsFixed(1).replaceAll('.', ',')}M';
+  if (n >= BigInt.from(1000)) return '${(n.toDouble() / 1000).toStringAsFixed(n >= BigInt.from(100000) ? 0 : 1).replaceAll('.', ',')}K';
   return n.toString();
 }
 

@@ -69,7 +69,9 @@ class WalletScreen extends StatelessWidget {
     final r = await guard(context, () => Api.post('/api/me/diamonds/exchange', {'diamonds': amount}));
     if (r == null || !context.mounted) return;
     toast(context, '${r['exchangedCoins']} Coin hesabına eklendi.');
-    await Session.refresh();
+    try {
+      await Session.refresh(); // bakiye yenilenemese de işlem tamamlandı; ekran yine güncellensin
+    } catch (_) {}
     await reload();
   }
 

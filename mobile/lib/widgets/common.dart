@@ -1,15 +1,109 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
+import 'app_theme.dart';
 
+OverlayEntry? _toastEntry;
+Timer? _toastTimer;
+
+/// Kısa bilgi/hata mesajı. En üst katmanda gösterilir: açık alt pencere veya diyalog varken de görünür.
 void toast(BuildContext context, String message, {bool error = false}) {
-  final m = ScaffoldMessenger.maybeOf(context);
-  m?.hideCurrentSnackBar();
-  m?.showSnackBar(SnackBar(
-    content: Text(message),
-    backgroundColor: error ? Colors.red.shade700 : null,
-    behavior: SnackBarBehavior.floating,
-  ));
+  final overlay = Overlay.maybeOf(context, rootOverlay: true);
+  if (overlay == null) {
+    final m = ScaffoldMessenger.maybeOf(context);
+    m?.hideCurrentSnackBar();
+    m?.showSnackBar(SnackBar(content: Text(message), backgroundColor: error ? Pal.red : null, behavior: SnackBarBehavior.floating));
+    return;
+  }
+  _toastTimer?.cancel();
+  final old = _toastEntry;
+  old?.remove();
+  old?.dispose();
+  late final OverlayEntry entry;
+  void close() {
+    if (_toastEntry == entry) {
+      entry.remove();
+      entry.dispose();
+      _toastEntry = null;
+    }
+  }
+
+  entry = OverlayEntry(builder: (_) => _ToastView(message: message, error: error, onTap: close));
+  _toastEntry = entry;
+  overlay.insert(entry);
+  _toastTimer = Timer(Duration(milliseconds: (2400 + message.length * 35).clamp(2400, 6000).toInt()), close);
 }
+
+class _ToastView extends StatelessWidget {
+  final String message;
+  final bool error;
+  final VoidCallback onTap;
+  const _ToastView({required this.message, required this.error, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    return Positioned(
+      left: Gap.l,
+      right: Gap.l,
+      bottom: mq.viewInsets.bottom + mq.padding.bottom + 96,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 180),
+        builder: (_, t, child) => Opacity(opacity: t, child: Transform.translate(offset: Offset(0, 12 * (1 - t)), child: child)),
+        child: Center(
+          child: Material(
+            color: error ? const Color(0xFFB3261E) : Pal.surfaceHi,
+            elevation: 8,
+            shadowColor: Colors.black54,
+            borderRadius: BorderRadius.circular(Rad.md),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(Rad.md),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: Gap.l, vertical: Gap.m),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(error ? Icons.error_outline : Icons.check_circle_outline, size: 20, color: error ? Colors.white : Pal.cyan),
+                  const SizedBox(width: Gap.s),
+                  Flexible(child: Text(message, style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.3))),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Boş liste / sonuç yok görünümü: simge, açıklama ve isteğe bağlı eylem düğmesi.
+class EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  const EmptyState({super.key, this.icon = Icons.inbox_outlined, required this.text, this.actionLabel, this.onAction});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(Gap.xl),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 52, color: Pal.textDim.withValues(alpha: 0.7)),
+            const SizedBox(height: Gap.m),
+            Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Pal.textDim, fontSize: 14, height: 1.4)),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: Gap.l),
+              FilledButton(onPressed: onAction, child: Text(actionLabel!)),
+            ],
+          ]),
+        ),
+      );
+}
+
+/// Türkçe büyük/küçük harf (Dart'ın toUpperCase'i 'i'yi 'I' yapar).
+String trUpper(String s) => s.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
+String trLower(String s) => s.replaceAll('İ', 'i').replaceAll('I', 'ı').toLowerCase();
 
 String errorText(Object e) => e is ApiException ? e.message : e.toString().replaceFirst('Exception: ', '');
 
@@ -23,14 +117,19 @@ Future<T?> guard<T>(BuildContext context, Future<T> Function() action) async {
   }
 }
 
-Future<bool> confirm(BuildContext context, String message, {String action = 'Onayla'}) async {
+/// Onay penceresi. [destructive]: silme/kapatma gibi geri alınamaz işlemlerde düğme kırmızı olur.
+Future<bool> confirm(BuildContext context, String message, {String action = 'Onayla', bool destructive = false}) async {
   final r = await showDialog<bool>(
     context: context,
     builder: (c) => AlertDialog(
       content: Text(message),
       actions: [
         TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
-        FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(action)),
+        FilledButton(
+          style: destructive ? FilledButton.styleFrom(backgroundColor: Pal.red, foregroundColor: Colors.white) : null,
+          onPressed: () => Navigator.pop(c, true),
+          child: Text(action),
+        ),
       ],
     ),
   );
@@ -103,11 +202,13 @@ class UserAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = Api.absoluteUrl(user?['avatarUrl'] as String?);
     final name = (user?['displayName'] ?? '?').toString();
+    // Görsel, gösterileceği boyutta çözülür: küçük avatar için 1024 px'lik dosyayı tam çözmek belleği tüketiyordu.
+    final px = (radius * 2 * MediaQuery.devicePixelRatioOf(context)).round().clamp(32, 512);
     final avatar = CircleAvatar(
       radius: radius,
-      backgroundImage: url == null ? null : NetworkImage(url),
+      backgroundImage: url == null ? null : ResizeImage(NetworkImage(url), width: px),
       onBackgroundImageError: url == null ? null : (_, __) {},
-      child: url == null ? Text(name.isEmpty ? '?' : name.characters.first.toUpperCase()) : null,
+      child: url == null ? Text(name.isEmpty ? '?' : trUpper(name.characters.first)) : null,
     );
     if (!speaking) return avatar;
     return Container(
@@ -292,6 +393,8 @@ class _AsyncBodyState<T> extends State<AsyncBody<T>> {
         _error = errorText(e);
         _loading = false;
       });
+      // İçerik zaten görünüyorsa yenileme hatası sessiz kalmasın.
+      if (_loaded) toast(context, _error!, error: true);
     }
   }
 

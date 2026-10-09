@@ -66,7 +66,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
   const senderId = req.user.id;
 
   const result = await tx(async (c) => {
-    const room = (await c.query(`SELECT id FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
+    const room = (await c.query(`SELECT id, is_hidden FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
     if (!room) throw fail('Oda bulunamadı.', 404);
     const gift = (await c.query(`SELECT * FROM gifts WHERE id = $1 AND is_active = TRUE`, [giftId])).rows[0];
     if (!gift) throw fail('Hediye bulunamadı.', 404);
@@ -155,7 +155,8 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
       )).rows[0];
       if (fam) await c.query(`UPDATE families SET level = $1 WHERE id = $2`, [familyLevelFor(fam.total_points), fam.id]);
 
-      if (coinAmount >= config.globalGiftMinCoins) {
+      // Gizli odanın kimliği tüm kullanıcılara yayılmasın: global şerit/kayıt yalnızca açık odalarda.
+      if (coinAmount >= config.globalGiftMinCoins && !room.is_hidden) {
         await c.query(
           `INSERT INTO global_gift_events(gift_transaction_id, room_id, sender_id, receiver_id, coin_amount, display_level)
            VALUES($1,$2,$3,$4,$5,$6)`,
@@ -169,7 +170,13 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
   });
 
   // ---- Olaylar (işlem başarıyla bittikten sonra) ----
-  const userRows = await loadPublicRows([...new Set([senderId, ...result.allocation.map((a) => a.userId)])]);
+  // Para hareketi tamamlandı: buradan sonraki bir veritabanı hatası 500 döndürmesin (istemci tekrar dener ve iki kez öder).
+  let userRows = [];
+  try {
+    userRows = await loadPublicRows([...new Set([senderId, ...result.allocation.map((a) => a.userId)])]);
+  } catch (e) {
+    console.error('Hediye sonrası kullanıcı bilgisi alınamadı:', e.message);
+  }
   const byId = new Map(userRows.map((u) => [u.id, u]));
   const giftInfo = {
     id: result.gift.id, name: result.gift.name, iconUrl: result.gift.icon_url, animationUrl: result.gift.animation_url,

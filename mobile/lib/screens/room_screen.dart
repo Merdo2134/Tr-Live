@@ -63,6 +63,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   lk.Room? _lk;
   bool _lkConnecting = false;
+  int _lkRetries = 0; // ses bağlantısı koparsa artan bekleme ile yeniden bağlanılır
+  Timer? _lkTick; // LiveKit değişikliklerinde tüm odayı saniyede onlarca kez yeniden çizmemek için
+  String? _password; // kilitli odada yeniden katılırken gerekir
   String? _lkError;
   bool _micOn = true;
   bool _camOn = true;
@@ -129,14 +132,28 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed || !_joined || _closing || !mounted) return;
+    _resync();
+  }
+
+  /// Bağlantı koptuktan / uygulama arka plandan döndükten sonra kaçırılan olayları telafi eder:
+  /// koltuklar, üyeler, sohbet, puanlar, PK, çantalar ve müzik sunucudan yeniden alınır.
+  Future<void> _resync() async {
+    if (!_joined || _closing || !mounted) return;
     SocketService.instance.subscribeRoom(widget.roomId);
-    _loadMembers().catchError((_) {});
-    _loadMessages().catchError((_) {});
+    try {
+      await _loadMembers();
+    } catch (_) {/* ağ yoksa bir sonraki sinyalde */}
+    if (!mounted || _closing) return;
+    _loadMessages();
+    _loadExtras();
+    MusicService.instance.refresh();
+    if (_lk == null && !_lkConnecting) _connectLivekit();
   }
 
   @override
   void dispose() {
     _beat?.cancel();
+    _lkTick?.cancel();
     _entrance.dispose();
     WidgetsBinding.instance.removeObserver(this);
     if (RoomDock.exitHandler == _onBack) RoomDock.exitHandler = null;
@@ -153,7 +170,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     _lk = null;
     if (room != null) {
       room.removeListener(_onLkChanged);
-      room.disconnect().whenComplete(() => room.dispose());
+      room.disconnect().whenComplete(() => room.dispose()).catchError((_) {});
     }
     super.dispose();
   }
@@ -163,12 +180,15 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     try {
       String? password;
       if (widget.locked) {
+        await WidgetsBinding.instance.endOfFrame; // initState içinde hemen diyalog açılmasın (ilk kare çizilsin)
+        if (!mounted) return;
         password = await askText(context, 'Oda şifresi', obscure: true);
         if (password == null) {
           if (mounted) RoomDock.close();
           return;
         }
       }
+      _password = password;
       final r = await Api.post('/api/rooms/${widget.roomId}/join', {if (password != null) 'password': password, if (widget.code != null) 'code': widget.code});
       if (!mounted) {
         Api.post('/api/rooms/${widget.roomId}/leave').catchError((_) => <String, dynamic>{});
@@ -282,7 +302,21 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   Future<void> _loadMembers() async {
     final r = await Api.get('/api/rooms/${widget.roomId}/members');
     if (!mounted) return;
-    setState(() => _members = listOf(r['members']));
+    final list = listOf(r['members']);
+    setState(() => _members = list);
+    if (!_joined || _closing) return;
+    // Kendi durumumu da sunucuyla eşitle (bağlantı kopukken mikrofondan indirilmiş / rolüm değişmiş olabilir).
+    final mine = list.where((m) => m['userId']?.toString() == Session.id).firstOrNull;
+    if (mine == null) {
+      _rejoin(); // sunucu bizi odadan çıkarmış (ör. uzun bağlantı kopukluğu): yeniden katıl
+      return;
+    }
+    final wasOnSeat = _onSeat;
+    setState(() => _me = {..._me, 'role': mine['role'], 'seatIndex': mine['seatIndex'], 'microphone': mine['microphone']});
+    if (wasOnSeat != _onSeat) {
+      BackgroundService.instance.micChanged(_onSeat);
+      _syncPublish();
+    }
   }
 
   Future<void> _loadMessages() async {
@@ -294,11 +328,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           ..clear()
           ..addAll(listOf(r['messages']));
       });
-      _scrollChatToEnd();
+      _scrollChatToEnd(force: true);
     } catch (_) {/* sohbet yüklenemese de oda çalışır */}
   }
 
-  void _scrollChatToEnd() {
+  /// Sohbetin sonuna kaydırır. Kullanıcı yukarı kaydırıp eski mesajları okuyorsa ([force] yoksa) yerinden oynatmaz.
+  void _scrollChatToEnd({bool force = false}) {
+    if (!force && _chatScroll.hasClients && _chatScroll.position.extentAfter > 120) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_chatScroll.hasClients) _chatScroll.jumpTo(_chatScroll.position.maxScrollExtent);
     });
@@ -318,11 +354,18 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (_rejoining || _closing) return;
     _rejoining = true;
     try {
-      await Api.post('/api/rooms/${widget.roomId}/join');
+      final r = await Api.post('/api/rooms/${widget.roomId}/join', {if (_password != null) 'password': _password, if (widget.code != null) 'code': widget.code});
+      if (!mounted || _closing) {
+        Api.post('/api/rooms/${widget.roomId}/leave').catchError((_) => <String, dynamic>{});
+        return;
+      }
       _joined = true;
+      final me = mapOf(r['me']);
+      if (me != null) _me = me;
       SocketService.instance.subscribeRoom(widget.roomId);
       await _loadMembers();
-      if (_lk == null) _connectLivekit();
+      if (!mounted) return;
+      if (_lk == null && !_lkConnecting) _connectLivekit();
     } catch (e) {
       // Yalnızca sunucu açıkça reddederse (oda kapandı, engellendi...) odadan çıkarılır.
       // Ağ kesintisi gibi geçici hatalarda oda açık kalır ve biraz sonra yeniden denenir.
@@ -344,6 +387,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     _closing = true;
     _joined = false; // sunucu tarafında zaten çıkarıldık
     toast(context, message);
+    // Oda açıkken üstünde duran pencereler (Ludo, alt pencereler, diyaloglar) kapanmış odanın üstünde kalmasın.
+    if (!RoomDock.minimized.value) Navigator.of(context).popUntil((r) => r.isFirst);
     RoomDock.close();
   }
 
@@ -353,13 +398,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       final ok = await confirm(context, 'Odadan ayrılırsanız oda kapanır. Devam edilsin mi?', action: 'Odayı kapat');
       if (!ok || !mounted) return;
     }
+    // Ağ yavaşsa çıkış düğmesi 20 sn donmasın: oda hemen kapanır, "leave" isteğini dispose() gönderir.
     _closing = true;
-    if (_joined) {
-      _joined = false;
-      try {
-        await Api.post('/api/rooms/${widget.roomId}/leave');
-      } catch (_) {/* sunucu temizler */}
-    }
     RoomDock.close();
   }
 
@@ -374,6 +414,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   // ---------- Gerçek zamanlı olaylar ----------
   void _onEvent(Map<String, dynamic> e) {
     final type = e['type'];
+    if (type == 'connected') {
+      _resync(); // soket yeniden bağlandı: arada kaçan olayları telafi et
+      return;
+    }
     if (type == 'error' && e['code'] == 'not_member' && e['roomId'] == widget.roomId) {
       _rejoin();
       return;
@@ -493,7 +537,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             _messages.add({'id': e['id'], 'user': e['user'], 'text': e['text'], 'createdAt': e['createdAt']});
             if (_messages.length > 200) _messages.removeAt(0);
           });
-          _scrollChatToEnd();
+          _scrollChatToEnd(force: mapOf(e['user'])?['id']?.toString() == Session.id);
         }
         break;
       case 'room_message_deleted':
@@ -549,7 +593,24 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   // ---------- LiveKit ----------
   void _onLkChanged() {
     if (_roomMuted) _applyRoomSound();
-    if (mounted) setState(() {});
+    final r = _lk;
+    // Ses sunucusu bağlantısı koptuysa (ağ değişimi, sunucudan çıkarılma sonrası yeniden katılma) yeniden kur.
+    if (r != null && r.connectionState == lk.ConnectionState.disconnected && !_lkConnecting && !_closing && mounted) {
+      _lk = null;
+      r.removeListener(_onLkChanged);
+      r.disconnect().whenComplete(() => r.dispose()).catchError((_) {});
+      final wait = Duration(seconds: 2 << _lkRetries.clamp(0, 4)); // 2, 4, 8, 16, 32 sn
+      _lkRetries++;
+      Future.delayed(wait, () {
+        if (mounted && !_closing && _joined && _lk == null) _connectLivekit();
+      });
+    }
+    // Konuşma göstergeleri vb. için yeniden çizim: en fazla 200 ms'de bir.
+    if (_lkTick?.isActive ?? false) return;
+    _lkTick = Timer(const Duration(milliseconds: 200), () {
+      _lkTick = null;
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _connectLivekit() async {
@@ -572,11 +633,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         return;
       }
       _lk = room;
+      _lkRetries = 0;
       await _syncPublish();
     } catch (e) {
       if (room != null) {
         room.removeListener(_onLkChanged);
-        room.disconnect().whenComplete(() => room!.dispose());
+        room.disconnect().whenComplete(() => room!.dispose()).catchError((_) {});
       }
       if (mounted) setState(() => _lkError = errorText(e));
     } finally {
@@ -753,6 +815,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   /// Hediye atılınca hediyenin ikonu (png) gönderenden alıcıların koltuğuna uçar; ardından tam ekran animasyon oynar (Yoho).
   void _flyGift(Map<String, dynamic> e) {
+    // Oda küçültülmüşken / uygulama arka plandayken animasyonlar donar; birikip açılışta yüzlercesi birden oynamasın.
+    final ls = WidgetsBinding.instance.lifecycleState;
+    if (RoomDock.minimized.value || (ls != null && ls != AppLifecycleState.resumed) || _flights.length > 40) return;
     final gift = mapOf(e['gift']);
     final icon = Api.absoluteUrl(gift?['iconUrl'] as String?);
     final stage = _stageKey.currentContext?.findRenderObject();
@@ -1175,7 +1240,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     }
     _kbSeen = false;
     setState(() => _inputOpen = true);
-    _scrollChatToEnd();
+    _scrollChatToEnd(force: true);
   }
 
   /// Yazı alanı (Yoho): klavyenin hemen üstünde beyaz şerit; boşluğa dokununca kapanır.

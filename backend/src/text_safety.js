@@ -31,6 +31,8 @@ function foldForFilter(text) {
   return t;
 }
 
+const FOLDED_PREFIXES = PREFIX_ROOTS.map(foldForFilter); // her mesajda yeniden hesaplanmasın (performans)
+
 function builtinHit(text) {
   const folded = foldForFilter(text);
   // Harfler arasına konan ayırıcılar ("s.i.k", "a m k") birleştirilmiş sürümde de aranır.
@@ -41,7 +43,7 @@ function builtinHit(text) {
       for (const tok of v.split(/[^\p{L}]+/u)) {
         if (!tok) continue;
         if (EXACT_ROOTS.has(tok)) return true;
-        if (tok.length >= 4 && PREFIX_ROOTS.some((r) => tok.startsWith(foldForFilter(r)))) return true;
+        if (tok.length >= 4 && FOLDED_PREFIXES.some((r) => tok.startsWith(r))) return true;
       }
     }
   }

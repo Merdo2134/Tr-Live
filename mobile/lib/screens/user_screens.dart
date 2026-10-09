@@ -121,11 +121,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               ]),
             ),
           ),
-          Positioned(
-            top: MediaQuery.paddingOf(context).top + 6,
-            left: 8,
-            child: CircleAvatar(backgroundColor: Colors.black45, child: IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.white), onPressed: () => Navigator.maybePop(context))),
-          ),
           if (widget.userId != Session.id)
             Positioned(
               top: MediaQuery.paddingOf(context).top + 6,
@@ -263,7 +258,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${family['name']}'.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, fontSize: 17)),
+                  Text(trUpper('${family['name']}'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, fontSize: 17)),
                   Text('Lvl ${family['level'] ?? 1}', style: const TextStyle(color: Pal.textDim, fontSize: 12)),
                 ]),
               ),
@@ -396,7 +391,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: AsyncBody<Map<String, dynamic>>(
+      // Yüklenirken veya hata olursa da geri dönülebilsin (asıl geri düğmesi kapak üstünde).
+      body: Stack(children: [
+        Positioned.fill(child: AsyncBody<Map<String, dynamic>>(
         key: ValueKey(_version),
         load: _load,
         builder: (context, data, reload) {
@@ -423,7 +420,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ]),
           );
         },
-      ),
+      )),
+        Positioned(
+          top: MediaQuery.paddingOf(context).top + 6,
+          left: 8,
+          child: CircleAvatar(backgroundColor: Colors.black45, child: IconButton(tooltip: 'Geri', icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.white), onPressed: () => Navigator.maybePop(context))),
+        ),
+      ]),
     );
   }
 }

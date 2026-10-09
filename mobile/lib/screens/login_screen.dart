@@ -28,7 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String? _validate() {
-    final u = _username.text.trim().toLowerCase();
+    final u = _username.text.trim().replaceAll('İ', 'i').toLowerCase();
     if (!RegExp(r'^[a-z0-9_.]{3,30}$').hasMatch(u)) {
       return 'Kullanıcı adı 3-30 karakter olmalı; yalnızca harf, rakam, nokta ve alt çizgi.';
     }
@@ -45,7 +45,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     setState(() => _busy = true);
     try {
-      final u = _username.text.trim().toLowerCase();
+      final u = _username.text.trim().replaceAll('İ', 'i').toLowerCase();
       if (_register) {
         final name = _displayName.text.trim();
         await AuthService.register(u, _password.text, name.isEmpty ? u : name);
@@ -134,7 +134,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Text(_register ? 'Hesabım var, giriş yap' : 'Hesap oluştur'),
                 ),
                 const SizedBox(height: 8),
-                const Text('Bağlantıyı gerçekleştirerek Topluluk Politikamızı kabul etmiş olursunuz.', textAlign: TextAlign.center, style: TextStyle(color: Pal.textDim, fontSize: 12)),
+                const Text('Devam ederek Topluluk Kurallarımızı kabul etmiş olursun.', textAlign: TextAlign.center, style: TextStyle(color: Pal.textDim, fontSize: 12)),
               ]),
             ),
           ),

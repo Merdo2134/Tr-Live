@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { fail } from '../http.js';
+import { query } from '../database.js';
 
 export const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
@@ -22,7 +23,10 @@ export async function saveUpload(req) {
   await fs.mkdir(config.uploadDir, { recursive: true });
   const name = `${crypto.randomUUID()}.${IMAGE_TYPES[kind]}`;
   await fs.writeFile(path.join(config.uploadDir, name), buf);
-  return `/uploads/${name}`;
+  const url = `/uploads/${name}`;
+  // Sahiplik kaydı: gönderide yalnızca kendi yüklediğin görsel kullanılabilsin.
+  await query(`INSERT INTO upload_owners(url, owner_id) VALUES($1,$2) ON CONFLICT (url) DO NOTHING`, [url, req.user?.id ?? null]);
+  return url;
 }
 
 export async function removeUpload(url) {

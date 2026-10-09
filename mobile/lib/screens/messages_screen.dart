@@ -29,18 +29,26 @@ class MessagesScreen extends StatefulWidget {
 class _MessagesScreenState extends State<MessagesScreen> {
   int _version = 0;
   StreamSubscription? _sub;
+  Future<void> Function()? _reload; // listeyi yerinde yeniler (kaydırma konumu korunur, yükleniyor halkası çıkmaz)
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
     _sub = SocketService.instance.events.listen((e) {
-      if (e['type'] == 'dm' && mounted) setState(() => _version++);
+      if (e['type'] != 'dm' || !mounted) return;
+      // Art arda gelen mesajlarda tek yenileme yeterli.
+      _debounce?.cancel();
+      _debounce = Timer(const Duration(milliseconds: 400), () {
+        if (mounted) _reload?.call();
+      });
     });
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _debounce?.cancel();
     super.dispose();
   }
 
@@ -58,7 +66,9 @@ class _MessagesScreenState extends State<MessagesScreen> {
       body: AsyncBody<List<Map<String, dynamic>>>(
         key: ValueKey(_version),
         load: () async => listOf((await Api.get('/api/messages/conversations'))['conversations']),
-        builder: (context, list, reload) => RefreshIndicator(
+        builder: (context, list, reload) {
+          _reload = reload;
+          return RefreshIndicator(
           onRefresh: reload,
           child: ListView(children: [
             const _InboxCards(),
@@ -80,7 +90,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
                       },
                     ),
           ]),
-        ),
+        );
+        },
       ),
     );
   }
@@ -122,7 +133,10 @@ class _InboxCardsState extends State<_InboxCards> {
 
   Widget _card(String label, IconData icon, List<Color> colors, int badge, VoidCallback onTap) {
     return Expanded(
-      child: GestureDetector(
+      child: Semantics(
+        button: true,
+        label: badge > 0 ? '$label, $badge yeni' : label,
+        child: GestureDetector(
         onTap: onTap,
         child: Stack(clipBehavior: Clip.none, children: [
           Container(
@@ -132,7 +146,7 @@ class _InboxCardsState extends State<_InboxCards> {
             child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
               Icon(icon, size: 30, color: Colors.white),
               const SizedBox(height: 6),
-              Text(label, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11.5)),
+              FittedBox(fit: BoxFit.scaleDown, child: Text(label, textAlign: TextAlign.center, maxLines: 1, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5))),
             ]),
           ),
           if (badge > 0)
@@ -140,12 +154,15 @@ class _InboxCardsState extends State<_InboxCards> {
               right: -4,
               top: -5,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: const BoxDecoration(color: Pal.red, shape: BoxShape.circle),
+                constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(color: Pal.red, borderRadius: BorderRadius.circular(10)),
                 child: Text('${badge > 99 ? '99+' : badge}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
               ),
             ),
         ]),
+      ),
       ),
     );
   }
@@ -158,13 +175,13 @@ class _InboxCardsState extends State<_InboxCards> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
       child: Row(children: [
-        _card('Arkadaşlık isteği', Icons.group_add, const [Color(0xFF7A5CFF), Color(0xFFB45CFF)], _n('followers'), () => _open(UserListScreen(title: 'Yeni takipçiler', path: '/api/users/$me/followers'))),
+        _card('Takipçiler', Icons.group_add, const [Color(0xFF7A5CFF), Color(0xFFB45CFF)], _n('followers'), () => _open(UserListScreen(title: 'Yeni takipçiler', path: '/api/users/$me/followers'))),
         const SizedBox(width: 8),
         _card('Ekip', Icons.workspace_premium, const [Color(0xFFFFB347), Color(0xFFFF7A18)], _n('team'), () => _open(const AnnouncementsScreen(kind: 'team', title: 'Ekip'))),
         const SizedBox(width: 8),
-        _card('Etkinlik duyurusu', Icons.campaign, const [Color(0xFF1FD6F5), Color(0xFF2FE6A8)], _n('event'), () => _open(const AnnouncementsScreen(kind: 'event', title: 'Etkinlik duyurusu'))),
+        _card('Etkinlik', Icons.campaign, const [Color(0xFF1FD6F5), Color(0xFF2FE6A8)], _n('event'), () => _open(const AnnouncementsScreen(kind: 'event', title: 'Etkinlik duyurusu'))),
         const SizedBox(width: 8),
-        _card('Ödül bildirimleri', Icons.card_giftcard, const [Color(0xFFFF4F9A), Color(0xFF8E5CFF)], _n('reward'), () => _open(const AnnouncementsScreen(kind: 'reward', title: 'Ödül bildirimleri'))),
+        _card('Ödüller', Icons.card_giftcard, const [Color(0xFFFF4F9A), Color(0xFF8E5CFF)], _n('reward'), () => _open(const AnnouncementsScreen(kind: 'reward', title: 'Ödül bildirimleri'))),
       ]),
     );
   }
@@ -230,10 +247,14 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _load();
     _sub = SocketService.instance.events.listen((e) {
+      if (e['type'] == 'connected' && mounted) {
+        _load(); // bağlantı koptuysa arada gelen mesajları al
+        return;
+      }
       if (e['type'] != 'dm') return;
       final m = mapOf(e['message']);
       if (m == null || m['senderId'] != _peerId) return;
-      if (!mounted) return;
+      if (!mounted || _messages.any((x) => x['id'] == m['id'])) return; // aynı mesaj iki kez eklenmesin
       setState(() => _messages.add(m));
       _toEnd();
       Api.get('/api/messages/with/$_peerId').then((_) => Inbox.refresh()).catchError((_) => <String, dynamic>{}); // okundu işaretle

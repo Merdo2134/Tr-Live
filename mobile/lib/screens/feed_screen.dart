@@ -40,7 +40,7 @@ class _FeedScreenState extends State<FeedScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 9),
             decoration: BoxDecoration(color: sel ? Pal.cyan : Colors.transparent, borderRadius: BorderRadius.circular(20)),
-            child: Center(child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, color: sel ? const Color(0xFF00212A) : Pal.textDim))),
+            child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1, style: TextStyle(fontWeight: FontWeight.w800, color: sel ? const Color(0xFF00212A) : Pal.textDim)))),
           ),
         ),
       );
@@ -55,7 +55,7 @@ class _FeedScreenState extends State<FeedScreen> {
           child: Row(children: [
             const Expanded(child: Text('Akış', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Pal.text))),
             Container(
-              width: 210,
+              width: 220,
               padding: const EdgeInsets.all(3),
               decoration: BoxDecoration(color: Pal.surface, borderRadius: BorderRadius.circular(24), border: Border.all(color: Pal.outline)),
               child: Row(children: [
@@ -142,13 +142,22 @@ class _FeedListState extends State<FeedList> {
         itemCount: _posts.length + (_more ? 1 : 0),
         itemBuilder: (_, i) {
           if (i == _posts.length) {
+            // Sonraki sayfa yüklenemediyse sonsuz istek döngüsüne girmesin; kullanıcı tekrar denesin.
+            if (_error != null) {
+              return Padding(
+                padding: const EdgeInsets.all(12),
+                child: Center(child: TextButton.icon(onPressed: () => setState(() { _error = null; _load(); }), icon: const Icon(Icons.refresh), label: const Text('Yüklenemedi, tekrar dene'))),
+              );
+            }
             _load();
             return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
           }
+          final id = _posts[i]['id'];
           return PostCard(
-            key: ValueKey(_posts[i]['id']),
+            key: ValueKey(id),
             post: _posts[i],
-            onDeleted: () => setState(() => _posts.removeAt(i)),
+            // Silme isteği sürerken liste yenilenmiş olabilir: sıra numarasıyla değil kimlikle kaldır.
+            onDeleted: () => setState(() => _posts.removeWhere((p) => p['id'] == id)),
           );
         },
       ),

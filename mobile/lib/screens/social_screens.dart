@@ -151,7 +151,7 @@ class _LevelsScreenState extends State<LevelsScreen> {
                     height: 34,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(color: on ? const Color(0xFFFFEB3B) : const Color(0xFFE0E0E0), borderRadius: BorderRadius.circular(6)),
-                    child: Text(label, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w800, fontSize: 13)),
+                    child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w800, fontSize: 13)))),
                   ),
                 ),
               );

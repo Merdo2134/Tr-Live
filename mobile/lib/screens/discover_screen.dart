@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/room_dock.dart';
 import '../widgets/common.dart';
+import 'home_screen.dart';
 
 /// Favori yayıncılar ve son girilen odalar. Yayıncı açıksa tek dokunuşla odasına girilir.
 class DiscoverScreen extends StatefulWidget {
@@ -45,10 +46,12 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     }
   }
 
-  void _open(Map<String, dynamic>? room) {
+  Future<void> _open(Map<String, dynamic>? room) async {
     if (room == null) return;
-    if (!widget.embedded) Navigator.pop(context);
-    RoomDock.open(RoomRequest(roomId: room['id'].toString(), name: (room['name'] ?? 'Oda').toString(), locked: room['locked'] == true));
+    // openRoom: oda sahibi kendi açık odasından başka odaya geçerken onay ister (odası kapanacağı için).
+    final req = RoomRequest(roomId: room['id'].toString(), name: (room['name'] ?? 'Oda').toString(), locked: room['locked'] == true);
+    await openRoom(context, req);
+    if (!widget.embedded && mounted && RoomDock.request.value?.roomId == req.roomId) Navigator.pop(context);
   }
 
   Future<void> _unfav(Map<String, dynamic> h) async {

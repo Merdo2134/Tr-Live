@@ -4,6 +4,7 @@ import * as ludo from '../ludo.js';
 import { loadPublicRows } from './users.js';
 import { publicUser } from '../views.js';
 import { fail } from '../http.js';
+import { nonOverlapping } from '../ticker.js';
 
 export async function gameView(gameId, run = query) {
   const g = (await run(`SELECT * FROM room_games WHERE id = $1`, [gameId])).rows[0];
@@ -102,7 +103,7 @@ export async function cancelRoomGame(roomId) {
 
 // Süresi dolan sıralar için otomatik oyun (AFK koruması).
 export function startGameTicker() {
-  const timer = setInterval(async () => {
+  const timer = setInterval(nonOverlapping(async () => {
     try {
       const due = await query(
         `SELECT id FROM room_games WHERE status = 'playing' AND (state->>'deadline')::bigint <= $1`, [Date.now()],
@@ -113,7 +114,7 @@ export function startGameTicker() {
     } catch (error) {
       console.error('Oyun zamanlayıcı hatası:', error.message);
     }
-  }, 2000);
+  }), 2000);
   timer.unref();
   return timer;
 }

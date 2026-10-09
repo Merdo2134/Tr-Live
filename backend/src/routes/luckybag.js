@@ -53,7 +53,8 @@ router.get('/rooms/:roomId/lucky-bags', async (req, res) => {
 
 router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
-  const tier = BAG_TIERS[String(req.body?.tier ?? '')];
+  const tierKey = String(req.body?.tier ?? '');
+  const tier = Object.hasOwn(BAG_TIERS, tierKey) ? BAG_TIERS[tierKey] : null;
   if (!tier) throw fail('Geçersiz çanta türü.');
   let note = null;
   if (tier.kind === 'super') {
@@ -63,7 +64,7 @@ router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), 
   }
   const userId = req.user.id;
   const out = await tx(async (c) => {
-    const room = (await c.query(`SELECT id, name FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
+    const room = (await c.query(`SELECT id, name, is_hidden FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
     if (!room) throw fail('Oda bulunamadı.', 404);
     if (!(await c.query(`SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2`, [roomId, userId])).rowCount) throw fail('Önce odaya girin.', 403);
     const u = (await c.query(`SELECT coins FROM users WHERE id = $1 FOR UPDATE`, [userId])).rows[0];
@@ -80,11 +81,11 @@ router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), 
       `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'lucky_bag_sent',$2,$3,$4)`,
       [userId, String(-tier.total), bag.id, `${tier.kind === 'super' ? 'Süper ' : ''}Şanslı çanta (${tier.slots} kişilik)`],
     );
-    return { bag, roomName: room.name };
+    return { bag, roomName: room.name, hidden: room.is_hidden === true };
   });
   const json = await bagJson(out.bag, userId);
   hub.broadcastRoom(roomId, { type: 'lucky_bag_new', roomId, bag: { ...json, mine: null } });
-  if (out.bag.kind === 'super') {
+  if (out.bag.kind === 'super' && !out.hidden) {
     hub.broadcastGlobal({ type: 'lucky_bag_global', roomId, roomName: out.roomName, sender: json.sender, totalCoins: json.totalCoins, slots: json.slots, bagId: json.id });
   }
   res.status(201).json({ bag: json });

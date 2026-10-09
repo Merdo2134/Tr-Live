@@ -58,26 +58,35 @@ class BackgroundService with WidgetsBindingObserver {
   }
 
   // ---------- Oda açılınca / kapanınca ----------
-  Future<void> roomOpened(String name) async {
-    _roomName = name;
-    await _startService();
+  // Aç/kapat/mikrofon işlemleri sırayla çalışır: oda değiştirirken "kapat" bitmeden gelen "aç" atlanıp
+  // servis odadayken durmasın diye tek kuyruktan geçer.
+  Future<void> _chain = Future<void>.value();
+  Future<void> _queue(Future<void> Function() job) {
+    final next = _chain.then((_) => job()).catchError((Object e, StackTrace s) => ErrorLog.add('Arka plan servisi', e, s));
+    _chain = next;
+    return next;
   }
 
-  Future<void> roomClosed() async {
-    _withMic = false;
-    await _hideBubble();
-    await _stopService();
-  }
+  Future<void> roomOpened(String name) => _queue(() async {
+        _roomName = name;
+        await _startService();
+      });
+
+  Future<void> roomClosed() => _queue(() async {
+        _withMic = false;
+        await _hideBubble();
+        await _stopService();
+      });
 
   /// Mikrofona çıkınca/inince servis türü güncellenir (Android mikrofonu yalnızca "microphone" türlü servise açık tutar).
-  Future<void> micChanged(bool onMic) async {
-    if (_withMic == onMic) return;
-    _withMic = onMic;
-    if (_running) {
-      await _stopService();
-      await _startService();
-    }
-  }
+  Future<void> micChanged(bool onMic) => _queue(() async {
+        if (_withMic == onMic) return;
+        _withMic = onMic;
+        if (_running) {
+          await _stopService();
+          await _startService();
+        }
+      });
 
   Future<void> _startService() async {
     if (_running) return;

@@ -11,6 +11,7 @@ import { ensureAgencyCode } from './agencies.js';
 import { WIP_MIN_LEVEL, WIP_MAX_LEVEL } from '../levels.js';
 import { dealerSell } from '../services/dealers.js';
 import { hub } from '../realtime.js';
+import { leaveRoom } from '../services/rooms.js';
 import { banIpPersist, unbanIp, listBans, securityStats } from '../firewall.js';
 import net from 'node:net';
 import { saveUpload, removeUpload, IMAGE_TYPES } from '../services/images.js';
@@ -87,6 +88,10 @@ router.post('/users/:userId/ban', async (req, res) => {
     await auditStaff(c, req.user.id, userId, 'account_ban', { until, reason, by: req.user.system_role });
   });
   hub.disconnectUser(userId, 'banned');
+  // Banlanan kullanıcı odalardan çıkarılır; ses/görüntü (LiveKit) bağlantısı da kesilir, sahibi olduğu oda kapanır.
+  for (const r of (await query(`SELECT room_id FROM room_members WHERE user_id = $1`, [userId])).rows) {
+    await leaveRoom(userId, r.room_id).catch((e) => console.error('Ban sonrası odadan çıkarma:', e.message));
+  }
   res.json({ ok: true, status: 'banned', bannedUntil: until });
 });
 
@@ -764,7 +769,7 @@ router.post('/users/:userId/kyc', requireSuperAdmin, async (req, res) => {
 });
 
 router.get('/finance/audit', requireSuperAdmin, async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 100, 500));
   const userId = req.query.userId ? uuid(String(req.query.userId), 'Kullanıcı') : null;
   const r = await query(
     `SELECT * FROM financial_audit_logs WHERE ($1::uuid IS NULL OR user_id = $1) ORDER BY created_at DESC LIMIT $2`,
@@ -819,7 +824,7 @@ router.post('/reports/:id/resolve', async (req, res) => {
 
 // ---------------- Güvenlik duvarı (yalnızca yönetici) ----------------
 router.get('/security/events', requireSuperAdmin, async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 100, 500));
   const type = req.query.type ? String(req.query.type).slice(0, 40) : null;
   const r = await query(
     `SELECT id, event_type, host(ip) AS ip, user_id, detail, created_at FROM security_events

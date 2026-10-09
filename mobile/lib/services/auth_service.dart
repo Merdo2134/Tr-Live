@@ -1,6 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'inbox_service.dart';
+import 'music_service.dart';
+import 'room_dock.dart';
 import 'session.dart';
 import 'socket_service.dart';
 
@@ -29,6 +31,18 @@ class AuthService {
 
   /// Yerel oturumu temizler (sunucuya istek atmaz).
   static Future<void> logout() async {
+    // Açık (veya küçültülmüş) oda varsa: oturum hâlâ geçerliyken odadan çık, sonra odayı ve müziği kapat.
+    // Aksi halde oda arka planda açık kalıyor, sonraki girişte eski oda yeni kullanıcıyla açılıyordu.
+    final rid = RoomDock.request.value?.roomId;
+    if (rid != null && Api.token != null) {
+      try {
+        await Api.post('/api/rooms/$rid/leave').timeout(const Duration(seconds: 5));
+      } catch (_) {/* çıkış yine de sürer */}
+    }
+    RoomDock.close();
+    try {
+      await MusicService.instance.unbind();
+    } catch (_) {}
     SocketService.instance.stop();
     Inbox.stop();
     Api.token = null;

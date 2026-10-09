@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
+import '../services/error_log.dart';
+import '../services/room_dock.dart';
+import '../services/session.dart';
 import '../services/socket_service.dart';
 import 'anim_asset.dart';
 import 'common.dart';
@@ -69,10 +72,14 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   }
 
   void _enqueueAnim(Map<String, dynamic>? gift) {
+    // Oda küçültülmüşken tam ekran hediye animasyonları birikmesin.
+    if (widget.roomId != null && RoomDock.minimized.value) return;
     final url = Api.absoluteUrl(gift?['animationUrl'] as String?);
     if (gift == null) return;
     if (url == null) {
-      if (mounted) toast(context, '"${gift['name']}" hediyesinde animasyon dosyası tanımlı değil (Yönetici → Katalog listesinden kontrol edin).', error: true);
+      // Kullanıcıya teknik mesaj gösterilmez; yalnızca yetkililere ve hata kaydına düşer.
+      ErrorLog.add('Hediye animasyonu yok', '"${gift['name']}" için animasyon dosyası tanımlı değil');
+      if (mounted && Session.isStaff) toast(context, '"${gift['name']}" hediyesinde animasyon dosyası yok (Yönetim → Katalog).', error: true);
       return;
     }
     if (_anims.length < 5) _anims.add({'url': url, 'format': (gift['animationFormat'] ?? '').toString()});
@@ -103,7 +110,8 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
           key: ValueKey(a['seq']),
           onDone: _nextAnim,
           onFail: (m) {
-            if (mounted) toast(context, '$m\n${a['url']}', error: true);
+            ErrorLog.add('Hediye animasyonu oynatılamadı', '$m ${a['url']}');
+            if (mounted && Session.isStaff) toast(context, 'Animasyon oynatılamadı: $m', error: true);
           },
         ),
       ),

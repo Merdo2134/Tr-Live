@@ -41,7 +41,7 @@ class EntranceQueue extends ChangeNotifier {
   }
 
   void _next() {
-    if (_busy || _q.isEmpty) return;
+    if (_dead || _busy || _q.isEmpty) return; // oda kapandıktan sonra gecikmeli çağrı gelebilir
     _busy = true;
     current = _q.removeAt(0);
     notifyListeners();

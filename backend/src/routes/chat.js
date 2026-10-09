@@ -21,7 +21,11 @@ const banned = config.bannedWords.map((w) => w.toLocaleLowerCase('tr'));
 async function roomAndMember(roomId, userId) {
   const room = (await query(`SELECT id, chat_enabled FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
   if (!room) throw fail('Oda bulunamadı.', 404);
-  const member = (await query(`SELECT role, chat_muted_until FROM room_members WHERE room_id = $1 AND user_id = $2`, [roomId, userId])).rows[0];
+  // Susturma odadan çıkıp girince kaybolmasın: kalıcı kayıt (room_mutes) ile üyelikteki süre birleştirilir.
+  const member = (await query(
+    `SELECT m.role, GREATEST(m.chat_muted_until, mu.until) AS chat_muted_until
+     FROM room_members m LEFT JOIN room_mutes mu ON mu.room_id = m.room_id AND mu.user_id = m.user_id
+     WHERE m.room_id = $1 AND m.user_id = $2`, [roomId, userId])).rows[0];
   if (!member) throw fail('Önce odaya girin.', 403);
   return { room, member };
 }
@@ -98,6 +102,10 @@ router.post('/:roomId/members/:userId/chat-mute', userLimit('moderate', 60, 60e3
     `UPDATE room_members SET chat_muted_until = CASE WHEN $3::int = 0 THEN NULL ELSE NOW() + ($3::int * INTERVAL '1 minute') END WHERE room_id = $1 AND user_id = $2`,
     [roomId, targetId, minutes],
   );
+  if (minutes === 0) await query(`DELETE FROM room_mutes WHERE room_id = $1 AND user_id = $2`, [roomId, targetId]);
+  else await query(
+    `INSERT INTO room_mutes(room_id, user_id, until) VALUES($1,$2, NOW() + ($3::int * INTERVAL '1 minute'))
+     ON CONFLICT (room_id, user_id) DO UPDATE SET until = EXCLUDED.until`, [roomId, targetId, minutes]);
   hub.sendToUser(targetId, { type: 'room_chat_muted', roomId, minutes });
   res.json({ ok: true, minutes });
 });

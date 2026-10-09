@@ -3,6 +3,7 @@ import { hub } from '../realtime.js';
 import { decideWinner, remainingSeconds, PK_INVITE_TTL_SECONDS } from '../pk_logic.js';
 import { loadPublicRows } from './users.js';
 import { publicUser } from '../views.js';
+import { nonOverlapping } from '../ticker.js';
 
 const OPEN = `('pending','active')`;
 
@@ -94,7 +95,7 @@ export async function scorePk(c, roomId, receiverId, senderId, coinAmount) {
 }
 
 export function startPkTicker() {
-  const timer = setInterval(async () => {
+  const timer = setInterval(nonOverlapping(async () => {
     try {
       const due = await query(`SELECT id FROM pk_battles WHERE status = 'active' AND ends_at <= NOW()`);
       for (const b of due.rows) await finishPk(b.id);
@@ -115,7 +116,7 @@ export function startPkTicker() {
     } catch (error) {
       console.error('PK zamanlayıcı hatası:', error.message);
     }
-  }, 2000);
+  }), 2000);
   timer.unref();
   return timer;
 }

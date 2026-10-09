@@ -78,7 +78,7 @@ class _WipScreenState extends State<WipScreen> {
                       const SizedBox(height: 8),
                       for (final line in _featureLines(mapOf(t['features']) ?? {})) Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(children: [const Icon(Icons.check, size: 16, color: Colors.greenAccent), const SizedBox(width: 6), Expanded(child: Text(line))])),
                       const SizedBox(height: 8),
-                      Wrap(spacing: 8, children: [
+                      Wrap(spacing: 8, runSpacing: 8, children: [
                         for (final plan in listOf(t['plans']))
                           FilledButton.tonal(
                             onPressed: (current != null && (current['level'] as num) > (t['level'] as num)) ? null : () => _buy(t, plan, current),

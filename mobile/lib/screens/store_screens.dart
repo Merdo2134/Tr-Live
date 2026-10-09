@@ -114,7 +114,7 @@ class _Tile extends StatelessWidget {
 
 Widget _greenBtn(String label, VoidCallback? onTap, {Color color = const Color(0xFF12C84A), bool outline = false}) => Expanded(
       child: SizedBox(
-        height: 26,
+        height: 32, // dokunma hedefi büyütüldü (26 dp çok küçüktü)
         child: outline
             ? OutlinedButton(style: OutlinedButton.styleFrom(padding: EdgeInsets.zero, foregroundColor: color, side: BorderSide(color: color), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))), onPressed: onTap, child: FittedBox(child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700))))
             : FilledButton(style: FilledButton.styleFrom(padding: EdgeInsets.zero, backgroundColor: color, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))), onPressed: onTap, child: FittedBox(child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)))),
@@ -144,7 +144,9 @@ class _StoreScreenState extends State<StoreScreen> {
     final r = await guard(context, () => Api.post('/api/store/buy', {'itemId': item['id'], if (toUserId != null) 'toUserId': toUserId}));
     if (r == null || !mounted) return;
     toast(context, toUserId == null ? 'Satın alındı. Görünüm sayfasından etkinleştirebilirsin.' : 'Hediye gönderildi.');
-    await Session.refresh();
+    try {
+      await Session.refresh();
+    } catch (_) {}
     if (mounted) setState(() => _version++);
   }
 
@@ -243,7 +245,7 @@ class _StoreScreenState extends State<StoreScreen> {
             height: 44,
             alignment: Alignment.center,
             decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: on ? const LinearGradient(colors: [Color(0xFF00A8FF), Color(0xFF7FE0FF)]) : null, color: on ? null : Colors.white12),
-            child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: on ? Colors.white : Colors.white38)),
+            child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: on ? Colors.white : Colors.white70)),
           ),
         ),
       );

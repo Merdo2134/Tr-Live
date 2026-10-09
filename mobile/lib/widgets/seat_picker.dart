@@ -195,11 +195,11 @@ Future<void> showMicModeSheet(
               context: c,
               builder: (d) => AlertDialog(
                 backgroundColor: Colors.white,
-                title: const Text('Tips', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w700)),
+                title: const Text('Emin misin?', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w700)),
                 content: const Text('Mikrofon modunu değiştirdikten sonra, mikrofondaki bazı kullanıcılar otomatik olarak kaldırılacaktır. Geçiş yapmayı onaylıyor musunuz?', style: TextStyle(color: Colors.black87)),
                 actions: [
-                  TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('İPTAL ET', style: TextStyle(color: Color(0xFF16A34A), fontWeight: FontWeight.w800))),
-                  TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('ONAYLA', style: TextStyle(color: Color(0xFF16A34A), fontWeight: FontWeight.w800))),
+                  TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Vazgeç', style: TextStyle(color: Color(0xFF16A34A), fontWeight: FontWeight.w800))),
+                  TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Onayla', style: TextStyle(color: Color(0xFF16A34A), fontWeight: FontWeight.w800))),
                 ],
               ),
             );

@@ -4,6 +4,7 @@ import { query, tx } from '../database.js';
 import { config } from '../config.js';
 import { hub } from '../realtime.js';
 import { positionAt, hasEnded } from '../music_logic.js';
+import { nonOverlapping } from '../ticker.js';
 
 const trackOf = (r) => ({ id: r.track_id ?? r.id, title: r.title, artist: r.artist, url: r.url, coverUrl: r.cover_url, durationMs: r.duration_ms });
 const ELAPSED = `(EXTRACT(EPOCH FROM (NOW() - rm.updated_at)) * 1000)::bigint`;
@@ -80,7 +81,7 @@ export async function purgeTempTracks() {
 
 // Biten şarkıları 2 sn'de bir kontrol eder; yeniden başlatmaya dayanıklıdır (durum veritabanındadır).
 export function startMusicTicker() {
-  const timer = setInterval(async () => {
+  const timer = setInterval(nonOverlapping(async () => {
     try {
       const r = await query(
         `SELECT rm.room_id FROM room_music rm JOIN music_tracks t ON t.id = rm.track_id
@@ -90,7 +91,7 @@ export function startMusicTicker() {
     } catch (error) {
       console.error('Müzik zamanlayıcı hatası:', error.message);
     }
-  }, 2000);
+  }), 2000);
   timer.unref();
   const purge = setInterval(() => purgeTempTracks().catch((e) => console.error('Geçici müzik temizliği hatası:', e.message)), 10 * 60e3);
   purge.unref();

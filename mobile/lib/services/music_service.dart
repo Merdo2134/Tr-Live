@@ -19,6 +19,7 @@ class MusicService {
   String? _trackId;
   DateTime _receivedAt = DateTime.now();
   Timer? _resync;
+  int _gen = 0; // her yeni durum/odadan çıkış sayacı artırır; eski (geç gelen) işlemler sonucu ezmesin
 
   AudioPlayer get _p => _player ??= AudioPlayer();
 
@@ -44,14 +45,18 @@ class MusicService {
   Future<void> refresh() async {
     final id = _roomId;
     if (id == null) return;
+    final g = _gen;
     try {
       final r = await Api.get('/api/rooms/$id/music');
       final s = mapOf(r['state']);
-      if (s != null && _roomId == id) await apply(s);
+      // Bu sırada soketten daha yeni bir durum geldiyse (g değişti) eski yanıt uygulanmaz.
+      if (s != null && _roomId == id && g == _gen) await apply(s);
     } catch (_) {/* oda kapanmış olabilir */}
   }
 
   Future<void> apply(Map<String, dynamic> s) async {
+    final g = ++_gen;
+    bool stale() => g != _gen || _roomId == null; // odadan çıkıldı ya da daha yeni durum geldi
     _receivedAt = DateTime.now();
     state.value = s;
     final track = mapOf(s['track']);
@@ -65,20 +70,24 @@ class MusicService {
       final url = Api.absoluteUrl(track['url'] as String?);
       if (url == null) return;
       if (track['id'] != _trackId) {
-        _trackId = track['id'] as String?;
+        _trackId = null; // yükleme başarısız olursa sonraki durumda yeniden denensin
         await _p.setUrl(url);
+        if (stale()) return;
+        _trackId = track['id'] as String?;
       }
       error.value = null;
       await _p.setVolume(muted.value ? 0 : volume.value);
+      if (stale()) return;
       final position = (s['positionMs'] as num?)?.toInt() ?? 0;
       await _p.seek(Duration(milliseconds: position + (status == 'playing' ? 150 : 0)));
+      if (stale()) return;
       if (status == 'playing') {
-        unawaited(_p.play()); // play() şarkı bitene kadar tamamlanmaz; beklenmez
+        unawaited(_p.play().catchError((_) {})); // play() şarkı bitene kadar tamamlanmaz; beklenmez
       } else {
         await _p.pause();
       }
     } catch (e) {
-      error.value = 'Müzik çalınamadı. Bağlantınızı kontrol edin.';
+      if (!stale()) error.value = 'Müzik çalınamadı. Bağlantınızı kontrol edin.';
     }
   }
 
@@ -93,6 +102,7 @@ class MusicService {
   }
 
   Future<void> unbind() async {
+    _gen++;
     _resync?.cancel();
     _resync = null;
     _roomId = null;

@@ -107,6 +107,11 @@ export async function closePeriod({ adminId, periodKey, force = false }) {
     const run = (t, p) => c.query(t, p);
     await c.query(`SELECT pg_advisory_xact_lock(hashtext('payout_close'))`);
     if ((await c.query(`SELECT 1 FROM payout_periods WHERE period_key = $1`, [b.key])).rowCount) throw fail('Bu dönem zaten kapatılmış.', 409);
+    // Aylık ve haftalık dönemler karışırsa aynı hediyeler/mikrofon süresi iki kez ödenmesin: zaman aralığı çakışması reddedilir.
+    const overlap = (await c.query(
+      `SELECT period_key FROM payout_periods WHERE starts_at < $2 AND ends_at > $1 LIMIT 1`, [b.start, b.end],
+    )).rows[0];
+    if (overlap) throw fail(`Bu dönem, kapatılmış ${overlap.period_key} dönemiyle çakışıyor; aynı kazanç iki kez ödenemez.`, 409);
     const cfg = await loadConfig(run);
     const p = (await c.query(
       `INSERT INTO payout_periods(period_key, cycle, starts_at, ends_at, closed_by, config) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,

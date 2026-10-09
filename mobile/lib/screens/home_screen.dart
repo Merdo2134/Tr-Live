@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Küçültülmüş oda: sürüklenebilir yuvarlak balon. Dokununca büyür, sağ üstteki X odadan çıkarır.
   Widget _miniBar(RoomRequest req) {
-    final initial = req.name.trim().isEmpty ? '?' : req.name.trim().characters.first.toUpperCase();
+    final initial = req.name.trim().isEmpty ? '?' : trUpper(req.name.trim().characters.first);
     return DragBubble(
       pos: _roomBubblePos,
       size: 64,

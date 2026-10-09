@@ -154,7 +154,9 @@ export function loginGuard(ip, username) {
   const nameKey = `n|${username}`;
   return {
     check() {
-      const ms = Math.max(ipLockout.lockedFor(ipKey), nameLockout.lockedFor(nameKey));
+      // Yalnızca IP+kullanıcı adı kilidi uygulanır. Kullanıcı adına genel kilit, başkasının hesabını (ör. admin)
+      // birkaç IP'den yanlış şifre deneyerek kilitlemeye izin veriyordu; o sayaç artık yalnızca güvenlik kaydı içindir.
+      const ms = ipLockout.lockedFor(ipKey);
       if (ms > 0) {
         noteViolation(ip, 'login_locked', { weight: 1 });
         throw fail(`Çok fazla hatalı deneme. ${Math.ceil(ms / 60000)} dakika sonra tekrar deneyin.`, 429);
@@ -162,7 +164,8 @@ export function loginGuard(ip, username) {
     },
     failed() {
       const a = ipLockout.fail(ipKey);
-      nameLockout.fail(nameKey);
+      const n = nameLockout.fail(nameKey);
+      if (n.locked) logSecurityEvent('login_name_attack', ip, null, { username });
       noteViolation(ip, 'login_failed', { weight: 1 });
       if (a.locked) logSecurityEvent('login_lockout', ip, null, { username });
     },

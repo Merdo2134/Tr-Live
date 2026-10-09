@@ -68,6 +68,12 @@ export function detectAudio(buf) {
 
 router.post('/rooms/:roomId/music/upload',
   userLimit('music_upload', 60, 10 * 60e3),
+  // Yetki, 25 MB'lık gövde belleğe alınmadan ÖNCE denetlenir (yetkisiz istek sunucuyu yormasın).
+  async (req, _res, next) => {
+    const member = await context(uuid(req.params.roomId, 'Oda'), req.user.id);
+    if (!MUSIC_MANAGERS.includes(member.role) && member.microphone !== true) throw fail('Müzik çalmak için mikrofonda olmalısınız.', 403);
+    next();
+  },
   express.raw({ type: () => true, limit: MAX_AUDIO_BYTES }),
   async (req, res) => {
     const roomId = uuid(req.params.roomId, 'Oda');

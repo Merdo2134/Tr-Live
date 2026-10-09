@@ -80,6 +80,11 @@ router.post('/pk/:id/cancel', async (req, res) => {
 
 router.get('/rooms/:roomId/pk', async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
+  const room = (await query(`SELECT owner_id, is_hidden FROM rooms WHERE id = $1`, [roomId])).rows[0];
+  if (room?.is_hidden && room.owner_id !== req.user.id
+    && !(await query(`SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2`, [roomId, req.user.id])).rowCount) {
+    throw fail('Oda bulunamadı.', 404);
+  }
   const id = await activePkOfRoom(roomId);
   res.json({ pk: id ? await pkView(id) : null });
 });

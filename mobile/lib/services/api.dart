@@ -40,12 +40,15 @@ class Api {
     return url.startsWith('http') ? url : '$baseUrl$url';
   }
 
-  static Future<Map<String, dynamic>> _send(Future<http.Response> Function() request, {Duration? timeout}) async {
+  static Future<Map<String, dynamic>> _send(Future<http.Response> Function() request, {Duration? timeout, bool mutating = false}) async {
     http.Response r;
     try {
       r = await request().timeout(timeout ?? _timeout);
     } on TimeoutException {
-      throw ApiException('Sunucu yanıt vermedi. Lütfen tekrar deneyin.');
+      // Değişiklik yapan istekte (hediye, satın alma…) sunucu işlemi yapmış olabilir: körü körüne tekrar ettirme.
+      throw ApiException(mutating
+          ? 'Sunucu zamanında yanıt vermedi; işlem gerçekleşmiş olabilir. Tekrar denemeden önce bakiyeni/sonucu kontrol et.'
+          : 'Sunucu yanıt vermedi. Lütfen tekrar deneyin.');
     } catch (_) {
       throw ApiException('Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edin.');
     }
@@ -67,22 +70,22 @@ class Api {
       _send(() => http.get(_uri(path, query), headers: _headers()));
 
   static Future<Map<String, dynamic>> post(String path, [Map<String, dynamic>? body]) =>
-      _send(() => http.post(_uri(path), headers: _headers(), body: jsonEncode(body ?? {})));
+      _send(() => http.post(_uri(path), headers: _headers(), body: jsonEncode(body ?? {})), mutating: true);
 
   static Future<Map<String, dynamic>> patch(String path, [Map<String, dynamic>? body]) =>
-      _send(() => http.patch(_uri(path), headers: _headers(), body: jsonEncode(body ?? {})));
+      _send(() => http.patch(_uri(path), headers: _headers(), body: jsonEncode(body ?? {})), mutating: true);
 
   static Future<Map<String, dynamic>> put(String path, [Map<String, dynamic>? body]) =>
-      _send(() => http.put(_uri(path), headers: _headers(), body: jsonEncode(body ?? {})));
+      _send(() => http.put(_uri(path), headers: _headers(), body: jsonEncode(body ?? {})), mutating: true);
 
   static Future<Map<String, dynamic>> delete(String path, [Map<String, dynamic>? body]) =>
-      _send(() => http.delete(_uri(path), headers: _headers(), body: body == null ? null : jsonEncode(body)));
+      _send(() => http.delete(_uri(path), headers: _headers(), body: body == null ? null : jsonEncode(body)), mutating: true);
 
   /// Ham görsel yükleme (png / jpeg / webp).
   static Future<Map<String, dynamic>> putBytes(String path, Uint8List bytes, String contentType) =>
-      _send(() => http.put(_uri(path), headers: _headers(contentType), body: bytes));
+      _send(() => http.put(_uri(path), headers: _headers(contentType), body: bytes), timeout: const Duration(minutes: 2), mutating: true);
 
   /// Ham dosya gönderimi (POST) — büyük dosyalar için uzun zaman aşımı.
   static Future<Map<String, dynamic>> postBytes(String path, Uint8List bytes, String contentType, {Map<String, String>? query}) =>
-      _send(() => http.post(_uri(path, query), headers: _headers(contentType), body: bytes), timeout: const Duration(minutes: 3));
+      _send(() => http.post(_uri(path, query), headers: _headers(contentType), body: bytes), timeout: const Duration(minutes: 3), mutating: true);
 }

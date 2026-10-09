@@ -1,3 +1,33 @@
+## v2.34.0 — Derin denetim: güvenlik, kararlılık, tasarım
+Sunucu
+- Başkasının yüklediği dosyayı silme açığı kapatıldı: gönderide yalnızca kendi yüklediğin görsel kullanılabilir; gönderi silinince yalnızca sahibinin dosyası silinir (upload_owners).
+- Banlanan / hesabını silen kullanıcı tüm odalardan çıkarılır, ses-görüntü bağlantısı kesilir, sahibi olduğu oda kapanır. Silinen hesap adı çakışması giderildi.
+- Gizli odanın üye/yönetici/katkı/PK bilgisi yalnızca odadakilere açık; gizli odalardan global hediye şeridi ve şans çantası duyurusu yayılmaz.
+- Sohbet susturması odadan çıkıp girince kaybolmuyor (room_mutes). Moderatör, çevrimdışı yardımcı sahibi engelleyemez ve sahibin koyduğu engeli kaldıramaz.
+- Maaş dönemleri çakışırsa (aylık + haftalık) kapatma reddedilir: aynı kazanç iki kez ödenmez.
+- Tek bir kullanıcı adına yanlış şifre denenerek başkasının (ör. admin) hesabını kilitleme engellendi (kilit IP+kullanıcı bazlı).
+- Yetki, büyük dosya gövdesi belleğe alınmadan önce denetlenir (müzik yükleme, oda kapağı). Profil/kapak yüklemeye sınır; eski hareketli avatar kaydı silinir.
+- Zamanlayıcılar üst üste binmez (PK, müzik, oyun, oda temizliği); küfür filtresi ~25 kat hızlandı; sıralama sorgularına indeks; hediye sonrası hata parayı tekrar çektirmez; küçük doğrulama düzeltmeleri (limit, doğum tarihi, çanta türü, gizli yetkili adı, kullanıcı arama sınırı).
+- Migration 026. Sözdizimi kontrolü tüm dosyalara genişletildi.
+
+Mobil
+- Çıkış yapınca açık/küçültülmüş oda kapanır, odadan düzgün çıkılır, müzik durur (önceden sonraki girişte eski oda açılıyordu).
+- Ses (LiveKit) bağlantısı koparsa artan aralıklarla kendiliğinden yeniden kurulur.
+- Soket yeniden bağlanınca / uygulama öne gelince oda durumu (koltuklar, kendi mikrofonun, sohbet, puanlar, PK, çantalar, müzik) sunucuyla eşitlenir; ölü bağlantı 70 sn'de fark edilir; geçici sunucu hatası artık oturumu kapatmaz.
+- Kilitli/gizli odaya yeniden katılırken şifre/kod korunur. Odadan çıkış ağı beklemeden anında.
+- Para işlemlerinde zaman aşımı mesajı "işlem gerçekleşmiş olabilir, kontrol et" der (körü körüne tekrar ettirmez).
+- Müzik yarış durumları (geç gelen yanıt, odadan çıkınca yeniden başlama) giderildi. Arka plan servisi aç/kapat sırası düzeltildi.
+- Hediye uçuşları/animasyonları oda küçültülmüşken birikmez; animasyon bitiş/hata bildirimleri bir kez ve doğru zamanda.
+- Avatarlar gösterildiği boyutta çözülür (bellek). Sohbet, yukarı kaydırıp okurken aşağı zıplamaz. DM listesi her mesajda baştan yüklenmez.
+- Akışta sayfa hatası sonsuz istek döngüsüne girmez; kısa ekranda hediye penceresi çökmesi giderildi; gizli mod anahtarı hata olursa geri döner.
+
+Tasarım
+- Bildirimler en üst katmanda (açık pencere/diyalog arkasında kalmaz), simgeli ve yumuşak geçişli. Silme/kapatma onayları kırmızı.
+- Türkçe sistem metinleri (Geri, Kopyala/Yapıştır, tarih seçici). Kısa listelerde de aşağı çekip yenileme çalışır.
+- Başlık yazısı 20 sp (uzun başlıklar kesilmez), kartlar arası boşluk, renk/boşluk/köşe ölçü tabloları (Gap, Rad, Pal.green/orange/gold), ortak EmptyState.
+- Taşma düzeltmeleri (büyük yazı boyutunda bakiye, segmentler, çanta sayacı, mesaj kartları), podyum 🥉, "1,5K" Türkçe ondalık, Türkçe büyük harf (İ), kullanıcı profili yüklenirken de geri düğmesi, teknik hata metinleri kullanıcıya gösterilmez.
+- APK derlemesi: Dart hatası varsa uzun derlemeyi beklemeden durur ve hatalı satırları özet sayfasında gösterir.
+
 ## v2.33.0 — Oda ekranı Yoho ölçüleriyle
 - Koltuk yerleşimi Yoho ekran görüntülerinden ölçülen oranlarla her mod için ayrı: 2, 5, 8, 9, 12, 15, 20 ve yeni 30 mikrofon (6 x 5). Koltuklar başlığın altından sabit ölçüyle başlar; sohbet koltukların bittiği yerden akar. Boş koltuk: yarı saydam beyaz daire + ince çerçeve, altında numara.
 - Mikrofonlar artık hiçbir durumda küçülmez: klavye açılınca oda kararır, mesajlar karartının üstünde görünür, beyaz yazı şeridi klavyenin üstündedir (Yoho). Hediye paneli koltukları sıkıştırmaz.

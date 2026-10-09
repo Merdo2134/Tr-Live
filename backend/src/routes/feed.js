@@ -100,6 +100,8 @@ router.post('/posts', requireAuth, userLimit('post_create', 20, 3600e3), async (
   if (req.body?.imageUrl !== undefined && req.body.imageUrl !== null) {
     imageUrl = String(req.body.imageUrl);
     if (!/^\/uploads\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(imageUrl)) throw fail('Görsel adresi geçersiz.');
+    const own = await query(`SELECT 1 FROM upload_owners WHERE url = $1 AND owner_id = $2`, [imageUrl, req.user.id]);
+    if (!own.rowCount) throw fail('Yalnızca kendi yüklediğin görseli paylaşabilirsin.', 403);
   }
   if (!body && !imageUrl) throw fail('Gönderi boş olamaz.');
   const r = await query(`INSERT INTO posts(user_id, body, image_url) VALUES($1,$2,$3) RETURNING id`, [req.user.id, body, imageUrl]);
@@ -114,10 +116,17 @@ router.delete('/posts/:id', requireAuth, async (req, res) => {
   const id = uuid(req.params.id);
   const post = (await query(`SELECT user_id, image_url FROM posts WHERE id = $1 AND is_removed = FALSE`, [id])).rows[0];
   if (!post) throw fail('Gönderi bulunamadı.', 404);
-  const staff = ['admin', 'support'].includes(req.user.system_role);
-  if (post.user_id !== req.user.id && !staff) throw fail('Bu gönderiyi silemezsiniz.', 403);
+  // Yardımcı admin (support) yetkileri staff_logic ile sınırlı; gönderi silme yalnızca yönetici ve sahibine açık.
+  if (post.user_id !== req.user.id && req.user.system_role !== 'admin') throw fail('Bu gönderiyi silemezsiniz.', 403);
   await query(`UPDATE posts SET is_removed = TRUE WHERE id = $1`, [id]);
-  await removeUpload(post.image_url);
+  // Dosya yalnızca gönderi sahibinin yüklediği ve başka hiçbir gönderide kullanılmayan görselse silinir.
+  if (post.image_url) {
+    const own = await query(
+      `SELECT 1 FROM upload_owners uo WHERE uo.url = $1 AND uo.owner_id = $2
+         AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.image_url = $1 AND p.id <> $3 AND p.is_removed = FALSE)`,
+      [post.image_url, post.user_id, id]);
+    if (own.rowCount) await removeUpload(post.image_url);
+  }
   res.json({ ok: true });
 });
 

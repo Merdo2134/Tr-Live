@@ -14,7 +14,7 @@ const like = (q) => `%${q.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
 const paging = (req) => ({ limit: Math.min(Math.max(Number(req.query.limit) || 30, 1), 100), offset: Math.max(Number(req.query.offset) || 0, 0) });
 
 // Gizli kullanıcılar aramada çıkmaz.
-router.get('/search', async (req, res) => {
+router.get('/search', userLimit('user_search', 60, 60e3), async (req, res) => {
   const q = String(req.query.q ?? '').trim();
   if (q.length < 2) throw fail('Arama için en az 2 karakter girin.');
   const r = await query(

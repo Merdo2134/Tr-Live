@@ -11,6 +11,7 @@ import 'services/session.dart';
 import 'services/socket_service.dart';
 import 'widgets/app_theme.dart';
 import 'widgets/common.dart';
+import 'widgets/tr_localizations.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 bool _loggingOut = false;
@@ -33,6 +34,10 @@ Future<void> main() async {
 
 Future<void> _boot() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Yayın sürümünde bozulan bir parça gri kutu yerine sade bir simgeyle görünsün (ekranın geri kalanı çalışır).
+  if (kReleaseMode) {
+    ErrorWidget.builder = (details) => const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white24, size: 28));
+  }
   BackgroundService.instance.init();
   await AuthService.restore();
   // Oturum sona erdiğinde (401, yasaklı hesap, şifre değişimi) giriş ekranına dön.
@@ -57,9 +62,28 @@ class TRLiveApp extends StatelessWidget {
       title: 'TR Live',
       theme: buildAppTheme(),
       themeMode: ThemeMode.dark,
+      locale: const Locale('tr'),
+      supportedLocales: const [Locale('tr')],
+      localizationsDelegates: const [TrMaterialLocalizations.delegate, TrMaterialLocalizations.cupertinoDelegate, DefaultWidgetsLocalizations.delegate],
+      // Kısa listelerde de aşağı çekip yenileme çalışsın.
+      scrollBehavior: const _AppScroll(),
       builder: appFrame,
       home: const _Boot(),
     );
+  }
+}
+
+class _AppScroll extends MaterialScrollBehavior {
+  const _AppScroll();
+
+  // Yalnızca dikey listeler her zaman kaydırılabilir (aşağı çekip yenileme için); yatay listeler eski davranışında
+  // kalır, böylece kısa yatay şeritler üst sayfa geçişlerinin kaydırmasını yakalamaz.
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    final base = super.getScrollPhysics(context);
+    final w = context.widget;
+    final vertical = w is Scrollable && axisDirectionToAxis(w.axisDirection) == Axis.vertical;
+    return vertical ? AlwaysScrollableScrollPhysics(parent: base) : base;
   }
 }
 

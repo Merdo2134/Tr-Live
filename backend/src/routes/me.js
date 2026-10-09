@@ -15,6 +15,7 @@ import { config } from '../config.js';
 import { cleanPublic } from '../safe_text.js';
 import { hub } from '../realtime.js';
 import { userLimit } from '../firewall.js';
+import { closeRoom, leaveRoom } from '../services/rooms.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -50,7 +51,8 @@ router.patch('/', async (req, res) => {
     if (b.birthDate === null) set('birth_date', null);
     else {
       const d = new Date(`${b.birthDate}T00:00:00Z`);
-      const ok = /^\d{4}-\d{2}-\d{2}$/.test(String(b.birthDate)) && !Number.isNaN(d.getTime());
+      // 2025-02-31 gibi takvimde olmayan günler reddedilir (JS bunu Mart'a kaydırır, veritabanı ise hata verir).
+      const ok = /^\d{4}-\d{2}-\d{2}$/.test(String(b.birthDate)) && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === String(b.birthDate);
       const age = ok ? (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000) : 0;
       if (!ok || age < 13 || age > 110) throw fail('Doğum tarihi geçersiz (en az 13 yaşında olmalısınız).');
       set('birth_date', b.birthDate);
@@ -99,11 +101,15 @@ function imageUpload(column, allowAnimated = false) {
         [animated, mimeFor(animated), animated, buf.length, buf, req.user.id],
       );
       url = `/media/${r.rows[0].id}.${animated}`;
+      const prev = (await query(`SELECT avatar_url FROM users WHERE id = $1`, [req.user.id])).rows[0]?.avatar_url ?? '';
       // Önceki sabit fotoğraf yedeklenir; WIP 5 bitince ona dönülür.
       await query(
         `UPDATE users SET static_avatar_url = CASE WHEN avatar_animated THEN static_avatar_url ELSE avatar_url END, avatar_animated = TRUE, avatar_url = $1, updated_at = NOW() WHERE id = $2`,
         [url, req.user.id],
       );
+      // Eski hareketli fotoğraf veritabanında birikmesin (yalnızca bu kullanıcının yüklediği kayıt silinir).
+      const m = /^\/media\/([0-9a-f-]{36})\./.exec(prev);
+      if (m) await query(`DELETE FROM media_files WHERE id = $1 AND created_by = $2`, [m[1], req.user.id]);
       return res.json({ url, animated: true });
     } else {
       const kind = detectImage(buf);
@@ -125,8 +131,8 @@ function imageUpload(column, allowAnimated = false) {
     res.json({ url, animated: false });
   }];
 }
-router.put('/avatar', ...imageUpload('avatar_url', true));
-router.put('/cover', ...imageUpload('cover_url'));
+router.put('/avatar', userLimit('avatar_upload', 15, 3600e3), ...imageUpload('avatar_url', true));
+router.put('/cover', userLimit('cover_upload', 15, 3600e3), ...imageUpload('cover_url'));
 
 router.post('/password', userLimit('password', 5, 15 * 60e3), async (req, res) => {
   const current = String(req.body?.currentPassword ?? '');
@@ -148,9 +154,17 @@ router.delete('/', userLimit('acct_delete', 5, 15 * 60e3), async (req, res) => {
   if (owned.rowCount) throw fail('Önce ailenizin sahipliğini devredin veya aileyi dağıtın.', 409);
   const agency = await query(`SELECT 1 FROM agencies WHERE owner_id = $1 AND status IN ('pending','active','suspended')`, [req.user.id]);
   if (agency.rowCount) throw fail('Önce ajans sahipliği için destek ile iletişime geçin.', 409);
+  // Açık odaları kapat, bulunduğu odalardan çıkar (ses/görüntü bağlantısı da kesilir).
+  for (const r of (await query(`SELECT id FROM rooms WHERE owner_id = $1 AND is_active = TRUE`, [req.user.id])).rows) {
+    await closeRoom(r.id).catch((e) => console.error('Hesap silme oda kapatma:', e.message));
+  }
+  for (const r of (await query(`SELECT room_id FROM room_members WHERE user_id = $1`, [req.user.id])).rows) {
+    await leaveRoom(req.user.id, r.room_id).catch(() => {});
+  }
   await tx(async (c) => {
+    // Kullanıcı adı tam kimlikten türetilir (8 karakterlik kısaltma çakışıp silmeyi engelleyebiliyordu).
     await c.query(
-      `UPDATE users SET account_status = 'deleted', username = 'silinmis_' || substr(id::text, 1, 8), display_name = 'Silinmiş Kullanıcı',
+      `UPDATE users SET account_status = 'deleted', username = 'del_' || replace(id::text, '-', ''), display_name = 'Silinmiş Kullanıcı',
          password_hash = NULL, avatar_url = NULL, cover_url = NULL, bio = NULL, birth_date = NULL, country = NULL, city = NULL,
          is_hidden = FALSE, token_version = token_version + 1, updated_at = NOW() WHERE id = $1`,
       [req.user.id],
@@ -194,7 +208,7 @@ router.post('/diamonds/exchange', userLimit('diamond_exchange', 20, 10 * 60e3), 
 });
 
 router.get('/wallet', async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 50, 100);
+  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 50, 100));
   const r = await query(
     `SELECT id, transaction_type, coin_amount, diamond_amount, description, created_at
      FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,

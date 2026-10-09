@@ -206,7 +206,7 @@ class _ClaimDialogState extends State<_ClaimDialog> {
                     shape: BoxShape.circle,
                     gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: canOpen ? const [Color(0xFFFFF59D), Color(0xFFFFF176)] : const [Color(0xFFFFF9C4), Color(0xFFFFECB3)]),
                   ),
-                  child: Text(big, style: TextStyle(fontSize: _won != null ? 44 : (counting ? 34 : 38), fontWeight: FontWeight.w900, color: const Color(0xFF8A1560))),
+                  child: Padding(padding: const EdgeInsets.all(10), child: FittedBox(fit: BoxFit.scaleDown, child: Text(big, style: TextStyle(fontSize: _won != null ? 44 : (counting ? 34 : 38), fontWeight: FontWeight.w900, color: const Color(0xFF8A1560))))),
                 ),
               ),
             ),

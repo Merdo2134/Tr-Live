@@ -19,6 +19,7 @@ class SocketService {
   Timer? _ping;
   bool _wanted = false;
   int _attempt = 0;
+  DateTime _lastData = DateTime.now(); // yarı açık (sessizce ölmüş) bağlantıyı fark etmek için
   String? _roomId;
 
   void start() {
@@ -74,13 +75,24 @@ class SocketService {
       _channel = channel;
       channel.ready.then((_) {}, onError: (_) {}); // bağlantı hatası stream üzerinden de gelir; yakalanmamış istisna olmasın
       _sub = channel.stream.listen(_onData, onDone: _onClosed, onError: (_) => _onClosed(), cancelOnError: true);
-      _ping = Timer.periodic(const Duration(seconds: 25), (_) => _send({'type': 'ping'}));
+      _lastData = DateTime.now();
+      _ping = Timer.periodic(const Duration(seconds: 25), (_) {
+        // Sunucu her ping'e "pong" döner; 70 sn hiç veri gelmediyse bağlantı ölmüştür (ör. Wi-Fi → mobil veri geçişi).
+        if (DateTime.now().difference(_lastData) > const Duration(seconds: 70)) {
+          _teardown();
+          _controller.add({'type': 'socket_closed'});
+          _scheduleRetry();
+          return;
+        }
+        _send({'type': 'ping'});
+      });
     } catch (_) {
       _scheduleRetry();
     }
   }
 
   void _onData(dynamic raw) {
+    _lastData = DateTime.now();
     try {
       final decoded = jsonDecode(raw.toString());
       if (decoded is! Map) return;
@@ -96,12 +108,15 @@ class SocketService {
   void _onClosed() {
     final code = _channel?.closeCode;
     _teardown();
-    // 1008: kimlik doğrulama reddedildi, 4001: hesap yasaklandı/şifre değişti/silindi.
-    if (code == 1008 || code == 4001) {
+    // 4001: hesap yasaklandı / şifre değişti / silindi → kesin çıkış.
+    if (code == 4001) {
       _wanted = false;
       Api.onUnauthorized?.call();
       return;
     }
+    // 1008 her zaman oturum sorunu değildir (sunucu yeniden başlarken, IP sınırı, mesaj seli). Oturumu REST ile
+    // doğrula: gerçekten geçersizse Api zaten çıkış yaptırır; değilse yeniden bağlanmayı dene.
+    if (code == 1008) Api.get('/api/me').then((_) {}, onError: (_) {});
     _controller.add({'type': 'socket_closed'});
     _scheduleRetry();
   }

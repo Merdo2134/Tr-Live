@@ -5,6 +5,7 @@ import { clearRoomMusic } from './music.js';
 import { closeMicSessions, closeRoomMicSessions } from './mic.js';
 import { endPkForRoom } from './pk.js';
 import { cancelRoomGame, forfeitUserInRoom } from './games.js';
+import { nonOverlapping } from '../ticker.js';
 
 export const SUPPORTED_SEATS = new Set([2, 4, 5, 6, 8, 9, 12, 15, 20, 30]);
 
@@ -58,7 +59,7 @@ export async function isRoomMember(userId, roomId) {
 const GRACE_SECONDS = { user: Number(process.env.ROOM_GRACE_SECONDS || 300), owner: Number(process.env.ROOM_OWNER_GRACE_SECONDS || 900) };
 
 export function startRoomSweeper() {
-  const timer = setInterval(async () => {
+  const timer = setInterval(nonOverlapping(async () => {
     try {
       const r = await query(
         `SELECT room_id, user_id FROM room_members
@@ -72,7 +73,7 @@ export function startRoomSweeper() {
     } catch (error) {
       console.error('Oda temizleyici hatası:', error.message);
     }
-  }, 30000);
+  }), 30000);
   timer.unref();
   return timer;
 }

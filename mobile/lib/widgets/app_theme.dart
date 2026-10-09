@@ -13,6 +13,27 @@ class Pal {
   static const red = Color(0xFFE5483D);
   static const text = Color(0xFFEAF4FA);
   static const textDim = Color(0xFF8AA5BB); // koyu zeminlerde en az 4.5:1 kontrast (WCAG AA)
+  static const green = Color(0xFF22C55E); // onay / başarı
+  static const orange = Color(0xFFFF7A18); // sıcak vurgu (canlı rozet, oda kartı)
+  static const gold = Color(0xFFFFD54F); // Coin
+  static const onBright = Color(0xFF00212A); // açık renkli zeminlerin üstündeki yazı (cyan, altın, yeşil)
+}
+
+/// Boşluk ölçüleri (dp). Ekranlarda bu değerler kullanılır; elle sayı yazılmaz.
+class Gap {
+  static const xs = 4.0;
+  static const s = 8.0;
+  static const m = 12.0;
+  static const l = 16.0;
+  static const xl = 24.0;
+}
+
+/// Köşe yuvarlaklıkları (dp).
+class Rad {
+  static const sm = 8.0;
+  static const md = 12.0;
+  static const lg = 16.0;
+  static const xl = 24.0;
 }
 
 /// Material 3 yazı ölçeği (sp / satır yüksekliği). Android'in standardı; sosyal uygulamalarda gövde 14-16, etiket 11-12, başlık 16-22 kullanılır.
@@ -67,7 +88,7 @@ ThemeData buildAppTheme() {
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
-      titleTextStyle: TextStyle(color: Pal.text, fontSize: 24, fontWeight: FontWeight.w800),
+      titleTextStyle: TextStyle(color: Pal.text, fontSize: 20, fontWeight: FontWeight.w700),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: Pal.surface,
@@ -77,7 +98,7 @@ ThemeData buildAppTheme() {
       iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(color: s.contains(WidgetState.selected) ? Pal.cyan : Pal.textDim, size: 28)),
       labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(fontSize: 11, color: s.contains(WidgetState.selected) ? Pal.cyan : Pal.textDim)),
     ),
-    cardTheme: CardThemeData(color: Pal.surface, surfaceTintColor: Colors.transparent, shape: shape, margin: EdgeInsets.zero),
+    cardTheme: CardThemeData(color: Pal.surface, surfaceTintColor: Colors.transparent, shape: shape, margin: const EdgeInsets.symmetric(vertical: 5)),
     dialogTheme: DialogThemeData(backgroundColor: Pal.surface, surfaceTintColor: Colors.transparent, shape: shape),
     bottomSheetTheme: const BottomSheetThemeData(
       backgroundColor: Pal.surface,

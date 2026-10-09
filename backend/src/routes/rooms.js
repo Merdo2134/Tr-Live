@@ -44,6 +44,12 @@ async function uniqueCode(run) {
   throw fail('Davet kodu üretilemedi, tekrar deneyin.', 503);
 }
 
+// Gizli odanın üye/yönetici/katkı listesi yalnızca odadakilere ve sahibine açıktır.
+async function assertRoomVisible(room, userId) {
+  if (!room.is_hidden || room.owner_id === userId) return;
+  if (!(await memberOf(room.id, userId))) throw fail('Oda bulunamadı.', 404);
+}
+
 async function activeRoom(roomId) {
   const room = (await query(`SELECT * FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
   if (!room) throw fail('Oda bulunamadı.', 404);
@@ -156,6 +162,7 @@ router.post('/', requireAuth, userLimit('room_create', 20, 3600e3), async (req, 
 router.get('/:roomId/managers', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const room = await activeRoom(roomId);
+  await assertRoomVisible(room, req.user.id);
   const r = await query(
     `SELECT s.role, ${USER_PUBLIC_COLUMNS}
      FROM room_staff s JOIN users u ON u.id = s.user_id ${USER_PUBLIC_JOINS}
@@ -395,7 +402,12 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
 });
 
 // Oda kapak fotoğrafı (oda sahibi / yardımcı sahip).
-router.put('/:roomId/cover', requireAuth, userLimit('room_cover', 10, 10 * 60e3), express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
+router.put('/:roomId/cover', requireAuth, userLimit('room_cover', 10, 10 * 60e3), async (req, _res, next) => {
+  // Yetki, gövde belleğe alınmadan önce denetlenir.
+  const me = await memberOf(uuid(req.params.roomId, 'Oda'), req.user.id);
+  if (!me || !['owner', 'cohost'].includes(me.role)) throw fail('Kapak fotoğrafını yalnızca oda sahibi ve yardımcı sahip değiştirebilir.', 403);
+  next();
+}, express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const before = await activeRoom(roomId);
   const me = await memberOf(roomId, req.user.id);
@@ -425,7 +437,7 @@ router.delete('/:roomId/staff/:userId', requireAuth, userLimit('moderate', 60, 6
 // Katkı listesi: odaya en çok hediye gönderenler (24 saat / toplam).
 router.get('/:roomId/contributions', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
-  await activeRoom(roomId);
+  await assertRoomVisible(await activeRoom(roomId), req.user.id);
   const day = req.query.range === 'day';
   const r = await query(
     `SELECT ${USER_PUBLIC_COLUMNS}, g.total
@@ -453,6 +465,7 @@ router.post('/:roomId/close', requireAuth, async (req, res) => {
 
 router.get('/:roomId/members', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
+  await assertRoomVisible(await activeRoom(roomId), req.user.id);
   const r = await query(
     `SELECT rm.role, rm.microphone, rm.seat_index, rm.joined_at, ${USER_PUBLIC_COLUMNS}
      FROM room_members rm JOIN users u ON u.id = rm.user_id ${USER_PUBLIC_JOINS}
@@ -626,9 +639,15 @@ router.post('/:roomId/members/:userId/kick', requireAuth, userLimit('moderate', 
 router.post('/:roomId/members/:userId/block', requireAuth, userLimit('moderate', 60, 60e3), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const targetId = uuid(req.params.userId, 'Kullanıcı');
-  await activeRoom(roomId);
+  const room = await activeRoom(roomId);
   const { actor, target } = await moderationContext(roomId, req.user.id, targetId);
-  if (!canManage(actor.role, target?.role ?? 'user', 'moderate')) throw fail('Bu işlem için yetkiniz yok.', 403);
+  // Odada olmayan kişinin rolü: oda sahibi veya kalıcı oda yöneticisi olabilir (çevrimdışı yardımcı sahibi moderatör engelleyemesin).
+  let targetRole = target?.role;
+  if (!targetRole) {
+    if (room.owner_id === targetId) targetRole = 'owner';
+    else targetRole = (await query(`SELECT role FROM room_staff WHERE owner_id = $1 AND room_type = $2 AND user_id = $3`, [room.owner_id, room.room_type, targetId])).rows[0]?.role ?? 'user';
+  }
+  if (!canManage(actor.role, targetRole, 'moderate')) throw fail('Bu işlem için yetkiniz yok.', 403);
   await assertNotImmune(actor, targetId);
   await query(
     `INSERT INTO room_blocks(room_id, blocked_user_id, blocked_by_user_id) VALUES($1,$2,$3) ON CONFLICT (room_id, blocked_user_id) DO NOTHING`,
@@ -643,6 +662,11 @@ router.delete('/:roomId/blocks/:userId', requireAuth, async (req, res) => {
   const targetId = uuid(req.params.userId, 'Kullanıcı');
   const me = await memberOf(roomId, req.user.id);
   if (!me || !['owner', 'cohost', 'moderator'].includes(me.role)) throw fail('Bu işlem için yetkiniz yok.', 403);
+  // Moderatör yalnızca kendi koyduğu engeli kaldırır; sahibin/yardımcı sahibin engelini kaldıramaz.
+  if (me.role === 'moderator') {
+    const b = (await query(`SELECT blocked_by_user_id FROM room_blocks WHERE room_id = $1 AND blocked_user_id = $2`, [roomId, targetId])).rows[0];
+    if (b && b.blocked_by_user_id !== req.user.id) throw fail('Bu engeli yalnızca oda sahibi veya yardımcı sahip kaldırabilir.', 403);
+  }
   await query(`DELETE FROM room_blocks WHERE room_id = $1 AND blocked_user_id = $2`, [roomId, targetId]);
   res.json({ ok: true });
 });
@@ -685,7 +709,9 @@ router.post('/:roomId/members/:userId/mic-invite', requireAuth, userLimit('mic_i
     if (!Number.isInteger(seatIndex) || seatIndex < 1 || seatIndex >= room.seat_count) throw fail('Geçersiz koltuk.');
   }
   grantMicInvite(roomId, targetId);
-  hub.sendToUser(targetId, { type: 'mic_invite', roomId, seatIndex, fromUserId: req.user.id, fromName: req.user.display_name });
+  // Gizli kullanıcı olan yetkilinin gerçek adı açığa çıkmasın.
+  const inviter = publicUser(req.user, targetId);
+  hub.sendToUser(targetId, { type: 'mic_invite', roomId, seatIndex, fromUserId: inviter?.id ?? null, fromName: inviter?.displayName ?? 'Oda yetkilisi' });
   res.json({ ok: true });
 });
 

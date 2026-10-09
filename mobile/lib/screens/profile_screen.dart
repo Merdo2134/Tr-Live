@@ -98,7 +98,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 subtitle: const Text('Odalarda adınız ve fotoğrafınız gizlenir, aramada çıkmazsınız.'),
                 value: p['isHidden'] == true,
                 onChanged: (v) async {
-                  await guard(context, () => Api.patch('/api/me', {'isHidden': v}));
+                  final r = await guard(context, () => Api.patch('/api/me', {'isHidden': v}));
+                  if (r == null || !context.mounted) return; // sunucu reddettiyse anahtar eski hâlinde kalsın
                   p['isHidden'] = v;
                   setLocal(() {});
                 },
@@ -308,7 +309,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           row(Icons.podcasts, Colors.pinkAccent, isBroadcaster ? 'Yayıncı Merkezi' : 'Yayıncı Ol', () => _open(const AgencyScreen(mode: 'broadcaster')),
               sub: isBroadcaster ? (broadcasterStatus == 'pending' ? 'Başvurunuz inceleniyor' : null) : 'Başvur veya ajans kur'),
         // Ajans Merkezi: yalnızca ajans sahibi
-        if (agencyOwned != null) row(Icons.business, Colors.lightBlueAccent, 'Ajans Merkezi', () => _open(const AgencyScreen(mode: 'agency')), sub: '${agencyOwned['name']} · ${agencyOwned['status']}'),
+        if (agencyOwned != null) row(Icons.business, Colors.lightBlueAccent, 'Ajans Merkezi', () => _open(const AgencyScreen(mode: 'agency')), sub: '${agencyOwned['name']} · ${const {'pending': 'İnceleniyor', 'active': 'Aktif', 'suspended': 'Askıda', 'rejected': 'Reddedildi'}[agencyOwned['status']] ?? agencyOwned['status']}'),
         row(Icons.task_alt, Colors.greenAccent, 'Günlük Görevler', () => showDailySheet(context)),
         if (isDealer) row(Icons.store_mall_directory, Colors.tealAccent, 'Bayi paneli', () => _open(const DealerScreen())),
         if (Session.isStaff) row(Icons.admin_panel_settings, Colors.redAccent, Session.isAdmin ? 'Yönetim paneli' : 'Yardımcı admin paneli', () => _open(const AdminScreen())),
