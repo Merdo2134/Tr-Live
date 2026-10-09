@@ -66,7 +66,11 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
 
   void _enqueueAnim(Map<String, dynamic>? gift) {
     final url = Api.absoluteUrl(gift?['animationUrl'] as String?);
-    if (gift == null || url == null) return;
+    if (gift == null) return;
+    if (url == null) {
+      if (mounted) toast(context, '"${gift['name']}" hediyesinde animasyon dosyası tanımlı değil (Yönetici → Katalog listesinden kontrol edin).', error: true);
+      return;
+    }
     if (_anims.length < 5) _anims.add({'url': url, 'format': (gift['animationFormat'] ?? '').toString()});
     if (_anim == null) _nextAnim();
   }

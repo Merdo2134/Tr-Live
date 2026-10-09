@@ -1,5 +1,8 @@
 # Değişiklik ve inceleme raporu
 
+## v2.22.4
+- Hediyede animasyon dosyası tanımlı değilse oda içinde açık uyarı gösterilir (sessizce geçmez).
+
 ## v2.22.3
 - Telefon belleğine indirme yalnızca hediyeler için. Çerçeveler ve giriş efektleri eskisi gibi doğrudan internetten oynar (AnimAsset cache: false).
 
