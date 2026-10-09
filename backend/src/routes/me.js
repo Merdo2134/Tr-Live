@@ -128,7 +128,7 @@ function imageUpload(column, allowAnimated = false) {
 router.put('/avatar', ...imageUpload('avatar_url', true));
 router.put('/cover', ...imageUpload('cover_url'));
 
-router.post('/password', async (req, res) => {
+router.post('/password', userLimit('password', 5, 15 * 60e3), async (req, res) => {
   const current = String(req.body?.currentPassword ?? '');
   const next = String(req.body?.newPassword ?? '');
   passwordRules(next);
@@ -141,7 +141,7 @@ router.post('/password', async (req, res) => {
 });
 
 // Mağaza kuralları gereği uygulama içinden hesap silme.
-router.delete('/', async (req, res) => {
+router.delete('/', userLimit('acct_delete', 5, 15 * 60e3), async (req, res) => {
   const password = String(req.body?.password ?? '');
   if (!req.user.password_hash || !(await checkPassword(password, req.user.password_hash))) throw fail('Şifre hatalı.', 403);
   const owned = await query(`SELECT 1 FROM families WHERE owner_id = $1 AND is_active = TRUE`, [req.user.id]);

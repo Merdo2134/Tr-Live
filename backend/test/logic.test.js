@@ -142,3 +142,9 @@ test('160 kademeli seviye eğrisi', () => {
   assert.equal(i.nextLevelExp, expForLevel(11).toString());
   assert.equal(levelInfo(expForLevel(160)).maxed, true);
 });
+
+test('yerleşik küfür filtresi hileleri yakalar, masum sözleri geçirir', async () => {
+  const { containsBanned } = await import('../src/text_safety.js');
+  for (const t of ['s1ktir git', 'a.m.k', 'siiiiktir', 'amına koyayım', 'orospu']) assert.equal(containsBanned(t, []), true, t);
+  for (const t of ['selam nasılsın', 'sıkıntı var', 'pişmanlık', 'bitcoin', 'dickens', 'I got it', 'kitap']) assert.equal(containsBanned(t, []), false, t);
+});

@@ -1,3 +1,11 @@
+## v2.30.1
+- Derleme hatası düzeltildi (kullanıcı arama kutusu, common.dart: const InputDecoration).
+
+## v2.30.0
+- Güvenlik: yerleşik Türkçe/İngilizce küfür-hakaret filtresi (BANNED_WORDS boş olsa da çalışır; s1k, a.m.k, siiiik gibi yazım hilelerini yakalar, "sıkıntı" gibi masum sözleri geçirir). Sohbet, DM, biyografi, ad, oda adı, destek mesajı ve akışta geçerli.
+- Güvenlik: şifre değiştirme ve hesap silme için kullanıcı başına hız sınırı (15 dakikada 5 deneme).
+- Denetim notu: hediye/bakiye işlemleri zaten satır kilidiyle (FOR UPDATE) korunuyor.
+
 ## v2.29.0
 - Seviye Merkezi: Yayıncı / Kullanıcı seviyesi geçişi, 160 kademeli seviye eğrisi, Mevcut/Gerekli Exp, Ayrıcalıklar tablosu (ödül sütunu henüz boş).
 - Yükleme Merkezi (Coins; Gümüş yok): bakiye, coin paketleri (7.000 / 42,99₺ vb.), ödeme yöntemi listesi (ödeme altyapısı henüz bağlı değil uyarısı). Profildeki "Coins Yükleme" kartı buraya açılır.

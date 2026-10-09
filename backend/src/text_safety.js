@@ -18,7 +18,39 @@ export function parseBannedWords(raw = '') {
   return raw.split(',').map((w) => w.trim().toLocaleLowerCase('tr')).filter(Boolean);
 }
 
+// Yerleşik küfür/hakaret kökleri (Türkçe). Yazım hileleri (s1k, a.m.k, siiiik, @ $ 0 3) temizlenerek aranır.
+// Kısa kökler yalnızca tam kelime, uzun kökler kelime başı olarak eşleşir ("sıkıntı" gibi masum sözler takılmaz).
+const EXACT_ROOTS = new Set(['sik', 'amk', 'aq', 'oc', 'amq', 'yrk', 'pic', 'dick']);
+const PREFIX_ROOTS = ['siktir', 'sikik', 'sikeyim', 'sikis', 'sikim', 'sikerim', 'amina', 'aminakoy', 'amcik', 'amcuk', 'orospu', 'orspu', 'yarrak', 'yarak', 'gotveren', 'gotlek', 'gotoc', 'ibne', 'pezevenk', 'gavat', 'kahpe', 'puşt', 'pust', 'oropsu', 'serefsiz', 'şerefsiz', 'haysiyetsiz', 'dallama', 'sürtük', 'surtuk', 'fahise', 'fuck', 'bitch', 'shit', 'pussy', 'whore', 'nigg'];
+const LEET = { '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', '$': 's', '!': 'i' };
+
+function foldForFilter(text) {
+  let t = text.toLocaleLowerCase('tr');
+  t = t.replace(/[0134577@$!]/g, (c) => LEET[c] ?? c);
+  t = t.replace(/ı/g, 'i').replace(/ç/g, 'c').replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/î/g, 'i').replace(/â/g, 'a');
+  return t;
+}
+
+function builtinHit(text) {
+  const folded = foldForFilter(text);
+  // Harfler arasına konan ayırıcılar ("s.i.k", "a m k") birleştirilmiş sürümde de aranır.
+  const joined = folded.replace(/(?<=\p{L})[.\-_*+,\s]+(?=\p{L}\b)/gu, '');
+  for (const variant of [folded, joined]) {
+    const squeezed = variant.replace(/(\p{L})\1{2,}/gu, '$1$1'); // "siiiik" → "siik"
+    for (const v of [variant, squeezed, squeezed.replace(/(\p{L})\1/gu, '$1')]) {
+      for (const tok of v.split(/[^\p{L}]+/u)) {
+        if (!tok) continue;
+        if (EXACT_ROOTS.has(tok)) return true;
+        if (tok.length >= 4 && PREFIX_ROOTS.some((r) => tok.startsWith(foldForFilter(r)))) return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function containsBanned(text, words) {
+  if (typeof text !== 'string') return false;
+  if (builtinHit(text)) return true;
   if (!words.length) return false;
   const t = text.toLocaleLowerCase('tr');
   return words.some((w) => t.includes(w));
