@@ -1,8 +1,8 @@
-import 'dart:io' show ZLibCodec;
+import 'dart:io' show File, ZLibCodec;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
-import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/material.dart';
 
 // SVGA 2.x oynatıcısı (dış paket gerektirmez). Görsel katmanları (konum, ölçek, dönüş, saydamlık) oynatır.
 // Desteklenmeyenler: vektör şekiller, kırpma yolu, matte maskeleri ve gömülü ses.
@@ -96,16 +96,14 @@ class SvgaMovie {
     }
   }
 
-  static final Map<String, Uint8List> _cache = {};
-
-  static Future<SvgaMovie> load(String url) async {
-    var raw = _cache[url];
-    if (raw == null) {
-      final r = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 60));
-      if (r.statusCode != 200) throw Exception('svga indirilemedi');
+  static Future<SvgaMovie> load({File? file, String? url}) async {
+    final Uint8List raw;
+    if (file != null) {
+      raw = await file.readAsBytes();
+    } else {
+      final r = await http.get(Uri.parse(url!)).timeout(const Duration(seconds: 60));
+      if (r.statusCode != 200) throw Exception('svga indirilemedi (${r.statusCode})');
       raw = r.bodyBytes;
-      if (_cache.length > 3) _cache.remove(_cache.keys.first);
-      _cache[url] = raw;
     }
     final data = Uint8List.fromList(ZLibCodec().decode(raw));
     return _parse(data);
@@ -271,11 +269,13 @@ class _SvgaPainter extends CustomPainter {
 }
 
 class SvgaLite extends StatefulWidget {
-  final String url;
+  final File? file;
+  final String? url;
   final BoxFit fit;
   final bool repeat;
   final VoidCallback? onDone;
-  const SvgaLite({super.key, required this.url, this.fit = BoxFit.contain, this.repeat = false, this.onDone});
+  final ValueChanged<String>? onFail;
+  const SvgaLite({super.key, this.file, this.url, this.fit = BoxFit.contain, this.repeat = false, this.onDone, this.onFail});
 
   @override
   State<SvgaLite> createState() => _SvgaLiteState();
@@ -293,7 +293,7 @@ class _SvgaLiteState extends State<SvgaLite> with SingleTickerProviderStateMixin
 
   Future<void> _load() async {
     try {
-      final m = await SvgaMovie.load(widget.url);
+      final m = await SvgaMovie.load(file: widget.file, url: widget.url);
       if (!mounted) {
         m.dispose();
         return;
@@ -307,8 +307,11 @@ class _SvgaLiteState extends State<SvgaLite> with SingleTickerProviderStateMixin
           if (mounted) widget.onDone?.call();
         });
       }
-    } catch (_) {
-      if (mounted) widget.onDone?.call();
+    } catch (e) {
+      if (mounted) {
+        widget.onFail?.call('SVGA açılamadı: $e');
+        widget.onDone?.call();
+      }
     }
   }
 

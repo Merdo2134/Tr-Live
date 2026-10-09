@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api.dart';
+import '../services/media_cache.dart';
 import '../services/session.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
@@ -77,6 +78,7 @@ class _GiftSheetState extends State<_GiftSheet> {
       if (!mounted) return;
       setState(() {
         _gifts = listOf(r['gifts']);
+        MediaCache.prefetch([for (final g in _gifts) Api.absoluteUrl(g['animationUrl'] as String?)]);
         _globalMin = BigInt.tryParse((r['globalMinCoins'] ?? '1000').toString()) ?? BigInt.from(1000);
         final shown = _tabGifts;
         if (shown.isEmpty) {

@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
+import '../widgets/anim_asset.dart';
 import '../widgets/common.dart';
 import 'admin_content.dart';
 import 'admin_payouts.dart';
@@ -24,6 +25,124 @@ Future<Map<String, dynamic>?> pickAndUploadMedia(BuildContext context, {String a
   }
   toast(context, 'Yükleniyor (${(bytes.length / 1048576).toStringAsFixed(1)} MB)…');
   return guard(context, () => Api.postBytes('/api/admin/media', bytes, 'application/octet-stream', query: {'alpha': alpha}));
+}
+
+/// Yüklenen dosyanın canlı önizlemesi (hediye animasyonu veya çerçeve).
+Widget mediaPreview(String? url, {bool frame = false, double size = 170}) {
+  final u = Api.absoluteUrl(url != null && url.trim().isNotEmpty ? url.trim() : null);
+  return Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF0B3C5D), Color(0xFF061A2B)]),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: u == null
+        ? const Center(child: Text('Önizleme', style: TextStyle(color: Colors.white38)))
+        : Stack(alignment: Alignment.center, children: [
+            if (frame) Icon(Icons.person, size: size * 0.45, color: Colors.white24),
+            Positioned.fill(child: AnimAsset(key: ValueKey(u), url: u, repeat: true, fit: BoxFit.contain, cache: !frame)),
+          ]),
+  );
+}
+
+/// Katalogdaki tüm hediye ve çerçeveleri önizlemeyle listeler; açıp kapatma ve "bana ver" burada.
+class CatalogListPage extends StatefulWidget {
+  const CatalogListPage({super.key});
+
+  @override
+  State<CatalogListPage> createState() => _CatalogListPageState();
+}
+
+class _CatalogListPageState extends State<CatalogListPage> {
+  List<Map<String, dynamic>> _gifts = [];
+  List<Map<String, dynamic>> _frames = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final r = await guard(context, () => Api.get('/api/admin/catalog'));
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (r != null) {
+        _gifts = [for (final g in (r['gifts'] as List? ?? [])) if (g is Map) Map<String, dynamic>.from(g)];
+        _frames = [for (final f in (r['frames'] as List? ?? [])) if (f is Map) Map<String, dynamic>.from(f)];
+      }
+    });
+  }
+
+  Future<void> _toggle(String kind, Map<String, dynamic> it, bool v) async {
+    final r = await guard(context, () => Api.post('/api/admin/catalog/$kind/${it['id']}/active', {'isActive': v}));
+    if (r != null) setState(() => it['isActive'] = v);
+  }
+
+  Future<void> _grantSelf(Map<String, dynamic> f) async {
+    final r = await guard(context, () => Api.post('/api/admin/users/${Session.id}/inventory', {'itemType': 'frame', 'itemKey': f['id'], 'itemName': f['name']}));
+    if (r != null && mounted) toast(context, '"${f['name']}" envanterine eklendi.');
+  }
+
+  Widget _card(String kind, Map<String, dynamic> it, {required bool frame}) {
+    final active = it['isActive'] == true;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(children: [
+          Expanded(child: LayoutBuilder(builder: (c, box) => Center(child: mediaPreview((frame ? it['imageUrl'] : it['animationUrl'] ?? it['iconUrl']) as String?, frame: frame, size: box.biggest.shortestSide)))),
+          const SizedBox(height: 6),
+          Text(it['name'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+          if (!frame) Text('${fmtNumber(it['coinPrice'])} coin · ${it['category']}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(active ? 'Açık' : 'Kapalı', style: TextStyle(color: active ? Colors.greenAccent : Colors.white38)),
+            Switch(value: active, onChanged: (v) => _toggle(kind, it, v)),
+          ]),
+          if (frame) TextButton(onPressed: () => _grantSelf(it), child: const Text('Bana ver (dene)')),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Katalog önizleme')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(padding: const EdgeInsets.all(12), children: [
+                Text('Hediyeler (${_gifts.length})', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                GridView.count(
+                  crossAxisCount: 2,
+                  childAspectRatio: 0.72,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  children: [for (final g in _gifts) _card('gifts', g, frame: false)],
+                ),
+                const SizedBox(height: 16),
+                Text('Çerçeveler (${_frames.length})', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                GridView.count(
+                  crossAxisCount: 2,
+                  childAspectRatio: 0.72,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  children: [for (final f in _frames) _card('frames', f, frame: true)],
+                ),
+              ]),
+            ),
+    );
+  }
 }
 
 class AdminScreen extends StatelessWidget {
@@ -470,6 +589,7 @@ class _CatalogTab extends StatelessWidget {
                 ),
               ),
               TextField(controller: anim, decoration: const InputDecoration(labelText: 'Animasyon adresi (https veya yüklenen dosya)')),
+              Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: mediaPreview(anim.text)),
               Row(children: [
                 const Text('Şeffaflık:  ', style: TextStyle(color: Colors.white70)),
                 DropdownButton<String>(
@@ -562,6 +682,7 @@ class _CatalogTab extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               TextField(controller: name, decoration: const InputDecoration(labelText: 'Ad')),
               TextField(controller: url, decoration: const InputDecoration(labelText: 'Görsel adresi (https veya yüklenen dosya)')),
+              Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: mediaPreview(url.text, frame: true)),
               Row(children: [
                 const Text('MP4 şeffaflık:  ', style: TextStyle(color: Colors.white70)),
                 DropdownButton<String>(
@@ -704,6 +825,12 @@ class _CatalogTab extends StatelessWidget {
     return ListView(padding: const EdgeInsets.all(16), children: [
       const Text('Adresler https:// ile başlamalıdır. Oluşan kimlik, envanterde "Anahtar" olarak kullanılır.', style: TextStyle(color: Colors.white70)),
       const SizedBox(height: 12),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.grid_view),
+        label: const Text('Katalog listesi (önizleme)'),
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CatalogListPage())),
+      ),
+      const SizedBox(height: 8),
       FilledButton.icon(
         icon: const Icon(Icons.card_giftcard),
         label: const Text('Hediye ekle'),

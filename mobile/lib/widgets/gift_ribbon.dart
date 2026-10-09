@@ -89,7 +89,15 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     final a = _anim!;
     return Positioned.fill(
       child: IgnorePointer(
-        child: AnimAsset(url: a['url'] as String, format: a['format'] as String, key: ValueKey(a['seq']), onDone: _nextAnim),
+        child: AnimAsset(
+          url: a['url'] as String,
+          format: a['format'] as String,
+          key: ValueKey(a['seq']),
+          onDone: _nextAnim,
+          onFail: (m) {
+            if (mounted) toast(context, '$m\n${a['url']}', error: true);
+          },
+        ),
       ),
     );
   }
@@ -202,7 +210,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       child: IgnorePointer(
         child: Stack(alignment: Alignment.center, children: [
           if (url != null)
-            AnimAsset(url: url),
+            AnimAsset(url: url, cache: false),
           Positioned(
             bottom: 140,
             child: Material(

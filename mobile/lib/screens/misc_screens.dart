@@ -199,7 +199,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   for (final i in items)
                     ListTile(
                       leading: Api.absoluteUrl(i['assetUrl'] as String?) != null && i['itemType'] == 'frame'
-                          ? SizedBox(width: 40, height: 40, child: AnimAsset(url: Api.absoluteUrl(i['assetUrl'] as String?)!, repeat: true))
+                          ? SizedBox(width: 40, height: 40, child: AnimAsset(url: Api.absoluteUrl(i['assetUrl'] as String?)!, repeat: true, cache: false))
                           : const Icon(Icons.auto_awesome),
                       title: Text((i['itemName'] ?? '').toString()),
                       subtitle: Text('${_typeNames[i['itemType']] ?? i['itemType']}${i['expiresAt'] != null ? ' · ${_date(i['expiresAt'])} tarihine kadar' : ''}'),

@@ -1,5 +1,18 @@
 # Değişiklik ve inceleme raporu
 
+## v2.22.3
+- Telefon belleğine indirme yalnızca hediyeler için. Çerçeveler ve giriş efektleri eskisi gibi doğrudan internetten oynar (AnimAsset cache: false).
+
+## v2.22.2 — Telefon belleğine indirme
+- Hediye animasyonları ve çerçeveler ilk kullanımda kullanıcının telefonuna (uygulama önbelleği) indirilir, sonra hep oradan oynar (services/media_cache.dart). Oda açılınca ve hediye paneli açılınca tüm hediyeler arka planda önceden indirilir. Önbellek 400 MB'ı geçerse en eski dosyalar silinir.
+- Uygulama paketinde (APK) hiçbir hediye/çerçeve dosyası yoktur; hepsi yönetim panelinden eklenir.
+
+## v2.22.1 — Yönetim panelinden önizlemeli ekleme
+- Hediye ve çerçeve formunda dosya yüklenince canlı önizleme gösterilir (çerçeve avatar üstünde).
+- Katalog → "Katalog listesi (önizleme)": tüm hediye/çerçeveler hareketli önizlemeyle, açma/kapama ve çerçeve için "Bana ver (dene)". Sunucu: GET /api/admin/catalog.
+- Toplu hediye/çerçeve yükleme, telefondan dosya seçme, oynatma hatasında ekran uyarısı (v2.21.x) korunur.
+- Pakete gömülü hazır içerik (v2.22.0) geri alındı; her şey yönetim panelinden eklenir.
+
 ## v2.21.3
 - Katalog: "Toplu hediye yükle" ve "Toplu çerçeve yükle". Birden fazla dosya seçilir; ad dosya adından, fiyat/sekme tek seferde girilir; sonunda hangi dosyanın neden eklenmediği listelenir.
 

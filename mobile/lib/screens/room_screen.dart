@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import '../services/api.dart';
 import '../services/background_service.dart';
+import '../services/media_cache.dart';
 import '../services/music_service.dart';
 import '../services/room_dock.dart';
 import '../services/session.dart';
@@ -86,6 +87,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     _sub = SocketService.instance.events.listen(_onEvent);
     RoomDock.exitHandler = _onBack;
     WidgetsBinding.instance.addObserver(this);
+    MediaCache.warmGifts();
     _enter();
   }
 

@@ -317,6 +317,14 @@ router.post('/entrance-effects', requireSuperAdmin, async (req, res) => {
     req.body?.durationMs === undefined ? 4000 : positiveInt(req.body.durationMs, 'Süre', 20000)]);
   res.status(201).json({ id: r.rows[0].id });
 });
+router.get('/catalog', requireSuperAdmin, async (_req, res) => {
+  const g = await query(`SELECT id, name, coin_price, icon_url, animation_url, animation_format, category, is_active FROM gifts ORDER BY is_active DESC, coin_price DESC, name`);
+  const f = await query(`SELECT id, name, image_url, is_active FROM frames ORDER BY is_active DESC, name`);
+  res.json({
+    gifts: g.rows.map((r) => ({ id: r.id, name: r.name, coinPrice: String(r.coin_price), iconUrl: r.icon_url, animationUrl: r.animation_url, animationFormat: r.animation_format, category: r.category, isActive: r.is_active })),
+    frames: f.rows.map((r) => ({ id: r.id, name: r.name, imageUrl: r.image_url, isActive: r.is_active })),
+  });
+});
 const TOGGLE_TABLES = { gifts: 'gifts', frames: 'frames', 'entrance-effects': 'entrance_effects', music: 'music_tracks' };
 router.post('/catalog/:kind/:id/active', requireSuperAdmin, async (req, res) => {
   const table = TOGGLE_TABLES[req.params.kind];
