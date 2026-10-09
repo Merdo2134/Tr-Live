@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_vap_kit/flutter_vap_kit.dart';
 import 'package:lottie/lottie.dart';
-import 'package:svgaplayer_flutter/svgaplayer_flutter.dart';
+import 'svga_lite.dart';
 
 /// Adresin uzantısına göre doğru oynatıcıyı seçer: svga, Lottie (json), şeffaf mp4 (VAP), webp/gif/png.
 /// [repeat] true ise döngüde oynar (avatar çerçevesi); false ise bir kez oynar ve [onDone] çağrılır.
@@ -29,7 +29,7 @@ class AnimAsset extends StatelessWidget {
   Widget build(BuildContext context) {
     final e = extOf(url);
     final f = format ?? '';
-    if (e == 'svga' || f == 'svga') return _SvgaView(url: url, fit: fit, repeat: repeat, onDone: onDone);
+    if (e == 'svga' || f == 'svga') return SvgaLite(url: url, fit: fit, repeat: repeat, onDone: onDone);
     if (e == 'mp4' || f == 'mp4') {
       return VapPlayer.network(url, fit: fit, loop: repeat, onComplete: repeat ? null : onDone, onError: (_) => onDone?.call());
     }
@@ -45,58 +45,5 @@ class AnimAsset extends StatelessWidget {
       );
     }
     return Image.network(url, fit: fit, gaplessPlayback: true, errorBuilder: (_, __, ___) => const SizedBox.shrink());
-  }
-}
-
-class _SvgaView extends StatefulWidget {
-  final String url;
-  final BoxFit fit;
-  final bool repeat;
-  final VoidCallback? onDone;
-  const _SvgaView({required this.url, required this.fit, required this.repeat, this.onDone});
-
-  @override
-  State<_SvgaView> createState() => _SvgaViewState();
-}
-
-class _SvgaViewState extends State<_SvgaView> with SingleTickerProviderStateMixin {
-  late final SVGAAnimationController _c;
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _c = SVGAAnimationController(vsync: this);
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final item = await SVGAParser.shared.decodeFromURL(widget.url);
-      if (!mounted) return;
-      _c.videoItem = item;
-      setState(() => _ready = true);
-      if (widget.repeat) {
-        _c.repeat();
-      } else {
-        _c.forward().whenComplete(() {
-          if (mounted) widget.onDone?.call();
-        });
-      }
-    } catch (_) {
-      if (mounted) widget.onDone?.call();
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_ready) return const SizedBox.shrink();
-    return SVGAImage(_c, fit: widget.fit);
   }
 }
