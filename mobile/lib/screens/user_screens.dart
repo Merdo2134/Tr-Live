@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
+import '../widgets/anim_asset.dart';
 import '../services/session.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
@@ -58,7 +59,7 @@ class ProfileHeader extends StatelessWidget {
                 decoration: BoxDecoration(shape: BoxShape.circle, color: Theme.of(context).scaffoldBackgroundColor),
                 child: UserAvatar(user: p, radius: 44),
               ),
-              if (frame != null) IgnorePointer(child: Image.network(frame, width: 112, height: 112, errorBuilder: (_, __, ___) => const SizedBox.shrink())),
+              if (frame != null) IgnorePointer(child: SizedBox(width: 112, height: 112, child: AnimAsset(url: frame, repeat: true))),
             ]),
           ),
           Positioned(right: 12, bottom: 4, child: Row(children: actions)),

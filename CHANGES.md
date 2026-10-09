@@ -1,5 +1,16 @@
 # Değişiklik ve inceleme raporu
 
+## v2.21.1
+- Çerçeve olarak şeffaf mp4 (VAP) desteği; mp4 çerçeve ve avatar efekti döngüde oynar.
+- Hareketli PNG (APNG) yüklemesi açık mesajla reddedilir (Flutter oynatamaz); webp/gif/svga kullanın.
+
+## v2.21.0 — Hediye ve çerçeve dosyası yükleme
+- Yönetici → Katalog: hediye ikonu/animasyonu ve avatar çerçevesi telefondan seçilip yüklenir (40 MB'a kadar). Dosyalar veritabanında saklanır (sunucu yenilense de kaybolmaz).
+- Sunucu türü uzantıdan değil içinden anlar: svga 2.x, mp4, Lottie json (birleşik), webp, gif, png, jpg. PAG, WebM, svga 1.x ve görselleri dışarıda olan Lottie açık bir mesajla reddedilir.
+- Yan yana şeffaf mp4'e eksik VAP ayar kutusu (vapc) otomatik eklenir; şeffaflık solda/sağda seçilebilir.
+- Oynatıcı: svga (yeni paket svgaplayer_flutter), Lottie, VAP mp4, webp/gif/png. Avatar çerçeveleri hareketli (döngü) oynar. Giriş efekti de aynı oynatıcıyı kullanır.
+- Migration 018 (media_files).
+
 ## v2.20.0 — Sabit koltuk sahnesi, yeni oda başlığı, çanta tasarımı
 - **Koltuklar kaymaz (YoHo mantığı):** Sahne artık kaydırılmaz. Avatar boyutu, sahne yüksekliği ve genişliğine göre hesaplanır; her koltuk modu (2…20) ekrana sığar. 3 satıra kadar elmas rozeti, daha fazla satırda gizli. Az koltuklu üst satır Figma'daki gibi geniş aralıklı ortalanır. Hızlı dikey fling hâlâ odayı değiştirir; sahne oynamaz. İzleyiciler artık sahnede değil, üstteki izleyici sayısından açılan listede.
 - **Oda başlığı (Figma):** kapak fotoğraflı oda rozeti + başlık + `ID:oda numarası`; sağ üstte izleyici sayısı ve en sağda çıkış X; alt satırda elmas toplamı, favori ve **taç = Katkı Listesi** (24 Saat / Toplam sekmeleri, ilk 3 kürsü, 4+ liste).

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api.dart';
+import '../widgets/anim_asset.dart';
 import '../services/session.dart';
 import '../services/error_log.dart';
 import '../widgets/common.dart';
@@ -198,7 +199,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   for (final i in items)
                     ListTile(
                       leading: Api.absoluteUrl(i['assetUrl'] as String?) != null && i['itemType'] == 'frame'
-                          ? Image.network(Api.absoluteUrl(i['assetUrl'] as String?)!, width: 40, height: 40, errorBuilder: (_, __, ___) => const Icon(Icons.image))
+                          ? SizedBox(width: 40, height: 40, child: AnimAsset(url: Api.absoluteUrl(i['assetUrl'] as String?)!, repeat: true))
                           : const Icon(Icons.auto_awesome),
                       title: Text((i['itemName'] ?? '').toString()),
                       subtitle: Text('${_typeNames[i['itemType']] ?? i['itemType']}${i['expiresAt'] != null ? ' · ${_date(i['expiresAt'])} tarihine kadar' : ''}'),

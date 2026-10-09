@@ -3,7 +3,7 @@ import express from 'express';
 import { query, tx } from '../database.js';
 import { requireAuth, requireStaff, requireSuperAdmin } from '../auth.js';
 import { supportMayCall, banEnd, mayActOnUser } from '../staff_logic.js';
-import { fail, uuid, bigAmount, positiveInt, text, oneOf, httpsUrl } from '../http.js';
+import { fail, uuid, bigAmount, positiveInt, text, oneOf, httpsUrl, assetUrl } from '../http.js';
 import { validateAgencyConfig } from '../agency_config.js';
 import { loadConfig, configJson, closePeriod, hostStatementJson, agencyStatementJson } from '../services/payouts.js';
 import { parsePeriodKey, previousPeriod } from '../settlement.js';
@@ -14,6 +14,7 @@ import { hub } from '../realtime.js';
 import { banIpPersist, unbanIp, listBans, securityStats } from '../firewall.js';
 import net from 'node:net';
 import { saveUpload, removeUpload, IMAGE_TYPES } from '../services/images.js';
+import { detectMedia, ensureVapc, mimeFor, MEDIA_MAX_BYTES } from '../services/media.js';
 
 export const router = Router();
 router.use(requireAuth, requireStaff);
@@ -271,25 +272,48 @@ router.post('/users/:userId/inventory', async (req, res) => {
 });
 
 // ---------------- Katalog (yalnızca yönetici) ----------------
+function guessFormat(url) {
+  const m = /\.([a-z0-9]{2,5})(\?|$)/i.exec(String(url ?? ''));
+  const e = (m?.[1] ?? '').toLowerCase();
+  return { mp4: 'mp4', svga: 'svga', json: 'lottie', webp: 'webp', gif: 'gif', png: 'png' }[e] ?? 'lottie';
+}
+router.post('/media', requireSuperAdmin, express.raw({ type: () => true, limit: MEDIA_MAX_BYTES }), async (req, res) => {
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || !buf.length) throw fail('Dosya gönderilmedi.');
+  const d = detectMedia(buf);
+  const alpha = req.query.alpha === 'right' ? 'right' : 'left';
+  let data = buf; let note = null;
+  if (d.kind === 'mp4') {
+    const r = ensureVapc(buf, alpha);
+    data = r.buf;
+    note = r.injected ? 'Şeffaflık ayarı eklendi.' : 'Dosyada şeffaflık ayarı zaten vardı.';
+  }
+  const ins = await query(
+    `INSERT INTO media_files(kind, mime, ext, size_bytes, data, meta, created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [d.kind, mimeFor(d.ext), d.ext, data.length, data, JSON.stringify(d.meta ?? {}), req.user.id],
+  );
+  const format = { mp4: 'mp4', svga: 'svga', json: 'lottie', webp: 'webp', gif: 'gif', png: 'png', jpg: 'png' }[d.kind];
+  res.status(201).json({ url: `/media/${ins.rows[0].id}.${d.ext}`, kind: d.kind, format, size: data.length, note });
+});
 router.post('/gifts', requireSuperAdmin, async (req, res) => {
   const r = await query(
     `INSERT INTO gifts(name, coin_price, icon_url, animation_url, animation_format, has_alpha, category) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [text(req.body?.name, 'Ad', { min: 2, max: 80, required: true }), bigAmount(req.body?.coinPrice, 'Fiyat').toString(),
-      httpsUrl(req.body?.iconUrl, 'İkon adresi'), httpsUrl(req.body?.animationUrl, 'Animasyon adresi'),
-      oneOf(req.body?.animationFormat ?? (/\.mp4(\?|$)/i.test(String(req.body?.animationUrl ?? '')) ? 'mp4' : 'lottie'), ['lottie', 'svga', 'mp4', 'webp'], 'Animasyon biçimi'), req.body?.hasAlpha !== false,
+      assetUrl(req.body?.iconUrl, 'İkon adresi'), assetUrl(req.body?.animationUrl, 'Animasyon adresi'),
+      oneOf(req.body?.animationFormat ?? guessFormat(req.body?.animationUrl), ['lottie', 'svga', 'mp4', 'webp', 'gif', 'png'], 'Animasyon biçimi'), req.body?.hasAlpha !== false,
       oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip'], 'Hediye sekmesi')],
   );
   res.status(201).json({ id: r.rows[0].id });
 });
 router.post('/frames', requireSuperAdmin, async (req, res) => {
   const r = await query(`INSERT INTO frames(name, image_url) VALUES($1,$2) RETURNING id`, [
-    text(req.body?.name, 'Ad', { min: 2, max: 100, required: true }), httpsUrl(req.body?.imageUrl, 'Görsel adresi') ?? (() => { throw fail('Görsel adresi gerekli.'); })()]);
+    text(req.body?.name, 'Ad', { min: 2, max: 100, required: true }), assetUrl(req.body?.imageUrl, 'Görsel adresi') ?? (() => { throw fail('Görsel adresi gerekli.'); })()]);
   res.status(201).json({ id: r.rows[0].id });
 });
 router.post('/entrance-effects', requireSuperAdmin, async (req, res) => {
   const r = await query(`INSERT INTO entrance_effects(name, animation_url, duration_ms) VALUES($1,$2,$3) RETURNING id`, [
     text(req.body?.name, 'Ad', { min: 2, max: 100, required: true }),
-    httpsUrl(req.body?.animationUrl, 'Animasyon adresi') ?? (() => { throw fail('Animasyon adresi gerekli.'); })(),
+    assetUrl(req.body?.animationUrl, 'Animasyon adresi') ?? (() => { throw fail('Animasyon adresi gerekli.'); })(),
     req.body?.durationMs === undefined ? 4000 : positiveInt(req.body.durationMs, 'Süre', 20000)]);
   res.status(201).json({ id: r.rows[0].id });
 });

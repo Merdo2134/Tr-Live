@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_vap_kit/flutter_vap_kit.dart';
-import 'package:lottie/lottie.dart';
 import '../services/api.dart';
 import '../services/socket_service.dart';
+import 'anim_asset.dart';
 import 'common.dart';
 
 /// Hediye şeridi ve giriş efektleri için üst katman.
@@ -82,35 +81,17 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     final a = _anims.removeAt(0);
     setState(() => _anim = {...a, 'seq': ++_animSeq});
     // Güvenlik süresi: oynatıcı bitiş bildirmese de ekran açık kalmasın.
-    final still = a['format'] != 'mp4' && a['format'] != 'lottie' && !(a['url'] as String).toLowerCase().split('?').first.endsWith('.mp4') && !(a['url'] as String).toLowerCase().split('?').first.endsWith('.json');
-    _animTimer = Timer(Duration(seconds: still ? 4 : 15), _nextAnim);
+    final still = !AnimAsset.reportsEnd(a['url'] as String, a['format'] as String);
+    _animTimer = Timer(Duration(seconds: still ? 4 : 20), _nextAnim);
   }
 
   Widget _buildAnim() {
     final a = _anim!;
-    final url = a['url'] as String;
-    final format = a['format'] as String;
-    final key = ValueKey(a['seq']);
-    final isLottie = format == 'lottie' || url.toLowerCase().split('?').first.endsWith('.json');
-    final isVideo = format == 'mp4' || url.toLowerCase().split('?').first.endsWith('.mp4');
-    Widget child;
-    if (isVideo) {
-      child = VapPlayer.network(url, key: key, fit: BoxFit.contain, onComplete: _nextAnim);
-    } else if (isLottie) {
-      child = Lottie.network(
-        url,
-        key: key,
-        repeat: false,
-        onLoaded: (c) {
-          _animTimer?.cancel();
-          _animTimer = Timer(c.duration + const Duration(milliseconds: 300), _nextAnim);
-        },
-        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-      );
-    } else {
-      child = Image.network(url, key: key, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const SizedBox.shrink());
-    }
-    return Positioned.fill(child: IgnorePointer(child: child));
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimAsset(url: a['url'] as String, format: a['format'] as String, key: ValueKey(a['seq']), onDone: _nextAnim),
+      ),
+    );
   }
 
   void _enqueue(Map<String, dynamic> e) {
@@ -221,7 +202,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       child: IgnorePointer(
         child: Stack(alignment: Alignment.center, children: [
           if (url != null)
-            Lottie.network(url, repeat: false, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+            AnimAsset(url: url),
           Positioned(
             bottom: 140,
             child: Material(

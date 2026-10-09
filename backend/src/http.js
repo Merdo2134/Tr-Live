@@ -64,6 +64,12 @@ export function httpsUrl(value, field = 'Adres') {
   return u.toString();
 }
 
+/** https adresi veya sunucuya yüklenmiş "/media/<id>.<uzantı>" yolu. */
+export function assetUrl(value, field = 'Adres') {
+  if (typeof value === 'string' && /^\/media\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/.test(value)) return value;
+  return httpsUrl(value, field);
+}
+
 export function oneOf(value, allowed, field) {
   if (!allowed.includes(value)) throw fail(`${field} geçersiz.`);
   return value;

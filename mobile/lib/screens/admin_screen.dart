@@ -1,9 +1,29 @@
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
 import '../widgets/common.dart';
 import 'admin_content.dart';
 import 'admin_payouts.dart';
+
+/// Telefondan dosya seçip sunucuya yükler. Sunucu türü dosyanın içinden anlar (svga, mp4, Lottie, webp, gif, png).
+/// [alpha]: yan yana şeffaf mp4'te şeffaflık maskesinin yeri ('left' / 'right').
+Future<Map<String, dynamic>?> pickAndUploadMedia(BuildContext context, {String alpha = 'left'}) async {
+  final r = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
+  if (r == null || r.files.isEmpty || !context.mounted) return null;
+  final Uint8List? bytes = r.files.first.bytes;
+  if (bytes == null || bytes.isEmpty) {
+    toast(context, 'Dosya okunamadı.', error: true);
+    return null;
+  }
+  if (bytes.length > 40 * 1024 * 1024) {
+    toast(context, 'Dosya 40 MB sınırını aşıyor.', error: true);
+    return null;
+  }
+  toast(context, 'Yükleniyor (${(bytes.length / 1048576).toStringAsFixed(1)} MB)…');
+  return guard(context, () => Api.postBytes('/api/admin/media', bytes, 'application/octet-stream', query: {'alpha': alpha}));
+}
 
 class AdminScreen extends StatelessWidget {
   const AdminScreen({super.key});
@@ -425,6 +445,7 @@ class _CatalogTab extends StatelessWidget {
     final icon = TextEditingController();
     final anim = TextEditingController();
     var format = 'auto';
+    var alphaSide = 'left';
     var category = 'popular';
     final ok = await showDialog<bool>(
       context: context,
@@ -435,8 +456,46 @@ class _CatalogTab extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               TextField(controller: name, decoration: const InputDecoration(labelText: 'Ad')),
               TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Coin fiyatı')),
-              TextField(controller: icon, decoration: const InputDecoration(labelText: 'İkon adresi (https)')),
-              TextField(controller: anim, decoration: const InputDecoration(labelText: 'Animasyon adresi (https, isteğe bağlı)')),
+              TextField(controller: icon, decoration: const InputDecoration(labelText: 'İkon adresi (https veya yüklenen dosya)')),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('İkonu telefondan yükle'),
+                  onPressed: () async {
+                    final m = await pickAndUploadMedia(c);
+                    if (m != null) setS(() => icon.text = m['url'].toString());
+                  },
+                ),
+              ),
+              TextField(controller: anim, decoration: const InputDecoration(labelText: 'Animasyon adresi (https veya yüklenen dosya)')),
+              Row(children: [
+                const Text('Şeffaflık:  ', style: TextStyle(color: Colors.white70)),
+                DropdownButton<String>(
+                  value: alphaSide,
+                  items: const [
+                    DropdownMenuItem(value: 'left', child: Text('Sol yarıda (siyah-beyaz)')),
+                    DropdownMenuItem(value: 'right', child: Text('Sağ yarıda (siyah-beyaz)')),
+                  ],
+                  onChanged: (v) => setS(() => alphaSide = v ?? 'left'),
+                ),
+              ]),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Animasyonu telefondan yükle'),
+                  onPressed: () async {
+                    final m = await pickAndUploadMedia(c, alpha: alphaSide);
+                    if (m == null) return;
+                    setS(() {
+                      anim.text = m['url'].toString();
+                      format = 'auto';
+                    });
+                    if (c.mounted) toast(c, 'Yüklendi: ${m['kind']} (${(((m['size'] as num?) ?? 0) / 1048576).toStringAsFixed(1)} MB). ${m['note'] ?? ''}');
+                  },
+                ),
+              ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 value: format,
@@ -445,7 +504,10 @@ class _CatalogTab extends StatelessWidget {
                   DropdownMenuItem(value: 'auto', child: Text('Otomatik (uzantıdan)')),
                   DropdownMenuItem(value: 'mp4', child: Text('Şeffaf MP4 (VAP)')),
                   DropdownMenuItem(value: 'lottie', child: Text('Lottie (.json)')),
-                  DropdownMenuItem(value: 'webp', child: Text('WebP / GIF')),
+                  DropdownMenuItem(value: 'svga', child: Text('SVGA')),
+                  DropdownMenuItem(value: 'webp', child: Text('WebP')),
+                  DropdownMenuItem(value: 'gif', child: Text('GIF')),
+                  DropdownMenuItem(value: 'png', child: Text('PNG')),
                 ],
                 onChanged: (v) => setS(() => format = v ?? 'auto'),
               ),
@@ -486,6 +548,59 @@ class _CatalogTab extends StatelessWidget {
     if (r != null && context.mounted) toast(context, 'Hediye eklendi. Kimlik: ${r['id']}');
   }
 
+  Future<void> _frameForm(BuildContext context) async {
+    final name = TextEditingController();
+    final url = TextEditingController();
+    var alphaSide = 'left';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => AlertDialog(
+          title: const Text('Çerçeve ekle'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(controller: name, decoration: const InputDecoration(labelText: 'Ad')),
+              TextField(controller: url, decoration: const InputDecoration(labelText: 'Görsel adresi (https veya yüklenen dosya)')),
+              Row(children: [
+                const Text('MP4 şeffaflık:  ', style: TextStyle(color: Colors.white70)),
+                DropdownButton<String>(
+                  value: alphaSide,
+                  items: const [
+                    DropdownMenuItem(value: 'left', child: Text('Sol yarıda')),
+                    DropdownMenuItem(value: 'right', child: Text('Sağ yarıda')),
+                  ],
+                  onChanged: (v) => setS(() => alphaSide = v ?? 'left'),
+                ),
+              ]),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Telefondan yükle (svga, mp4, webp, gif, json)'),
+                  onPressed: () async {
+                    final m = await pickAndUploadMedia(c, alpha: alphaSide);
+                    if (m == null) return;
+                    setS(() => url.text = m['url'].toString());
+                  },
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Ekle')),
+          ],
+        ),
+      ),
+    );
+    final body = {'name': name.text.trim(), 'imageUrl': url.text.trim()};
+    name.dispose();
+    url.dispose();
+    if (ok != true || !context.mounted) return;
+    final r = await guard(context, () => Api.post('/api/admin/frames', body));
+    if (r != null && context.mounted) toast(context, 'Çerçeve eklendi. Kimlik: ${r['id']}');
+  }
+
   Future<void> _create(BuildContext context, String title, List<String> labels, String path, Map<String, dynamic> Function(Map<String, String>) body) async {
     final f = await formDialog(context, title, labels);
     if (f == null || !context.mounted) return;
@@ -507,7 +622,7 @@ class _CatalogTab extends StatelessWidget {
       FilledButton.icon(
         icon: const Icon(Icons.filter_frames),
         label: const Text('Avatar çerçevesi ekle'),
-        onPressed: () => _create(context, 'Çerçeve ekle', ['Ad', 'Görsel adresi'], '/api/admin/frames', (f) => {'name': f['Ad'], 'imageUrl': f['Görsel adresi']}),
+        onPressed: () => _frameForm(context),
       ),
       const SizedBox(height: 8),
       FilledButton.icon(

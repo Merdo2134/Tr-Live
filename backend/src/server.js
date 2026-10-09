@@ -60,6 +60,15 @@ app.get(['/health', '/api/health'], async (req, res) => {
   }
 });
 
+app.get('/media/:file', async (req, res) => {
+  const m = /^([0-9a-f-]{36})\.[a-z0-9]{2,5}$/.exec(req.params.file);
+  if (!m) return res.status(404).end();
+  const r = await query('SELECT mime, data FROM media_files WHERE id = $1', [m[1]]);
+  if (!r.rowCount) return res.status(404).end();
+  res.set({ 'Content-Type': r.rows[0].mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'cross-origin' });
+  res.send(r.rows[0].data);
+});
+
 app.use('/uploads', express.static(config.uploadDir, {
   maxAge: '7d', index: false, dotfiles: 'deny',
   setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
