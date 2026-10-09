@@ -115,3 +115,10 @@ function shiftOffsets(buf, moovStart, moovSize, delta) {
   };
   walk(moovStart + 8, moovStart + moovSize);
 }
+
+/** GIF her zaman, WebP yalnızca animasyon bayrağı (VP8X) varsa hareketli sayılır. */
+export function isAnimatedImage(buf) {
+  if (buf.length > 6 && buf.toString('ascii', 0, 4) === 'GIF8') return 'gif';
+  if (buf.length > 30 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP' && buf.toString('ascii', 12, 16) === 'VP8X' && (buf[20] & 0x02)) return 'webp';
+  return null;
+}

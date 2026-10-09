@@ -4,7 +4,12 @@ export const HIDDEN_NAME = 'Gizli Kullanıcı';
 
 // "u" takma adlı users tablosu ile kullanılır.
 export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.public_id, u.display_name, u.avatar_url, u.is_hidden,
-  u.coin_level, u.gift_level, uw.level AS wip_level, wt.features AS wip_features`;
+  u.coin_level, u.gift_level, uw.level AS wip_level, wt.features AS wip_features,
+  (SELECT COALESCE(fr.image_url, fi.metadata->>'assetUrl') FROM inventory_items fi
+     LEFT JOIN frames fr ON fr.id::text = fi.item_key
+    WHERE fi.user_id = u.id AND fi.item_type = 'frame' AND fi.is_active = TRUE
+      AND (fi.expires_at IS NULL OR fi.expires_at > NOW()) AND COALESCE(fi.metadata->>'equipped' = 'true', FALSE)
+    ORDER BY fi.created_at DESC LIMIT 1) AS frame_url`;
 export const USER_PUBLIC_JOINS = `LEFT JOIN user_wip uw ON uw.user_id = u.id AND uw.is_active = TRUE AND uw.expires_at > NOW()
   LEFT JOIN wip_tiers wt ON wt.level = uw.level`;
 
@@ -14,7 +19,7 @@ export function publicUser(row, viewerId = null) {
   if (hidden) {
     return {
       id: row.id, publicId: null, username: HIDDEN_NAME, displayName: HIDDEN_NAME, avatarUrl: null,
-      coinLevel: row.coin_level, giftLevel: row.gift_level, wipLevel: null, nameColor: null, isHidden: true,
+      coinLevel: row.coin_level, giftLevel: row.gift_level, wipLevel: null, nameColor: null, frameUrl: null, isHidden: true,
     };
   }
   return {
@@ -27,6 +32,7 @@ export function publicUser(row, viewerId = null) {
     giftLevel: row.gift_level,
     wipLevel: row.wip_level ?? null,
     nameColor: row.wip_features?.nameColor ?? null,
+    frameUrl: row.frame_url ?? null,
     isHidden: Boolean(row.is_hidden),
   };
 }

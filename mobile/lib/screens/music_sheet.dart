@@ -16,7 +16,8 @@ Future<void> showMusicSheet(BuildContext context, {required String roomId, requi
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    showDragHandle: true,
+    backgroundColor: const Color(0xFF16112B),
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
     builder: (c) => SizedBox(
       height: MediaQuery.of(context).size.height * 0.8,
       child: _MusicPanel(roomId: roomId, canManage: canManage, canQueue: canQueue),
@@ -34,13 +35,12 @@ class _MusicPanel extends StatefulWidget {
   State<_MusicPanel> createState() => _MusicPanelState();
 }
 
-class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 3, vsync: this);
+class _MusicPanelState extends State<_MusicPanel> with TickerProviderStateMixin {
+  late final TabController _tabs = TabController(length: 2, vsync: this);
+  late final AnimationController _disc = AnimationController(vsync: this, duration: const Duration(seconds: 10));
   Timer? _tick;
-  final _search = TextEditingController();
   final _phoneSearch = TextEditingController();
-  int _libVersion = 0;
-  double? _dragging; // ilerleme çubuğu sürüklenirken
+    double? _dragging; // ilerleme çubuğu sürüklenirken
 
   final Set<String> _sending = {}; // yüklenmekte olan dosya yolları
 
@@ -58,7 +58,7 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
     LocalMusic.instance.stopPreview();
     _tick?.cancel();
     _tabs.dispose();
-    _search.dispose();
+    _disc.dispose();
     _phoneSearch.dispose();
     super.dispose();
   }
@@ -73,90 +73,133 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
   @override
   Widget build(BuildContext context) {
     return Column(children: [
-      TabBar(controller: _tabs, tabs: const [Tab(text: 'Çalan ve sıra'), Tab(text: 'Kütüphane'), Tab(text: 'Telefonum')]),
-      Expanded(child: TabBarView(controller: _tabs, children: [_nowPlaying(), _library(), _phone()])),
+      _player(),
+      TabBar(
+        controller: _tabs,
+        indicatorColor: Colors.pinkAccent,
+        labelColor: Colors.pinkAccent,
+        unselectedLabelColor: Colors.white60,
+        tabs: const [Tab(text: 'Müziklerim'), Tab(text: 'Sıra')],
+      ),
+      Expanded(child: TabBarView(controller: _tabs, children: [_phone(), _nowPlaying()])),
     ]);
+  }
+
+  /// Üstteki çalar kartı (Yoho tarzı): dönen plak, şarkı adı, ilerleme, kontroller; sağ üstte küçült.
+  Widget _player() {
+    return ValueListenableBuilder<Map<String, dynamic>?>(
+      valueListenable: MusicService.instance.state,
+      builder: (context, s, _) {
+        final track = mapOf(s?['track']);
+        final status = (s?['status'] ?? 'stopped').toString();
+        final playing = status == 'playing';
+        if (playing && !_disc.isAnimating) {
+          _disc.repeat();
+        } else if (!playing && _disc.isAnimating) {
+          _disc.stop();
+        }
+        final duration = ((track?['durationMs'] as num?) ?? 0).toDouble();
+        final position = (_dragging ?? MusicService.instance.currentPositionMs().toDouble()).clamp(0, duration > 0 ? duration : 1).toDouble();
+        final cover = Api.absoluteUrl(track?['coverUrl'] as String?);
+        Widget disc = Container(
+          width: 76,
+          height: 76,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.black, border: Border.all(color: Colors.white24, width: 4)),
+          child: ClipOval(
+            child: cover != null
+                ? Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, color: Colors.pinkAccent, size: 32))
+                : const Icon(Icons.music_note, color: Colors.pinkAccent, size: 32),
+          ),
+        );
+        return Container(
+          margin: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          padding: const EdgeInsets.fromLTRB(14, 10, 6, 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: const LinearGradient(colors: [Color(0xFF3A1C71), Color(0xFFD76D77)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+          ),
+          child: Column(children: [
+            Row(children: [
+              RotationTransition(turns: _disc, child: disc),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(track?['title']?.toString() ?? 'Şu an müzik çalmıyor', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                  Text((track?['artist'] ?? '').toString().isEmpty ? (playing ? 'Çalıyor' : 'Listeden bir şarkı seç') : track!['artist'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ]),
+              ),
+              IconButton(tooltip: 'Küçült', icon: const Icon(Icons.keyboard_arrow_down, size: 28), onPressed: () => Navigator.of(context).maybePop()),
+            ]),
+            if (track != null)
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(trackHeight: 3, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6), activeTrackColor: Colors.white, inactiveTrackColor: Colors.white30, thumbColor: Colors.white),
+                child: Row(children: [
+                  Text(_mmss(position), style: const TextStyle(fontSize: 11)),
+                  Expanded(
+                    child: Slider(
+                      value: position,
+                      max: duration > 0 ? duration : 1,
+                      onChangeStart: widget.canManage ? (v) => setState(() => _dragging = v) : null,
+                      onChanged: widget.canManage ? (v) => setState(() => _dragging = v) : null,
+                      onChangeEnd: widget.canManage
+                          ? (v) async {
+                              setState(() => _dragging = null);
+                              await _call(() => Api.post('$_base/seek', {'positionMs': v.round()}));
+                            }
+                          : null,
+                    ),
+                  ),
+                  Text(_mmss(duration), style: const TextStyle(fontSize: 11)),
+                ]),
+              ),
+            Row(children: [
+              ValueListenableBuilder<bool>(
+                valueListenable: MusicService.instance.muted,
+                builder: (_, muted, __) => IconButton(onPressed: () => MusicService.instance.setMuted(!muted), icon: Icon(muted ? Icons.volume_off : Icons.volume_up, size: 22)),
+              ),
+              Expanded(
+                child: ValueListenableBuilder<double>(
+                  valueListenable: MusicService.instance.volume,
+                  builder: (_, vol, __) => SliderTheme(
+                    data: SliderTheme.of(context).copyWith(trackHeight: 3, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5), activeTrackColor: Colors.white, inactiveTrackColor: Colors.white30, thumbColor: Colors.white),
+                    child: Slider(value: vol, onChanged: (v) => MusicService.instance.setVolume(v)),
+                  ),
+                ),
+              ),
+              if (widget.canManage) ...[
+                IconButton(
+                  iconSize: 36,
+                  onPressed: track == null ? null : () => _call(() => playing ? Api.post('$_base/pause') : Api.post('$_base/play')),
+                  icon: Icon(playing ? Icons.pause_circle_filled : Icons.play_circle_filled),
+                ),
+                IconButton(tooltip: 'Sonraki', onPressed: () => _call(() => Api.post('$_base/next')), icon: const Icon(Icons.skip_next, size: 28)),
+                IconButton(tooltip: 'Durdur', onPressed: track == null ? null : () => _call(() => Api.post('$_base/stop')), icon: const Icon(Icons.stop_circle_outlined, size: 26)),
+              ],
+            ]),
+            if (!widget.canManage)
+              const Padding(padding: EdgeInsets.only(bottom: 6), child: Text('Müziği oda yetkilileri yönetir; sen sadece sesini ayarlarsın.', style: TextStyle(color: Colors.white70, fontSize: 11))),
+            ValueListenableBuilder<String?>(
+              valueListenable: MusicService.instance.error,
+              builder: (_, e, __) => e == null ? const SizedBox.shrink() : Text(e, style: const TextStyle(color: Colors.yellowAccent, fontSize: 12)),
+            ),
+          ]),
+        );
+      },
+    );
   }
 
   Widget _nowPlaying() {
     return ValueListenableBuilder<Map<String, dynamic>?>(
       valueListenable: MusicService.instance.state,
       builder: (context, s, _) {
-        final track = mapOf(s?['track']);
-        final status = (s?['status'] ?? 'stopped').toString();
         final queue = listOf(s?['queue']);
-        final duration = ((track?['durationMs'] as num?) ?? 0).toDouble();
-        final position = (_dragging ?? MusicService.instance.currentPositionMs().toDouble()).clamp(0, duration > 0 ? duration : 1).toDouble();
-        final cover = Api.absoluteUrl(track?['coverUrl'] as String?);
-        return ListView(padding: const EdgeInsets.all(16), children: [
-          Row(children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: cover != null
-                  ? Image.network(cover, width: 72, height: 72, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox(width: 72, height: 72, child: Icon(Icons.music_note, size: 32)))
-                  : const SizedBox(width: 72, height: 72, child: Icon(Icons.music_note, size: 32)),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(track?['title']?.toString() ?? 'Şu an müzik çalmıyor', style: Theme.of(context).textTheme.titleMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
-                if ((track?['artist'] ?? '').toString().isNotEmpty) Text(track!['artist'].toString(), style: const TextStyle(color: Colors.white60)),
-                Text(status == 'playing' ? 'Çalıyor' : status == 'paused' ? 'Duraklatıldı' : 'Durdu', style: const TextStyle(color: Colors.white54, fontSize: 12)),
-              ]),
-            ),
-          ]),
-          if (track != null) ...[
-            Slider(
-              value: position,
-              max: duration > 0 ? duration : 1,
-              onChangeStart: widget.canManage ? (v) => setState(() => _dragging = v) : null,
-              onChanged: widget.canManage ? (v) => setState(() => _dragging = v) : null,
-              onChangeEnd: widget.canManage
-                  ? (v) async {
-                      setState(() => _dragging = null);
-                      await _call(() => Api.post('$_base/seek', {'positionMs': v.round()}));
-                    }
-                  : null,
-            ),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_mmss(position)), Text(_mmss(duration))]),
-          ],
-          if (widget.canManage)
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              IconButton.filled(
-                iconSize: 32,
-                onPressed: () => _call(() => status == 'playing' ? Api.post('$_base/pause') : Api.post('$_base/play')),
-                icon: Icon(status == 'playing' ? Icons.pause : Icons.play_arrow),
-              ),
-              const SizedBox(width: 12),
-              IconButton.filledTonal(tooltip: 'Sonraki', onPressed: () => _call(() => Api.post('$_base/next')), icon: const Icon(Icons.skip_next)),
-              const SizedBox(width: 12),
-              IconButton.filledTonal(tooltip: 'Durdur', onPressed: track == null ? null : () => _call(() => Api.post('$_base/stop')), icon: const Icon(Icons.stop)),
-            ])
-          else
-            const Padding(padding: EdgeInsets.only(top: 8), child: Text('Müziği oda yetkilileri yönetir. Siz yalnızca kendi ses seviyenizi ayarlayabilirsiniz.', style: TextStyle(color: Colors.white54, fontSize: 12))),
-          const SizedBox(height: 8),
-          ValueListenableBuilder<bool>(
-            valueListenable: MusicService.instance.muted,
-            builder: (_, muted, __) => ValueListenableBuilder<double>(
-              valueListenable: MusicService.instance.volume,
-              builder: (_, vol, __) => Row(children: [
-                IconButton(onPressed: () => MusicService.instance.setMuted(!muted), icon: Icon(muted ? Icons.volume_off : Icons.volume_up)),
-                Expanded(child: Slider(value: vol, onChanged: (v) => MusicService.instance.setVolume(v))),
-              ]),
-            ),
-          ),
-          ValueListenableBuilder<String?>(
-            valueListenable: MusicService.instance.error,
-            builder: (_, e, __) => e == null ? const SizedBox.shrink() : Text(e, style: const TextStyle(color: Colors.redAccent)),
-          ),
-          const Divider(),
-          Text('Sıradakiler (${queue.length})', style: Theme.of(context).textTheme.titleSmall),
-          if (queue.isEmpty) const Padding(padding: EdgeInsets.all(12), child: Text('Sıra boş. Kütüphane sekmesinden şarkı ekleyin.')),
+        if (queue.isEmpty) return const Center(child: Text('Sıra boş. Müziklerim sekmesinden şarkı ekle.', style: TextStyle(color: Colors.white54)));
+        return ListView(children: [
           for (final q in queue)
             ListTile(
               dense: true,
-              leading: const Icon(Icons.queue_music),
-              title: Text((mapOf(q['track'])?['title'] ?? '').toString()),
+              leading: const Icon(Icons.queue_music, color: Colors.pinkAccent),
+              title: Text((mapOf(q['track'])?['title'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text((mapOf(q['track'])?['artist'] ?? '').toString()),
               trailing: (widget.canManage || q['addedBy'] == Session.id)
                   ? IconButton(icon: const Icon(Icons.close), onPressed: () => _call(() => Api.delete('$_base/queue/${q['id']}')))
@@ -166,7 +209,6 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
       },
     );
   }
-
 
   Future<void> _addFiles() async {
     try {
@@ -270,47 +312,5 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
         ]);
       },
     );
-  }
-
-  Widget _library() {
-    return Column(children: [
-      Padding(
-        padding: const EdgeInsets.all(12),
-        child: TextField(
-          controller: _search,
-          textInputAction: TextInputAction.search,
-          onSubmitted: (_) => setState(() => _libVersion++),
-          decoration: InputDecoration(
-            hintText: 'Şarkı veya sanatçı ara',
-            prefixIcon: const Icon(Icons.search),
-            border: const OutlineInputBorder(),
-            suffixIcon: IconButton(icon: const Icon(Icons.arrow_forward), onPressed: () => setState(() => _libVersion++)),
-          ),
-        ),
-      ),
-      if (!widget.canQueue && !widget.canManage)
-        const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text('Şarkı eklemek için mikrofonda olmalısınız.', style: TextStyle(color: Colors.white54))),
-      Expanded(
-        child: AsyncBody<List<Map<String, dynamic>>>(
-          key: ValueKey('$_libVersion'),
-          load: () async => listOf((await Api.get('/api/music/tracks', query: {'q': _search.text.trim()}))['tracks']),
-          builder: (context, tracks, reload) => tracks.isEmpty
-              ? const Center(child: Text('Kütüphanede şarkı yok.'))
-              : ListView(children: [
-                  for (final t in tracks)
-                    ListTile(
-                      leading: const Icon(Icons.music_note),
-                      title: Text((t['title'] ?? '').toString()),
-                      subtitle: Text('${t['artist'] ?? ''} · ${_mmss((t['durationMs'] as num?) ?? 0)}'),
-                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                        if (widget.canManage) IconButton(tooltip: 'Hemen çal', icon: const Icon(Icons.play_circle_outline), onPressed: () => _call(() => Api.post('$_base/play', {'trackId': t['id']}))),
-                        if (widget.canManage || widget.canQueue)
-                          IconButton(tooltip: 'Sıraya ekle', icon: const Icon(Icons.playlist_add), onPressed: () => _call(() => Api.post('$_base/queue', {'trackId': t['id']}), done: 'Sıraya eklendi.')),
-                      ]),
-                    ),
-                ]),
-        ),
-      ),
-    ]);
   }
 }

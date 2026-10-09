@@ -6,8 +6,10 @@ import crypto from 'node:crypto';
 import { query, tx } from '../database.js';
 import { requireAuth, checkPassword, hashPassword, passwordRules } from '../auth.js';
 import { fail, text, oneOf, httpsUrl } from '../http.js';
+import { levelInfo } from '../levels.js';
 import { loadProfile } from '../services/profile.js';
-import { activeWip } from '../services/wip.js';
+import { activeWip, featuresFor } from '../services/wip.js';
+import { isAnimatedImage, mimeFor } from '../services/media.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 import { config } from '../config.js';
 import { cleanPublic } from '../safe_text.js';
@@ -56,7 +58,7 @@ router.patch('/', async (req, res) => {
   }
   if (b.country !== undefined) set('country', text(b.country, 'Ülke', { max: 60 }));
   if (b.city !== undefined) set('city', text(b.city, 'Şehir', { max: 60 }));
-  if (b.avatarUrl !== undefined) set('avatar_url', b.avatarUrl === null ? null : httpsUrl(b.avatarUrl, 'Avatar adresi'));
+  if (b.avatarUrl !== undefined) { set('avatar_url', b.avatarUrl === null ? null : httpsUrl(b.avatarUrl, 'Avatar adresi')); set('avatar_animated', false); set('static_avatar_url', null); }
   if (b.coverUrl !== undefined) set('cover_url', b.coverUrl === null ? null : httpsUrl(b.coverUrl, 'Kapak adresi'));
 
   if (sets.length) {
@@ -80,24 +82,50 @@ async function removeOldUpload(url) {
   try { await fs.unlink(path.join(config.uploadDir, file)); } catch (_) { /* yoksay */ }
 }
 
-function imageUpload(column) {
-  const parser = express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' });
+function imageUpload(column, allowAnimated = false) {
+  const types = allowAnimated ? [...Object.keys(IMAGE_TYPES), 'image/gif'] : Object.keys(IMAGE_TYPES);
+  const parser = express.raw({ type: types, limit: allowAnimated ? '6mb' : '3mb' });
   return [parser, async (req, res) => {
     const buf = req.body;
     if (!Buffer.isBuffer(buf) || !buf.length) throw fail('Görsel gönderilmedi (png, jpeg veya webp).');
-    const kind = detectImage(buf);
-    if (!kind || kind !== req.headers['content-type']?.split(';')[0]) throw fail('Görsel biçimi geçersiz.');
-    await fs.mkdir(config.uploadDir, { recursive: true });
-    const name = `${crypto.randomUUID()}.${IMAGE_TYPES[kind]}`;
-    await fs.writeFile(path.join(config.uploadDir, name), buf);
-    const url = `/uploads/${name}`;
-    const old = (await query(`SELECT ${column} AS url FROM users WHERE id = $1`, [req.user.id])).rows[0]?.url;
-    await query(`UPDATE users SET ${column} = $1, updated_at = NOW() WHERE id = $2`, [url, req.user.id]);
-    await removeOldUpload(old);
-    res.json({ url });
+    const animated = allowAnimated ? isAnimatedImage(buf) : null;
+    let url;
+    if (animated) {
+      // Hareketli profil fotoğrafı: WIP 5 özelliği; veritabanında saklanır (sunucu yenilense de kaybolmaz).
+      if (!(await featuresFor(req.user.id)).animatedAvatar) throw fail('Hareketli profil fotoğrafı WIP 5 özelliğidir.', 403);
+      if (buf.length > 5 * 1024 * 1024) throw fail('Hareketli fotoğraf 5 MB’tan küçük olmalı.');
+      const r = await query(
+        `INSERT INTO media_files(kind, mime, ext, size_bytes, data, created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [animated, mimeFor(animated), animated, buf.length, buf, req.user.id],
+      );
+      url = `/media/${r.rows[0].id}.${animated}`;
+      // Önceki sabit fotoğraf yedeklenir; WIP 5 bitince ona dönülür.
+      await query(
+        `UPDATE users SET static_avatar_url = CASE WHEN avatar_animated THEN static_avatar_url ELSE avatar_url END, avatar_animated = TRUE, avatar_url = $1, updated_at = NOW() WHERE id = $2`,
+        [url, req.user.id],
+      );
+      return res.json({ url, animated: true });
+    } else {
+      const kind = detectImage(buf);
+      if (!kind || kind !== req.headers['content-type']?.split(';')[0]) throw fail('Görsel biçimi geçersiz.');
+      if (buf.length > 3 * 1024 * 1024) throw fail('Görsel 3 MB’tan küçük olmalı.');
+      await fs.mkdir(config.uploadDir, { recursive: true });
+      const name = `${crypto.randomUUID()}.${IMAGE_TYPES[kind]}`;
+      await fs.writeFile(path.join(config.uploadDir, name), buf);
+      url = `/uploads/${name}`;
+    }
+    const old = (await query(`SELECT ${column} AS url, static_avatar_url FROM users WHERE id = $1`, [req.user.id])).rows[0];
+    if (column === 'avatar_url') {
+      await query(`UPDATE users SET avatar_url = $1, avatar_animated = FALSE, static_avatar_url = NULL, updated_at = NOW() WHERE id = $2`, [url, req.user.id]);
+      await removeOldUpload(old?.static_avatar_url);
+    } else {
+      await query(`UPDATE users SET ${column} = $1, updated_at = NOW() WHERE id = $2`, [url, req.user.id]);
+    }
+    await removeOldUpload(old?.url);
+    res.json({ url, animated: false });
   }];
 }
-router.put('/avatar', ...imageUpload('avatar_url'));
+router.put('/avatar', ...imageUpload('avatar_url', true));
 router.put('/cover', ...imageUpload('cover_url'));
 
 router.post('/password', async (req, res) => {
@@ -178,6 +206,113 @@ router.get('/wallet', async (req, res) => {
       diamondAmount: String(x.diamond_amount ?? 0), description: x.description, createdAt: x.created_at,
     })),
   });
+});
+
+// ---- Gelir Merkezi: yayın özeti (Europe/Istanbul gün/ay sınırları) ----
+const TZ = 'Europe/Istanbul';
+function monthParam(v) {
+  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(String(v ?? ''));
+  if (m) return `${m[1]}-${m[2]}`;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
+}
+async function earningsBlock(userId, from, to) {
+  // from/to: Istanbul yerel zaman damgası (metin) — yarı açık aralık
+  const gifts = await query(
+    `SELECT COALESCE(r.room_type, 'audio') AS t, COALESCE(SUM(g.coin_amount), 0)::text AS d
+     FROM gift_transactions g LEFT JOIN rooms r ON r.id = g.room_id
+     WHERE g.receiver_id = $1 AND g.sender_id <> g.receiver_id
+       AND g.created_at >= ($2::timestamp AT TIME ZONE '${TZ}') AND g.created_at < ($3::timestamp AT TIME ZONE '${TZ}')
+     GROUP BY 1`,
+    [userId, from, to],
+  );
+  const by = Object.fromEntries(gifts.rows.map((x) => [x.t, BigInt(x.d)]));
+  const video = by.video ?? 0n;
+  const audio = Object.entries(by).filter(([k]) => k !== 'video').reduce((a, [, v]) => a + v, 0n);
+  const mic = (await query(
+    `SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (LEAST(COALESCE(ended_at, NOW()), ($3::timestamp AT TIME ZONE '${TZ}')) - GREATEST(started_at, ($2::timestamp AT TIME ZONE '${TZ}'))))), 0)::bigint AS secs,
+            COUNT(DISTINCT (GREATEST(started_at, ($2::timestamp AT TIME ZONE '${TZ}')) AT TIME ZONE '${TZ}')::date)::int AS days
+     FROM mic_sessions WHERE user_id = $1 AND started_at < ($3::timestamp AT TIME ZONE '${TZ}') AND COALESCE(ended_at, NOW()) > ($2::timestamp AT TIME ZONE '${TZ}')`,
+    [userId, from, to],
+  )).rows[0];
+  return {
+    totalDiamonds: String(video + audio), videoDiamonds: String(video), audioDiamonds: String(audio),
+    activeDays: mic.days, activeMinutes: Math.floor(Number(mic.secs) / 60),
+  };
+}
+
+router.get('/earnings/summary', async (req, res) => {
+  const month = monthParam(req.query.month);
+  const [y, m] = month.split('-').map(Number);
+  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+  const monthly = await earningsBlock(req.user.id, `${month}-01 00:00:00`, `${next}-01 00:00:00`);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
+  const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date(Date.now() + 86400e3));
+  const daily = await earningsBlock(req.user.id, `${today} 00:00:00`, `${tomorrow} 00:00:00`);
+  res.json({ month, today, monthly, daily });
+});
+
+// Canlı yayın geçmişi (video/sesli): mikrofonda geçirilen oturumlar ve o oturumda alınan elmas.
+router.get('/earnings/history', async (req, res) => {
+  const type = req.query.type === 'video' ? 'video' : 'audio';
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const r = await query(
+    `SELECT s.started_at, s.ended_at,
+            EXTRACT(EPOCH FROM (COALESCE(s.ended_at, NOW()) - s.started_at))::bigint AS secs,
+            (SELECT COALESCE(SUM(g.coin_amount), 0)::text FROM gift_transactions g
+              WHERE g.receiver_id = s.user_id AND g.sender_id <> g.receiver_id AND g.room_id = s.room_id
+                AND g.created_at >= s.started_at AND g.created_at < COALESCE(s.ended_at, NOW())) AS diamonds
+     FROM mic_sessions s JOIN rooms rm ON rm.id = s.room_id
+     WHERE s.user_id = $1 AND (CASE WHEN rm.room_type = 'video' THEN 'video' ELSE 'audio' END) = $2
+     ORDER BY s.started_at DESC LIMIT 10 OFFSET $3`,
+    [req.user.id, type, offset],
+  );
+  const totals = (await query(
+    `SELECT COUNT(DISTINCT (s.started_at AT TIME ZONE '${TZ}')::date)::int AS days,
+            COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(s.ended_at, NOW()) - s.started_at))), 0)::bigint AS secs
+     FROM mic_sessions s JOIN rooms rm ON rm.id = s.room_id
+     WHERE s.user_id = $1 AND (CASE WHEN rm.room_type = 'video' THEN 'video' ELSE 'audio' END) = $2`,
+    [req.user.id, type],
+  )).rows[0];
+  const dia = (await query(
+    `SELECT COALESCE(SUM(g.coin_amount), 0)::text AS d FROM gift_transactions g LEFT JOIN rooms rm ON rm.id = g.room_id
+     WHERE g.receiver_id = $1 AND g.sender_id <> g.receiver_id AND (CASE WHEN rm.room_type = 'video' THEN 'video' ELSE 'audio' END) = $2`,
+    [req.user.id, type],
+  )).rows[0].d;
+  res.json({
+    type, offset, hasMore: r.rows.length === 10,
+    totals: { activeDays: totals.days, minutes: Math.floor(Number(totals.secs) / 60), diamonds: dia },
+    sessions: r.rows.map((x) => ({ startedAt: x.started_at, endedAt: x.ended_at, seconds: Number(x.secs), diamonds: x.diamonds })),
+  });
+});
+
+// Seviye Merkezi: kullanıcı seviyesi (gönderilen coin) ve yayıncı seviyesi (alınan elmas), 160 kademe.
+router.get('/levels', async (req, res) => {
+  const u = (await query(`SELECT total_sent_coins, total_received_diamonds FROM users WHERE id = $1`, [req.user.id])).rows[0];
+  const user = levelInfo(u.total_sent_coins);
+  const broadcaster = levelInfo(u.total_received_diamonds);
+  // Eski kayıtlarla uyuşmazlık varsa kendini düzelt.
+  await query(`UPDATE users SET coin_level = $2, gift_level = $3 WHERE id = $1 AND (coin_level <> $2 OR gift_level <> $3)`, [req.user.id, user.level, broadcaster.level]);
+  res.json({ user, broadcaster });
+});
+
+// Kırmızı rozetler (yeni ziyaretçi, yeni takipçi, bekleyen arkadaş isteği).
+router.get('/badges', async (req, res) => {
+  const r = await query(
+    `SELECT (SELECT COUNT(*)::int FROM profile_visitors WHERE profile_user_id = $1 AND last_visited_at > u.visitors_seen_at) AS visitors,
+            (SELECT COUNT(*)::int FROM follows WHERE followed_id = $1 AND created_at > u.followers_seen_at) AS followers,
+            (SELECT COUNT(*)::int FROM friend_requests WHERE target_id = $1 AND status = 'pending') AS friends
+     FROM users u WHERE u.id = $1`,
+    [req.user.id],
+  );
+  const x = r.rows[0] ?? { visitors: 0, followers: 0, friends: 0 };
+  res.json({ visitors: x.visitors, followers: x.followers, friends: x.friends, total: x.visitors + x.followers + x.friends });
+});
+
+// Liste açılınca rozet sıfırlanır.
+router.post('/seen', async (req, res) => {
+  const kind = oneOf(req.body?.kind, ['visitors', 'followers'], 'Tür');
+  await query(`UPDATE users SET ${kind}_seen_at = NOW() WHERE id = $1`, [req.user.id]);
+  res.json({ ok: true });
 });
 
 // Profil ziyaretçileri: sayı herkese açık, liste WIP kademesine bağlı (viewVisitors).

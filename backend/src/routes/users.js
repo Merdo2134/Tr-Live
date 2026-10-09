@@ -33,7 +33,7 @@ router.get('/:userId/card', async (req, res) => {
   const targetId = uuid(req.params.userId, 'Kullanıcı');
   const t = (await query(`SELECT id, is_hidden FROM users WHERE id = $1 AND account_status <> 'deleted'`, [targetId])).rows[0];
   if (!t) throw fail('Kullanıcı bulunamadı.', 404);
-  if (t.is_hidden && targetId !== req.user.id) return res.json({ supporters: [], medals: [] });
+  if (t.is_hidden && targetId !== req.user.id) return res.json({ supporters: [], medals: [], gifts: [] });
   const sup = await query(
     `SELECT sender_id, SUM(coin_amount)::text AS coins FROM gift_transactions
      WHERE receiver_id = $1 AND sender_id <> $1 GROUP BY sender_id ORDER BY SUM(coin_amount) DESC LIMIT 5`,
@@ -46,7 +46,14 @@ router.get('/:userId/card', async (req, res) => {
      ORDER BY created_at DESC LIMIT 12`,
     [targetId],
   );
+  // Başarılar: en çok alınan hediyeler (adet).
+  const gifts = await query(
+    `SELECT g.name, g.icon_url, SUM(t.quantity)::text AS qty FROM gift_transactions t JOIN gifts g ON g.id = t.gift_id
+     WHERE t.receiver_id = $1 GROUP BY g.id, g.name, g.icon_url ORDER BY SUM(t.quantity) DESC LIMIT 24`,
+    [targetId],
+  );
   res.json({
+    gifts: gifts.rows.map((g) => ({ name: g.name, iconUrl: g.icon_url, quantity: g.qty })),
     supporters: sup.rows.filter((x) => users.has(x.sender_id)).map((x) => ({ user: publicUser(users.get(x.sender_id), req.user.id), coins: x.coins })),
     medals: medals.rows.map((m) => ({ name: m.item_name, assetUrl: m.asset_url })),
   });

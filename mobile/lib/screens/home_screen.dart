@@ -7,12 +7,12 @@ import '../widgets/room_card.dart';
 import '../widgets/room_theme.dart';
 import '../widgets/seat_picker.dart';
 import '../services/api.dart';
+import '../widgets/drag_bubble.dart';
 import '../services/inbox_service.dart';
 import '../services/room_dock.dart';
 import 'discover_screen.dart';
 import '../widgets/common.dart';
 import '../widgets/gift_ribbon.dart';
-import 'family_screen.dart';
 import 'feed_screen.dart';
 import 'leaderboard_screen.dart';
 import 'messages_screen.dart';
@@ -82,24 +82,41 @@ class _HomeScreenState extends State<HomeScreen> {
     ]);
   }
 
+  static final ValueNotifier<Offset?> _roomBubblePos = ValueNotifier<Offset?>(null);
+
+  /// Küçültülmüş oda: sürüklenebilir yuvarlak balon. Dokununca büyür, sağ üstteki X odadan çıkarır.
   Widget _miniBar(RoomRequest req) {
-    return Positioned(
-      left: 12,
-      right: 12,
-      bottom: 88,
-      child: Material(
-        elevation: 6,
-        borderRadius: BorderRadius.circular(16),
-        color: Theme.of(context).colorScheme.primaryContainer,
-        child: ListTile(
-          dense: true,
-          leading: const Icon(Icons.graphic_eq),
-          title: Text(req.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: const Text('Oda açık · dokunarak büyüt'),
-          onTap: RoomDock.expand,
-          trailing: IconButton(tooltip: 'Odadan ayrıl', icon: const Icon(Icons.close), onPressed: () => RoomDock.exitHandler?.call()),
+    final initial = req.name.trim().isEmpty ? '?' : req.name.trim().characters.first.toUpperCase();
+    return DragBubble(
+      pos: _roomBubblePos,
+      size: 64,
+      initial: const Offset(-1, -170),
+      onTap: RoomDock.expand,
+      child: Stack(clipBehavior: Clip.none, children: [
+        Container(
+          width: 64,
+          height: 64,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(colors: [Color(0xFF7C4DFF), Color(0xFFFF4081)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 8)],
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.graphic_eq, color: Colors.white, size: 22),
+            Text(initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15)),
+          ]),
         ),
-      ),
+        Positioned(
+          right: -4,
+          top: -4,
+          child: GestureDetector(
+            onTap: () => RoomDock.exitHandler?.call(),
+            child: const CircleAvatar(radius: 11, backgroundColor: Colors.black87, child: Icon(Icons.close, size: 14, color: Colors.white)),
+          ),
+        ),
+      ]),
     );
   }
 
@@ -160,7 +177,16 @@ class _HomeScreenState extends State<HomeScreen> {
             builder: (_, n, __) => Badge(label: Text('$n'), isLabelVisible: n > 0, child: Icon(_index == 3 ? Icons.chat_bubble : Icons.chat_bubble_outline, color: _index == 3 ? Pal.cyan : Pal.textDim, size: 26)),
           ),
         ),
-        item(4, Icons.person_outline, Icons.person, 'Profil'),
+        item(
+          4,
+          Icons.person_outline,
+          Icons.person,
+          'Profil',
+          badge: ValueListenableBuilder<Map<String, int>>(
+            valueListenable: Inbox.badges,
+            builder: (_, b, __) => Badge(smallSize: 9, isLabelVisible: (b['total'] ?? 0) > 0, child: Icon(_index == 4 ? Icons.person : Icons.person_outline, color: _index == 4 ? Pal.cyan : Pal.textDim, size: 26)),
+          ),
+        ),
       ])),
     );
   }
@@ -409,8 +435,6 @@ class RoomsTabState extends State<RoomsTab> {
           icon: const Icon(Icons.more_vert, color: Pal.text),
           onSelected: (v) {
             switch (v) {
-              case 'family':
-                Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('Aile')), body: const FamilyScreen())));
               case 'fav':
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()));
               case 'code':
@@ -420,7 +444,6 @@ class RoomsTabState extends State<RoomsTab> {
             }
           },
           itemBuilder: (_) => const [
-            PopupMenuItem(value: 'family', child: ListTile(leading: Icon(Icons.groups), title: Text('Aile'), dense: true)),
             PopupMenuItem(value: 'fav', child: ListTile(leading: Icon(Icons.star), title: Text('Favoriler ve son girilenler'), dense: true)),
             PopupMenuItem(value: 'code', child: ListTile(leading: Icon(Icons.vpn_key), title: Text('Gizli odaya kodla gir'), dense: true)),
             PopupMenuItem(value: 'user', child: ListTile(leading: Icon(Icons.person_search), title: Text('Kullanıcı ara'), dense: true)),

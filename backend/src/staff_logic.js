@@ -7,6 +7,9 @@ const SUPPORT_ROUTES = [
   ['POST', /^\/users\/[^/]+\/display-name$/],
   ['POST', /^\/users\/[^/]+\/avatar$/],
   ['GET', /^\/me\/permissions$/],
+  ['GET', /^\/support\/threads$/],
+  ['GET', /^\/support\/[^/]+$/],
+  ['POST', /^\/support\/[^/]+\/reply$/],
 ];
 
 export function supportMayCall(method, path) {

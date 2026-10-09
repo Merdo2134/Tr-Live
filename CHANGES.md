@@ -1,4 +1,84 @@
+## v2.29.0
+- Seviye Merkezi: Yayıncı / Kullanıcı seviyesi geçişi, 160 kademeli seviye eğrisi, Mevcut/Gerekli Exp, Ayrıcalıklar tablosu (ödül sütunu henüz boş).
+- Yükleme Merkezi (Coins; Gümüş yok): bakiye, coin paketleri (7.000 / 42,99₺ vb.), ödeme yöntemi listesi (ödeme altyapısı henüz bağlı değil uyarısı). Profildeki "Coins Yükleme" kartı buraya açılır.
+- Müşteri Hizmetleri Merkezi: konu kutuları + çevrimiçi sohbet (yalnızca yazı). Profilin en üstündeki kulaklık simgesinden açılır.
+- Yönetim paneli: "Destek" sekmesi (yönetici + yardımcı admin yanıtlar), "Coin paketleri", hediye / çerçeve / mağaza ürünü SİLME (geçmişte kullanıldıysa gizlenir).
+- Hediye eklerken animasyon yüklenince ikon, animasyonun ilk karesinden otomatik PNG olarak oluşturulur (önizlemesi formda görünür; oda hediye panelinde de bu ikon kullanılır).
+- WIP 5 adı ateşli git-gel, WIP 4 adı mavi buzlu hareketli renk (oda, koltuk, sohbet, profil).
+- Sunucu: migration 024 (seviye yeniden hesap, coin_packages, support_messages), /api/support, /api/store/coin-packages, /api/me/levels.
+
+## v2.28.1
+- Yönetim paneli: kullanıcı ID (public ID), kullanıcı adı veya adla bulunur; sonuçta ve kartta ID görünür.
+- "Öğe ver": kategori seç (Çerçeve, Rozet, Sohbet Balonu, Giriş Efekti, Mini Kart, Mikrofon Dalgası, Araç) → tüm öğeler önizlemeyle listelenir → seç, gün yaz (0 = süresiz) → Gönder. Elle anahtar yazmak kalktı.
+- Mağaza ürünü eklerken "Mağazada satılsın" seçeneği ve Rozet kategorisi (rozetler yalnızca yönetici verir). "Mağaza ürünleri (aç/kapat)" listesi.
+- Sunucu: migration 023, /api/admin/grantables, /api/admin/users/:id/grant.
+
+## v2.28.0
+- Mağaza (AVM): kategori çubuğu (Çerçeve, Sohbet Balonu, Özel Giriş, Mini Kart, Mikrofon Dalgası, Araç), Coins Mağazası, süre/fiyat, Önizleme, Satın al ve arkadaşa Gönder. Puan Mağazası "yakında".
+- Görünüm (eski envanter): kategori çubuğu, Etkinleştir / Kaldır, son kullanma tarihi.
+- Gelir Merkezi yeniden tasarlandı: mevcut elmas, Elmas Bozdurma, Para Çekme, son kazançlar, Canlı Kayıt.
+- Yayın Özeti (aylık ay seçmeli + günlük), Canlı Yayın Geçmişi (video/sesli sekmeleri, sayfalı tablo), Para Çekme sayfası.
+- Yönetim paneli: "Mağaza ürünü ekle" (yükleme + önizleme).
+- Sunucu: migration 022 (store_items), /api/store, /api/admin/store/items, /api/me/earnings/summary ve /history.
+- Not: sohbet balonu, mikrofon dalgası, mini kart ve araç ürünleri alınıp etkinleştirilebilir; uygulamada görsel etkileri sonraki sürümde.
+
+## v2.27.0
+- Profil ekranı Figma'ya göre yenilendi: ortalı çerçeveli avatar, kopyalanabilir ID, Takip edilen / Fanlar / Ziyaretçiler / Arkadaşlar sayaçları, Coins ve Gelir Merkezi kartları, Leveller · Aile · WIP · Görünüm kısayolları, Mağaza · Yayıncı Merkezi · Ajans Merkezi · Günlük Görevler listesi. Ayarlar sağ üstteki dişliye taşındı.
+- Envanter adı "Görünüm" oldu. Aile ve Günlük Görevler profile taşındı (ana sayfa menüsünden ve oda araçlarından kaldırıldı).
+- Mağaza sayfası eklendi (içerik sonra eklenecek).
+- Yayıncı Merkezi (yayıncı olan/başvuracak herkes) ve Ajans Merkezi (yalnızca ajans sahibi) ayrıldı.
+- Arkadaşlık sistemi: istek gönder / kabul / reddet / çıkar. Artık yalnızca arkadaşlar mesajlaşabilir.
+- Kırmızı rozetler: yeni ziyaretçi, yeni fan, bekleyen arkadaş isteği (sayaçlarda ve alttaki Profil sekmesinde).
+- Kullanıcı profili sekmeli: Profil · Başarılar (alınan hediyeler, madalyalar) · Paylaşım · İlişkiler; aile kartı, Top Destekçiler, kullanıcı/yayıncı seviye çubukları.
+- Sunucu: migration 021 (friend_requests, visitors_seen_at, followers_seen_at), /api/friends, /api/me/badges, /api/me/seen.
+
+## v2.26.3
+- Müzik seçme yalnızca oda sahibi, yardımcı sahip ve moderatörde.
+
+## v2.26.2
+- Oda araçları yetkiye göre gizleniyor: sohbet yasağı, tema, mikrofon modu (sahip/yardımcı sahip); sohbet temizleme (yönetici); oda kilidi, gizleme, kapatma, PK (sahip); müzik (yönetici veya mikrofondakiler).
+
+## v2.26.1
+- Müzik Kütüphanesi kaldırıldı (uygulama + yönetim panelindeki "Müzik ekle"). Müzik çalar: Müziklerim (telefondan) | Sıra.
+
+## v2.26.0
+- Müzik paneli yenilendi: dönen plaklı çalar kartı, ses/ilerleme/kontroller üstte; sekmeler Telefonum | Kütüphane | Sıra; küçült oku.
+- Müzik çalarken odada yuvarlak, sürüklenebilir müzik balonu (dönen kapak); dokununca panel açılır.
+- Küçültülmüş oda artık yuvarlak, sürüklenebilir balon (kenara yapışır); X ile odadan çıkılır.
+
+## v2.25.2
+- Alıcı mikrofonda değil ama odadaysa hediye ikonu seyirci sayısı rozetine uçar.
+
+## v2.25.1
+- Hediye uçuşu 20 alıcıya kadar çıkarıldı (koltuk sayısı kadar).
+
+## v2.25.0
+- Hediye gönderilince hediyenin PNG ikonu gönderenden alıcı mikrofonlara uçar, ardından tam ekran animasyon oynar (Yoho tarzı).
+
 # Değişiklik ve inceleme raporu
+
+## v2.24.1
+- WIP 5 (hareketli avatar özelliği) bitince hareketli profil fotoğrafı otomatik olarak önceki sabit fotoğrafa döner (dakikada bir kontrol; services/avatar_sweeper.js). Hareketli yüklenirken önceki sabit fotoğraf yedeklenir. Migration 020.
+
+## v2.24.0 — WIP 5: hareketli profil fotoğrafı
+- WIP 5 özelliği `animatedAvatar`: gif ve animasyonlu webp profil fotoğrafı (en çok 5 MB). Yalnızca WIP 5 yükleyebilir; sunucu 403 ile reddeder. Dosya olduğu gibi (yeniden sıkıştırılmadan) gönderilir, veritabanında saklanır.
+- Profil düzenleme ekranında "Hareketli (WIP 5)" düğmesi. Avatar her yerde NetworkImage ile hareketli oynar.
+- Migration 019. Yönetici WIP özellik düzenlemesinde `animatedAvatar` anahtarı kullanılabilir.
+
+## v2.23.3
+- Mikrofon Modu penceresi: araç penceresi kapandıktan 300 ms sonra, kök Navigator üzerinden açılır; açılamazsa hata mesajı gösterilir. Yetkisiz kullanıcıya uyarı pencerenin altında kalmaz.
+
+## v2.23.2
+- Mikrofon modu: seçim anında ekrana uygulanır; sunucu reddederse eski sayıya dönülür ve sunucunun hata mesajı pencerede gösterilir (sessiz başarısızlık kalmaz).
+
+## v2.23.1 — Oda üst başlığı (Figma)
+- İzleyici sayısı ve çıkış/küçült (X) düğmesi artık gerçekten en sağ üstte (oda kartı kalan alanı doldurur, kart solda).
+- Ailesi olanlarda sağda aile kısayolu (logo + ad); dokununca Aile ekranı. Taç (katkı listesi) kısayolun hemen altında sağda.
+
+## v2.23.0 — Koltukta çerçeve, renkli nick, yeni sahne hesabı
+- Sunucu kullanıcı verisine `frameUrl` (takılı çerçeve) eklendi; koltukta avatarın üstünde hareketli çerçeve çizilir.
+- Koltuk adı artık WIP renginde ve WIP rozetiyle görünür.
+- Sahne düzeni yeniden hesaplanır: her satırın avatar boyutu satıra göre ayrı (üst oda sahibi/az koltuklu satır %20–35 büyük), tüm satırlar mevcut yüksekliğe sığar; 12+ koltukta sahne daha yüksek, sohbet daha kısa. Kaydırma yok.
 
 ## v2.22.4
 - Hediyede animasyon dosyası tanımlı değilse oda içinde açık uyarı gösterilir (sessizce geçmez).

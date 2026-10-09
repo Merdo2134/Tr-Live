@@ -87,6 +87,7 @@ Future<int?> showMicModeSheet(BuildContext context, {required int current}) {
   final list = modes.contains(current) ? modes : [...modes, current]..sort();
   return showModalBottomSheet<int>(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (c) => SafeArea(

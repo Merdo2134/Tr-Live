@@ -41,14 +41,20 @@ export async function loadProfile(viewerId, targetId) {
     };
   }
 
-  const [counts, following, items, family, broadcaster, ownedAgency] = await Promise.all([
+  const [counts, following, friendRel, items, family, broadcaster, ownedAgency] = await Promise.all([
     query(
       `SELECT (SELECT COUNT(*)::int FROM follows WHERE followed_id = $1) AS followers,
               (SELECT COUNT(*)::int FROM follows WHERE follower_id = $1) AS following,
-              (SELECT COUNT(*)::int FROM profile_visitors WHERE profile_user_id = $1) AS visitors`,
+              (SELECT COUNT(*)::int FROM profile_visitors WHERE profile_user_id = $1) AS visitors,
+              (SELECT COUNT(*)::int FROM friend_requests WHERE status = 'accepted' AND (requester_id = $1 OR target_id = $1)) AS friends`,
       [targetId],
     ),
     isSelf ? Promise.resolve({ rowCount: 0 }) : query(`SELECT 1 FROM follows WHERE follower_id = $1 AND followed_id = $2`, [viewerId, targetId]),
+    isSelf ? Promise.resolve({ rows: [] }) : query(
+      `SELECT requester_id, status FROM friend_requests
+       WHERE (requester_id = $1 AND target_id = $2) OR (requester_id = $2 AND target_id = $1)`,
+      [viewerId, targetId],
+    ),
     equippedItems(targetId),
     query(
       `SELECT f.id, f.name, f.logo_url, f.level, fm.role FROM family_members fm
@@ -84,6 +90,13 @@ export async function loadProfile(viewerId, targetId) {
     followers: counts.rows[0].followers,
     following: counts.rows[0].following,
     isFollowing: following.rowCount > 0,
+    friends: counts.rows[0].friends,
+    friendStatus: isSelf ? null : (() => {
+      const rel = friendRel.rows[0];
+      if (!rel) return 'none';
+      if (rel.status === 'accepted') return 'friends';
+      return rel.requester_id === viewerId ? 'requested' : 'incoming';
+    })(),
     wip: u.wip_level ? {
       level: u.wip_level, name: u.wip_name, expiresAt: u.wip_expires_at,
       features: { ...BASE_FEATURES, ...u.wip_features },
@@ -96,7 +109,14 @@ export async function loadProfile(viewerId, targetId) {
   };
 
   if (isSelf) {
+    const badge = await query(
+      `SELECT (SELECT COUNT(*)::int FROM profile_visitors WHERE profile_user_id = $1 AND last_visited_at > $2) AS new_visitors,
+              (SELECT COUNT(*)::int FROM follows WHERE followed_id = $1 AND created_at > $3) AS new_followers,
+              (SELECT COUNT(*)::int FROM friend_requests WHERE target_id = $1 AND status = 'pending') AS friend_requests`,
+      [targetId, u.visitors_seen_at, u.followers_seen_at],
+    );
     Object.assign(profile, selfUser(u), {
+      newVisitors: badge.rows[0].new_visitors, newFollowers: badge.rows[0].new_followers, friendRequests: badge.rows[0].friend_requests,
       followers: profile.followers, following: profile.following, visitorCount: counts.rows[0].visitors,
       broadcasterStatus: b?.status ?? null,
       agencyOwned: ownedAgency.rows[0] ? { id: ownedAgency.rows[0].id, name: ownedAgency.rows[0].name, status: ownedAgency.rows[0].status } : null,

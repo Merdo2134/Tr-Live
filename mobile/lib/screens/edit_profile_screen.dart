@@ -1,3 +1,5 @@
+import 'dart:io' show File;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/api.dart';
@@ -49,6 +51,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (b.length > 12 && b[0] == 0x89 && b[1] == 0x50) return 'image/png';
     if (b.length > 3 && b[0] == 0xFF && b[1] == 0xD8) return 'image/jpeg';
     if (b.length > 12 && b[0] == 0x52 && b[1] == 0x49 && b[8] == 0x57 && b[9] == 0x45) return 'image/webp';
+    if (b.length > 6 && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x38) return 'image/gif';
     return null;
   }
 
@@ -63,6 +66,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     setState(() => _uploading = true);
     final r = await guard(context, () => Api.putBytes(cover ? '/api/me/cover' : '/api/me/avatar', bytes, mime));
     if (r != null) await guard(context, Session.refresh);
+    if (mounted) setState(() => _uploading = false);
+  }
+
+  /// WIP 5: hareketli profil fotoğrafı. Dosya olduğu gibi gönderilir (yeniden sıkıştırılırsa hareket kaybolur).
+  Future<void> _uploadAnimated() async {
+    final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: const ['gif', 'webp']);
+    final path = r?.files.first.path;
+    if (path == null) return;
+    final bytes = await File(path).readAsBytes();
+    final mime = _mime(bytes);
+    if (!mounted) return;
+    if (mime == null || (mime != 'image/gif' && mime != 'image/webp')) return toast(context, 'Hareketli fotoğraf için gif veya animasyonlu webp seçin.', error: true);
+    if (bytes.length > 5 * 1024 * 1024) return toast(context, 'Hareketli fotoğraf 5 MB’tan küçük olmalı.', error: true);
+    setState(() => _uploading = true);
+    final res = await guard(context, () => Api.putBytes('/api/me/avatar', bytes, mime));
+    if (res != null) await guard(context, Session.refresh);
     if (mounted) setState(() => _uploading = false);
   }
 
@@ -112,6 +131,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               child: Wrap(spacing: 8, children: [
                 OutlinedButton.icon(onPressed: _uploading ? null : () => _upload(false), icon: const Icon(Icons.photo_camera), label: const Text('Fotoğraf')),
                 OutlinedButton.icon(onPressed: _uploading ? null : () => _upload(true), icon: const Icon(Icons.panorama), label: const Text('Kapak')),
+                OutlinedButton.icon(onPressed: _uploading ? null : _uploadAnimated, icon: const Icon(Icons.gif_box), label: const Text('Hareketli (WIP 5)')),
               ]),
             ),
           ]),

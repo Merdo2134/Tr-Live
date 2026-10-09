@@ -29,3 +29,12 @@ test('Lottie json kabul edilir; dışarıdan görselli Lottie ve PAG reddedilir'
 test('mp4 olmayan veya bozuk dosyada vapc eklenmez', () => {
   assert.throws(() => ensureVapc(pad(Buffer.from('\0\0\0\x08ftyp')), 'left'));
 });
+
+test('hareketli görsel tespiti: gif ve animasyonlu webp', async () => {
+  const { isAnimatedImage } = await import('../src/services/media.js');
+  assert.equal(isAnimatedImage(Buffer.from('GIF89a' + '\0'.repeat(20))), 'gif');
+  const webp = Buffer.alloc(40); webp.write('RIFF', 0); webp.write('WEBP', 8); webp.write('VP8X', 12); webp[20] = 0x02;
+  assert.equal(isAnimatedImage(webp), 'webp');
+  webp[20] = 0;
+  assert.equal(isAnimatedImage(webp), null);
+});

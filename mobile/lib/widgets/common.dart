@@ -136,6 +136,71 @@ class WipChip extends StatelessWidget {
   }
 }
 
+
+/// WIP adı: 5. seviye ateşli git-gel, 4. seviye mavi buzlu parıltı; diğerleri düz renk.
+class WipNameText extends StatefulWidget {
+  final String text;
+  final int? level;
+  final Color? color;
+  final TextStyle? style;
+  final int maxLines;
+  const WipNameText(this.text, {super.key, this.level, this.color, this.style, this.maxLines = 1});
+
+  @override
+  State<WipNameText> createState() => _WipNameTextState();
+}
+
+class _WipNameTextState extends State<WipNameText> with SingleTickerProviderStateMixin {
+  AnimationController? _c;
+
+  bool get _fx => (widget.level ?? 0) >= 4;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_fx) _c = AnimationController(vsync: this, duration: Duration(milliseconds: widget.level == 5 ? 1600 : 2400))..repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(WipNameText old) {
+    super.didUpdateWidget(old);
+    if (_fx && _c == null) {
+      _c = AnimationController(vsync: this, duration: Duration(milliseconds: widget.level == 5 ? 1600 : 2400))..repeat(reverse: true);
+    } else if (!_fx && _c != null) {
+      _c!.dispose();
+      _c = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = (widget.style ?? const TextStyle()).copyWith(color: widget.color ?? widget.style?.color, fontWeight: _fx ? FontWeight.w800 : widget.style?.fontWeight);
+    if (!_fx || _c == null) return Text(widget.text, maxLines: widget.maxLines, overflow: TextOverflow.ellipsis, style: base);
+    final fire = widget.level == 5;
+    final colors = fire
+        ? const [Color(0xFFFFF176), Color(0xFFFF9800), Color(0xFFFF1744), Color(0xFFFF9800), Color(0xFFFFF176)]
+        : const [Color(0xFF80D8FF), Color(0xFFFFFFFF), Color(0xFF2979FF), Color(0xFFFFFFFF), Color(0xFF80D8FF)];
+    return AnimatedBuilder(
+      animation: _c!,
+      builder: (_, child) {
+        final t = Curves.easeInOut.transform(_c!.value);
+        return ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (r) => LinearGradient(begin: Alignment(-1.0 - 1.0 + 2.0 * t, 0), end: Alignment(1.0 + 2.0 * t - 2.0, 0), colors: colors, tileMode: TileMode.mirror).createShader(r),
+          child: child,
+        );
+      },
+      child: Text(widget.text, maxLines: widget.maxLines, overflow: TextOverflow.ellipsis, style: base.copyWith(color: Colors.white, shadows: [Shadow(color: fire ? const Color(0xAAFF5722) : const Color(0xAA40C4FF), blurRadius: 6)])),
+    );
+  }
+}
+
 /// Kullanıcı adı (WIP renginde) + WIP rozeti.
 class UserName extends StatelessWidget {
   final Map<String, dynamic>? user;
@@ -149,11 +214,7 @@ class UserName extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Flexible(
-          child: Text(
-            (user?['displayName'] ?? '').toString(),
-            overflow: TextOverflow.ellipsis,
-            style: (style ?? const TextStyle()).copyWith(color: color ?? style?.color),
-          ),
+          child: WipNameText((user?['displayName'] ?? '').toString(), level: (user?['wipLevel'] as num?)?.toInt(), color: color, style: style),
         ),
         WipChip(level: user?['wipLevel'], colorHex: user?['nameColor'] as String?),
       ],
@@ -247,7 +308,7 @@ Future<Map<String, dynamic>?> pickUser(BuildContext context, {bool admin = false
             TextField(
               controller: controller,
               autofocus: true,
-              decoration: const InputDecoration(hintText: 'Kullanıcı adı (en az 2 harf)'),
+              decoration: const InputDecoration(hintText: admin ? 'ID, kullanıcı adı veya ad' : 'Kullanıcı adı (en az 2 harf)'),
               onChanged: (v) async {
                 if (v.trim().length < 2) return;
                 try {
@@ -270,7 +331,7 @@ Future<Map<String, dynamic>?> pickUser(BuildContext context, {bool admin = false
                   ListTile(
                     leading: UserAvatar(user: u, radius: 16),
                     title: Text((u['displayName'] ?? '').toString()),
-                    subtitle: Text('@${u['username']}'),
+                    subtitle: Text(u['publicId'] != null ? 'ID: ${u['publicId']} · @${u['username']}' : '@${u['username']}'),
                     onTap: () => Navigator.pop(c, u),
                   ),
               ]),

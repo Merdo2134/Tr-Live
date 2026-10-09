@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bigAmount, uuid, positiveInt, text, httpsUrl, isUuid } from '../src/http.js';
-import { levelFor, COIN_LEVEL_STEPS, familyLevelFor, familyCapacity, commissionOf, giftDisplayLevel } from '../src/levels.js';
+import { levelFromExp, expForLevel, levelInfo, levelFor, COIN_LEVEL_STEPS, familyLevelFor, familyCapacity, commissionOf, giftDisplayLevel } from '../src/levels.js';
 import { distributeGift } from '../src/gifts_logic.js';
 import { canManage } from '../src/room_permissions.js';
 import { currentPeriod, periodRange, isPeriod } from '../src/periods.js';
@@ -128,4 +128,17 @@ test('publicUser: bakiye sızdırmaz, gizli kullanıcıyı maskeler', () => {
   assert.equal(hidden.wipLevel, null);
   assert.equal(publicUser({ ...row, is_hidden: true }, A).displayName, 'Ali'); // kendini görür
   assert.equal(selfUser({ ...row, total_sent_coins: '1', total_received_diamonds: '2' }).coins, '999');
+});
+
+test('160 kademeli seviye eğrisi', () => {
+  assert.equal(levelFromExp(0), 1);
+  assert.equal(levelFromExp(expForLevel(2) - 1n), 1);
+  assert.equal(levelFromExp(expForLevel(2)), 2);
+  assert.equal(levelFromExp(expForLevel(57)), 57);
+  assert.equal(levelFromExp(expForLevel(160)), 160);
+  assert.equal(levelFromExp('99999999999999999'), 160);
+  const i = levelInfo(expForLevel(10) + 5n);
+  assert.equal(i.level, 10);
+  assert.equal(i.nextLevelExp, expForLevel(11).toString());
+  assert.equal(levelInfo(expForLevel(160)).maxed, true);
 });

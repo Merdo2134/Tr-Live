@@ -8,7 +8,7 @@ import { publicUser } from '../views.js';
 import { hub } from '../realtime.js';
 import { config } from '../config.js';
 import { distributeGift } from '../gifts_logic.js';
-import { levelFor, COIN_LEVEL_STEPS, GIFT_LEVEL_STEPS, familyLevelFor, giftDisplayLevel } from '../levels.js';
+import { levelFromExp, familyLevelFor, giftDisplayLevel } from '../levels.js';
 import { scorePk, pkView } from '../services/pk.js';
 import { scoreboardOf } from '../services/scoreboard.js';
 import { loadPublicRows } from '../services/users.js';
@@ -109,7 +109,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
        WHERE id = $2 RETURNING coins, total_sent_coins`,
       [totalCoins.toString(), senderId],
     )).rows[0];
-    await c.query(`UPDATE users SET coin_level = $1 WHERE id = $2`, [levelFor(sent.total_sent_coins, COIN_LEVEL_STEPS), senderId]);
+    await c.query(`UPDATE users SET coin_level = $1 WHERE id = $2`, [levelFromExp(sent.total_sent_coins), senderId]);
 
     const pkIds = new Set();
     const transactions = [];
@@ -121,7 +121,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
          WHERE id = $2 RETURNING total_received_diamonds`,
         [coinAmount.toString(), item.userId],
       )).rows[0];
-      await c.query(`UPDATE users SET gift_level = $1 WHERE id = $2`, [levelFor(recv.total_received_diamonds, GIFT_LEVEL_STEPS), item.userId]);
+      await c.query(`UPDATE users SET gift_level = $1 WHERE id = $2`, [levelFromExp(recv.total_received_diamonds), item.userId]);
 
       const gt = (await c.query(
         `INSERT INTO gift_transactions(room_id, sender_id, receiver_id, gift_id, quantity, coin_amount, receiver_agency_id)

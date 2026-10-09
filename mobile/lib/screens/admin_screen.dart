@@ -1,13 +1,16 @@
 import 'dart:io' show File;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import '../services/api.dart';
 import '../services/session.dart';
 import '../widgets/anim_asset.dart';
 import '../widgets/common.dart';
 import 'admin_content.dart';
 import 'admin_payouts.dart';
+import 'support_screens.dart';
 
 /// Telefondan dosya seçip sunucuya yükler. Sunucu türü dosyanın içinden anlar (svga, mp4, Lottie, webp, gif, png).
 /// [alpha]: yan yana şeffaf mp4'te şeffaflık maskesinin yeri ('left' / 'right').
@@ -25,6 +28,48 @@ Future<Map<String, dynamic>?> pickAndUploadMedia(BuildContext context, {String a
   }
   toast(context, 'Yükleniyor (${(bytes.length / 1048576).toStringAsFixed(1)} MB)…');
   return guard(context, () => Api.postBytes('/api/admin/media', bytes, 'application/octet-stream', query: {'alpha': alpha}));
+}
+
+
+/// Animasyonun ilk karesini (şeffaf PNG) alıp sunucuya yükler; hediye ikonu için. Başarısızsa null.
+Future<String?> autoIconFromAnimation(BuildContext context, String animUrl) async {
+  final abs = Api.absoluteUrl(animUrl);
+  if (abs == null) return null;
+  final key = GlobalKey();
+  final overlay = Overlay.of(context, rootOverlay: true);
+  final entry = OverlayEntry(
+    builder: (_) => Positioned(
+      left: -2000,
+      top: 0,
+      width: 256,
+      height: 256,
+      child: IgnorePointer(child: RepaintBoundary(key: key, child: AnimAsset(url: abs, repeat: false, fit: BoxFit.contain))),
+    ),
+  );
+  overlay.insert(entry);
+  try {
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    final obj = key.currentContext?.findRenderObject();
+    if (obj is! RenderRepaintBoundary) return null;
+    final img = await obj.toImage(pixelRatio: 1.5);
+    final raw = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
+    final png = await img.toByteData(format: ui.ImageByteFormat.png);
+    if (raw == null || png == null) return null;
+    var visible = false;
+    for (var i = 3; i < raw.lengthInBytes; i += 4 * 17) {
+      if (raw.getUint8(i) > 8) {
+        visible = true;
+        break;
+      }
+    }
+    if (!visible) return null;
+    final r = await Api.postBytes('/api/admin/media', png.buffer.asUint8List(), 'application/octet-stream', query: {'alpha': 'left'});
+    return r['url']?.toString();
+  } catch (_) {
+    return null;
+  } finally {
+    entry.remove();
+  }
 }
 
 /// Yüklenen dosyanın canlı önizlemesi (hediye animasyonu veya çerçeve).
@@ -82,6 +127,23 @@ class _CatalogListPageState extends State<CatalogListPage> {
     if (r != null) setState(() => it['isActive'] = v);
   }
 
+  Future<void> _delete(String kind, Map<String, dynamic> it) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Silinsin mi?'),
+        content: Text('"${it['name']}" kalıcı olarak silinecek. Geçmişte kullanıldıysa silinmez, gizlenir.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sil'))],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final r = await guard(context, () => Api.delete('/api/admin/$kind/${it['id']}'));
+    if (r != null && mounted) {
+      toast(context, r['hidden'] == true ? (r['note'] ?? 'Gizlendi.').toString() : 'Silindi.');
+      _load();
+    }
+  }
+
   Future<void> _grantSelf(Map<String, dynamic> f) async {
     final r = await guard(context, () => Api.post('/api/admin/users/${Session.id}/inventory', {'itemType': 'frame', 'itemKey': f['id'], 'itemName': f['name']}));
     if (r != null && mounted) toast(context, '"${f['name']}" envanterine eklendi.');
@@ -101,7 +163,10 @@ class _CatalogListPageState extends State<CatalogListPage> {
             Text(active ? 'Açık' : 'Kapalı', style: TextStyle(color: active ? Colors.greenAccent : Colors.white38)),
             Switch(value: active, onChanged: (v) => _toggle(kind, it, v)),
           ]),
-          if (frame) TextButton(onPressed: () => _grantSelf(it), child: const Text('Bana ver (dene)')),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            if (frame) TextButton(onPressed: () => _grantSelf(it), child: const Text('Bana ver')),
+            TextButton(style: TextButton.styleFrom(foregroundColor: Colors.redAccent), onPressed: () => _delete(frame ? 'frames' : 'gifts', it), child: const Text('Sil')),
+          ]),
         ]),
       ),
     );
@@ -154,6 +219,7 @@ class AdminScreen extends StatelessWidget {
     final admin = Session.isAdmin;
     final tabs = <Tab>[
       const Tab(text: 'Kullanıcı'),
+      const Tab(text: 'Destek'),
       if (admin) const Tab(text: 'Yetkililer'),
       if (admin) const Tab(text: 'Ajans/Yayıncı'),
       if (admin) const Tab(text: 'Maaş/Dönem'),
@@ -168,10 +234,11 @@ class AdminScreen extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: Text(admin ? 'Yönetim paneli' : 'Yardımcı admin paneli'),
-          bottom: admin ? TabBar(isScrollable: true, tabs: tabs) : null,
+          bottom: TabBar(isScrollable: true, tabs: tabs),
         ),
         body: TabBarView(children: [
           const _UsersTab(),
+          const SupportAdminTab(),
           if (admin) const _StaffTab(),
           if (admin) const _AgenciesTab(),
           if (admin) const PayoutsTab(),
@@ -308,16 +375,9 @@ class _UsersTabState extends State<_UsersTab> {
   }
 
   Future<void> _inventory() async {
-    final f = await formDialog(context, 'Envanter öğesi ver', ['Tip (frame/entrance_effect/badge/profile_effect)', 'Anahtar (katalog kimliği)', 'Ad']);
-    if (f == null || !mounted) return;
-    await _run(
-      () => Api.post('/api/admin/users/${_user!['id']}/inventory', {
-        'itemType': f['Tip (frame/entrance_effect/badge/profile_effect)'],
-        'itemKey': f['Anahtar (katalog kimliği)'],
-        'itemName': f['Ad'],
-      }),
-      'Öğe eklendi.',
-    );
+    final u = _user;
+    if (u == null) return;
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => GrantItemPage(user: u)));
   }
 
   Future<void> _ban() async {
@@ -349,14 +409,14 @@ class _UsersTabState extends State<_UsersTab> {
     final u = _user;
     final admin = Session.isAdmin;
     return ListView(padding: const EdgeInsets.all(16), children: [
-      FilledButton.icon(onPressed: _pick, icon: const Icon(Icons.search), label: const Text('Kullanıcı bul')),
+      FilledButton.icon(onPressed: _pick, icon: const Icon(Icons.search), label: const Text('Kullanıcı bul (ID, ad)')),
       if (u != null) ...[
         const SizedBox(height: 12),
         Card(
           child: ListTile(
             leading: UserAvatar(user: u),
             title: Text((u['displayName'] ?? '').toString()),
-            subtitle: Text('@${u['username']} · ${u['systemRole']} · ${u['accountStatus']}'
+            subtitle: Text('ID: ${u['publicId'] ?? '-'} · @${u['username']} · ${u['systemRole']} · ${u['accountStatus']}'
                 '${admin ? '\nCoin: ${fmtNumber(u['coins'])} · Diamond: ${fmtNumber(u['diamonds'])}' : ''}${_banLine(u)}'),
             isThreeLine: true,
           ),
@@ -382,7 +442,7 @@ class _UsersTabState extends State<_UsersTab> {
           if (admin) OutlinedButton.icon(onPressed: _coins, icon: const Icon(Icons.monetization_on), label: const Text('Coin düzenle')),
           if (admin) OutlinedButton.icon(onPressed: _wip, icon: const Icon(Icons.workspace_premium), label: const Text('WIP ver')),
           if (admin) OutlinedButton.icon(onPressed: () => _run(() => Api.delete('/api/admin/users/${u['id']}/wip'), 'WIP kaldırıldı.'), icon: const Icon(Icons.remove_circle_outline), label: const Text('WIP al')),
-          if (admin) OutlinedButton.icon(onPressed: _inventory, icon: const Icon(Icons.inventory_2), label: const Text('Envanter ver')),
+          if (admin) OutlinedButton.icon(onPressed: _inventory, icon: const Icon(Icons.inventory_2), label: const Text('Öğe ver (çerçeve, rozet…)')),
         ]),
       ],
     ]);
@@ -588,6 +648,24 @@ class _CatalogTab extends StatelessWidget {
                   },
                 ),
               ),
+              if (icon.text.trim().isNotEmpty)
+                Padding(padding: const EdgeInsets.only(top: 4), child: Container(width: 72, height: 72, decoration: BoxDecoration(color: const Color(0xFF0B3C5D), borderRadius: BorderRadius.circular(10)), child: Image.network(Api.absoluteUrl(icon.text.trim()) ?? '', fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white38)))),
+              if (anim.text.trim().isNotEmpty)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.auto_fix_high),
+                    label: const Text('İkonu animasyonun ilk karesinden yap'),
+                    onPressed: () async {
+                      final u = await autoIconFromAnimation(c, anim.text);
+                      if (u != null) {
+                        setS(() => icon.text = u);
+                      } else if (c.mounted) {
+                        toast(c, 'İlk kare alınamadı.', error: true);
+                      }
+                    },
+                  ),
+                ),
               TextField(controller: anim, decoration: const InputDecoration(labelText: 'Animasyon adresi (https veya yüklenen dosya)')),
               Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: mediaPreview(anim.text)),
               Row(children: [
@@ -614,6 +692,15 @@ class _CatalogTab extends StatelessWidget {
                       format = 'auto';
                     });
                     if (c.mounted) toast(c, 'Yüklendi: ${m['kind']} (${(((m['size'] as num?) ?? 0) / 1048576).toStringAsFixed(1)} MB). ${m['note'] ?? ''}');
+                    if (icon.text.trim().isEmpty && c.mounted) {
+                      final u = await autoIconFromAnimation(c, anim.text);
+                      if (u != null) {
+                        setS(() => icon.text = u);
+                        if (c.mounted) toast(c, 'İkon animasyonun ilk karesinden otomatik oluşturuldu.');
+                      } else if (c.mounted) {
+                        toast(c, 'İlk kare otomatik alınamadı; ikonu elle yükleyebilirsin.', error: true);
+                      }
+                    }
                   },
                 ),
               ),
@@ -667,6 +754,87 @@ class _CatalogTab extends StatelessWidget {
     if (ok != true || !context.mounted) return;
     final r = await guard(context, () => Api.post('/api/admin/gifts', body));
     if (r != null && context.mounted) toast(context, 'Hediye eklendi. Kimlik: ${r['id']}');
+  }
+
+  Future<void> _storeForm(BuildContext context) async {
+    final name = TextEditingController();
+    final url = TextEditingController();
+    final price = TextEditingController(text: '500000');
+    final days = TextEditingController(text: '14');
+    var category = 'frame';
+    var forSale = true;
+    var alphaSide = 'left';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => AlertDialog(
+          title: const Text('Mağaza ürünü ekle'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              DropdownButton<String>(
+                isExpanded: true,
+                value: category,
+                items: const [
+                  DropdownMenuItem(value: 'frame', child: Text('Çerçeve')),
+                  DropdownMenuItem(value: 'chat_bubble', child: Text('Sohbet Balonu')),
+                  DropdownMenuItem(value: 'entrance_effect', child: Text('Özel Giriş')),
+                  DropdownMenuItem(value: 'mini_card', child: Text('Mini Kart')),
+                  DropdownMenuItem(value: 'mic_wave', child: Text('Mikrofon Dalgası')),
+                  DropdownMenuItem(value: 'vehicle', child: Text('Araç')),
+                  DropdownMenuItem(value: 'badge', child: Text('Rozet (yalnızca yönetici verir)')),
+                ],
+                onChanged: (v) => setS(() => category = v ?? 'frame'),
+              ),
+              TextField(controller: name, decoration: const InputDecoration(labelText: 'Ad')),
+              SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Mağazada satılsın'), subtitle: const Text('Kapalıysa yalnızca sen kullanıcıya verirsin'), value: forSale && category != 'badge', onChanged: category == 'badge' ? null : (v) => setS(() => forSale = v)),
+              TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Fiyat (coin)')),
+              TextField(controller: days, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Süre (gün)')),
+              TextField(controller: url, decoration: const InputDecoration(labelText: 'Görsel/animasyon adresi')),
+              Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: mediaPreview(url.text, frame: category == 'frame')),
+              Row(children: [
+                const Text('MP4 şeffaflık:  ', style: TextStyle(color: Colors.white70)),
+                DropdownButton<String>(
+                  value: alphaSide,
+                  items: const [DropdownMenuItem(value: 'left', child: Text('Sol yarıda')), DropdownMenuItem(value: 'right', child: Text('Sağ yarıda'))],
+                  onChanged: (v) => setS(() => alphaSide = v ?? 'left'),
+                ),
+              ]),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Telefondan yükle'),
+                  onPressed: () async {
+                    final m = await pickAndUploadMedia(c, alpha: alphaSide);
+                    if (m == null) return;
+                    setS(() => url.text = m['url'].toString());
+                  },
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Ekle')),
+          ],
+        ),
+      ),
+    );
+    final body = {
+      'category': category,
+      'name': name.text.trim(),
+      'imageUrl': url.text.trim(),
+      'priceCoins': price.text.trim(),
+      'durationDays': int.tryParse(days.text.trim()) ?? 14,
+      'forSale': forSale,
+    };
+    name.dispose();
+    url.dispose();
+    price.dispose();
+    days.dispose();
+    if (ok != true || !context.mounted) return;
+    final r = await guard(context, () => Api.post('/api/admin/store/items', body));
+    if (r != null && context.mounted) toast(context, 'Mağazaya eklendi.');
   }
 
   Future<void> _frameForm(BuildContext context) async {
@@ -849,30 +1017,28 @@ class _CatalogTab extends StatelessWidget {
         onPressed: () => _bulk(context, frames: true),
       ),
       const SizedBox(height: 8),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.monetization_on),
+        label: const Text('Coin paketleri (Yükleme Merkezi)'),
+        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CoinPackagesPage())),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.list_alt),
+        label: const Text('Mağaza ürünleri (aç/kapat/sil)'),
+        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreItemsPage())),
+      ),
+      const SizedBox(height: 8),
+      FilledButton.icon(
+        icon: const Icon(Icons.storefront),
+        label: const Text('Mağaza ürünü ekle'),
+        onPressed: () => _storeForm(context),
+      ),
+      const SizedBox(height: 8),
       FilledButton.icon(
         icon: const Icon(Icons.filter_frames),
         label: const Text('Avatar çerçevesi ekle'),
         onPressed: () => _frameForm(context),
-      ),
-      const SizedBox(height: 8),
-      FilledButton.icon(
-        icon: const Icon(Icons.library_music),
-        label: const Text('Müzik ekle (lisanslı)'),
-        onPressed: () async {
-          final f = await formDialog(context, 'Müzik ekle', ['Başlık', 'Sanatçı', 'Şarkı adresi (https, mp3/aac)', 'Süre (saniye)', 'Kapak adresi (isteğe bağlı)', 'Lisans notu (zorunlu)']);
-          if (f == null || !context.mounted) return;
-          final secs = int.tryParse(f['Süre (saniye)'] ?? '');
-          if (secs == null || secs <= 0) return toast(context, 'Süre saniye cinsinden bir sayı olmalı.', error: true);
-          final r = await guard(context, () => Api.post('/api/admin/music/tracks', {
-                'title': f['Başlık'],
-                'artist': f['Sanatçı'],
-                'url': f['Şarkı adresi (https, mp3/aac)'],
-                'durationMs': secs * 1000,
-                if ((f['Kapak adresi (isteğe bağlı)'] ?? '').isNotEmpty) 'coverUrl': f['Kapak adresi (isteğe bağlı)'],
-                'licenseNote': f['Lisans notu (zorunlu)'],
-              }));
-          if (r != null && context.mounted) toast(context, 'Müzik eklendi.');
-        },
       ),
       const SizedBox(height: 8),
       FilledButton.icon(
@@ -1014,6 +1180,176 @@ class _SecurityTabState extends State<_SecurityTab> {
           ]),
         );
       },
+    );
+  }
+}
+
+
+/// Öğe ver: kategori seç, listeden öğeyi seç, gün yaz, gönder (WIP verme gibi tek ekranda).
+class GrantItemPage extends StatefulWidget {
+  final Map<String, dynamic> user;
+  const GrantItemPage({super.key, required this.user});
+
+  @override
+  State<GrantItemPage> createState() => _GrantItemPageState();
+}
+
+class _GrantItemPageState extends State<GrantItemPage> {
+  static const _cats = [
+    ['frame', 'Çerçeve'],
+    ['badge', 'Rozet'],
+    ['chat_bubble', 'Sohbet Balonu'],
+    ['entrance_effect', 'Giriş Efekti'],
+    ['mini_card', 'Mini Kart'],
+    ['mic_wave', 'Mikrofon Dalgası'],
+    ['vehicle', 'Araç'],
+  ];
+  String _cat = 'frame';
+  String? _selected;
+  final _days = TextEditingController(text: '30');
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _days.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send(List<Map<String, dynamic>> items) async {
+    final item = items.where((i) => i['key'] == _selected).firstOrNull;
+    if (item == null) return toast(context, 'Önce bir öğe seç.', error: true);
+    final d = _days.text.trim();
+    final days = d.isEmpty || d == '0' ? null : int.tryParse(d);
+    if (d.isNotEmpty && d != '0' && days == null) return toast(context, 'Gün sayı olmalı.', error: true);
+    setState(() => _sending = true);
+    final r = await guard(context, () => Api.post('/api/admin/users/${widget.user['id']}/grant', {'category': _cat, 'itemKey': item['key'], if (days != null) 'days': days}));
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (r != null) toast(context, '"${item['name']}" ${widget.user['displayName']} kullanıcısına verildi.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Öğe ver · ${widget.user['displayName']}')),
+      body: Column(children: [
+        SizedBox(
+          height: 48,
+          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), children: [
+            for (final c in _cats)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ChoiceChip(label: Text(c[1]), selected: _cat == c[0], onSelected: (_) => setState(() {
+                      _cat = c[0];
+                      _selected = null;
+                    })),
+              ),
+          ]),
+        ),
+        Expanded(
+          child: AsyncBody<List<Map<String, dynamic>>>(
+            key: ValueKey(_cat),
+            load: () async => listOf((await Api.get('/api/admin/grantables', query: {'category': _cat}))['items']),
+            builder: (context, items, reload) => Column(children: [
+              Expanded(
+                child: items.isEmpty
+                    ? const Center(child: Text('Bu kategoride öğe yok. Katalog sekmesinden ekle.'))
+                    : GridView.builder(
+                        padding: const EdgeInsets.all(10),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 0.85),
+                        itemCount: items.length,
+                        itemBuilder: (_, i) {
+                          final it = items[i];
+                          final sel = it['key'] == _selected;
+                          return InkWell(
+                            onTap: () => setState(() => _selected = it['key'].toString()),
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? Colors.greenAccent : Colors.white24, width: sel ? 2.5 : 1)),
+                              child: Column(children: [
+                                Expanded(child: LayoutBuilder(builder: (c, box) => Center(child: mediaPreview(it['imageUrl'] as String?, frame: _cat == 'frame', size: box.biggest.shortestSide)))),
+                                Text(it['name'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                              ]),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+                  child: Row(children: [
+                    SizedBox(width: 110, child: TextField(controller: _days, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Gün (0 = süresiz)', isDense: true, border: OutlineInputBorder()))),
+                    const SizedBox(width: 10),
+                    Expanded(child: FilledButton.icon(onPressed: _sending || _selected == null ? null : () => _send(items), icon: const Icon(Icons.send), label: Text(_sending ? 'Gönderiliyor…' : 'Gönder'))),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Mağaza ürünlerini listele; aç/kapat (kapalı ürün mağazada ve "öğe ver" listesinde görünmez).
+class StoreItemsPage extends StatefulWidget {
+  const StoreItemsPage({super.key});
+
+  @override
+  State<StoreItemsPage> createState() => _StoreItemsPageState();
+}
+
+class _StoreItemsPageState extends State<StoreItemsPage> {
+  int _v = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Mağaza ürünleri (silmek için sola kaydır)')),
+      body: AsyncBody<List<Map<String, dynamic>>>(
+        key: ValueKey(_v),
+        load: () async => listOf((await Api.get('/api/admin/store/items'))['items']),
+        builder: (context, items, reload) => items.isEmpty
+            ? const Center(child: Text('Henüz ürün yok.'))
+            : ListView(children: [
+                for (final it in items)
+                  Dismissible(
+                    key: ValueKey(it['id']),
+                    direction: DismissDirection.endToStart,
+                    background: Container(color: Colors.red, alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20), child: const Icon(Icons.delete, color: Colors.white)),
+                    confirmDismiss: (_) async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (c) => AlertDialog(
+                          title: const Text('Ürün silinsin mi?'),
+                          content: Text('"${it['name']}" silinecek. Daha önce alındıysa silinmez, gizlenir.'),
+                          actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sil'))],
+                        ),
+                      );
+                      if (ok != true || !context.mounted) return false;
+                      final r = await guard(context, () => Api.delete('/api/admin/store/items/${it['id']}'));
+                      if (r != null && context.mounted) {
+                        toast(context, r['hidden'] == true ? (r['note'] ?? 'Gizlendi.').toString() : 'Silindi.');
+                        setState(() => _v++);
+                      }
+                      return false;
+                    },
+                    child: SwitchListTile(
+                    secondary: SizedBox(width: 48, height: 48, child: mediaPreview(it['imageUrl'] as String?, frame: it['category'] == 'frame', size: 48)),
+                    title: Text(it['name'].toString()),
+                    subtitle: Text('${it['category']} · ${fmtNumber(it['priceCoins'])} coin · ${it['durationDays']} gün${it['forSale'] == false ? ' · mağazada değil' : ''}'),
+                    value: it['isActive'] == true,
+                    onChanged: (v) async {
+                      final r = await guard(context, () => Api.post('/api/admin/store/items/${it['id']}/active', {'isActive': v}));
+                      if (r != null && mounted) setState(() => _v++);
+                    },
+                  ),
+                  ),
+              ]),
+      ),
     );
   }
 }

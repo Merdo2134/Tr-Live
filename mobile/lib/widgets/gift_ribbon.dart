@@ -56,7 +56,11 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       if (widget.roomId != null && e['roomId'] == widget.roomId) return;
       _enqueue(e);
     } else if (type == 'room_gift' && widget.roomId != null && e['roomId'] == widget.roomId) {
-      _enqueueAnim(mapOf(e['gift']));
+      // Önce ikon koltuğa uçar (oda ekranı), sonra tam ekran animasyon başlar.
+      final g = mapOf(e['gift']);
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (mounted) _enqueueAnim(g);
+      });
       _enqueue(e);
     } else if (type == 'room_member_joined' && widget.roomId != null && e['roomId'] == widget.roomId) {
       final effect = mapOf(e['entranceEffect']);

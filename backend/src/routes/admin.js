@@ -48,14 +48,14 @@ router.get('/users', async (req, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase();
   if (q.length < 2) throw fail('Arama için en az 2 karakter girin.');
   const r = await query(
-    `SELECT id, username, display_name, avatar_url, coins, diamonds, system_role, account_status, banned_until, ban_reason
-     FROM users WHERE lower(username) LIKE $1 ESCAPE '\\' OR lower(display_name) LIKE $1 ESCAPE '\\' OR id::text = $2
-     ORDER BY username LIMIT 20`,
+    `SELECT id, public_id, username, display_name, avatar_url, coins, diamonds, system_role, account_status, banned_until, ban_reason
+     FROM users WHERE lower(username) LIKE $1 ESCAPE '\\' OR lower(display_name) LIKE $1 ESCAPE '\\' OR id::text = $2 OR public_id = $2
+     ORDER BY (public_id = $2) DESC, username LIMIT 20`,
     [`%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`, q],
   );
   res.json({
     users: r.rows.map((u) => ({
-      id: u.id, username: u.username, displayName: u.display_name, coins: String(u.coins), diamonds: String(u.diamonds),
+      id: u.id, publicId: u.public_id ?? null, username: u.username, displayName: u.display_name, coins: String(u.coins), diamonds: String(u.diamonds),
       systemRole: u.system_role, accountStatus: u.account_status, avatarUrl: u.avatar_url, bannedUntil: u.banned_until, banReason: u.ban_reason,
       ...(req.user.system_role === 'admin' ? {} : { coins: undefined, diamonds: undefined }),
     })),
@@ -125,7 +125,7 @@ router.post('/users/:userId/avatar', async (req, res) => {
   if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
   if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
   await tx(async (c) => {
-    await c.query(`UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1`, [userId, url]);
+    await c.query(`UPDATE users SET avatar_url = $2, avatar_animated = FALSE, static_avatar_url = NULL, updated_at = NOW() WHERE id = $1`, [userId, url]);
     await auditStaff(c, req.user.id, userId, 'profile_avatar', { removed: !url, by: req.user.system_role });
   });
   res.json({ ok: true, avatarUrl: url });
@@ -204,7 +204,7 @@ router.delete('/users/:userId/wip', async (req, res) => {
   res.json({ ok: true });
 });
 
-const FEATURE_TYPES = { nameColor: 'color', badge: 'string', maxRooms: 'int', viewVisitors: 'bool', kickImmunity: 'bool', profileEffect: 'bool', customRoomTheme: 'bool' };
+const FEATURE_TYPES = { nameColor: 'color', badge: 'string', maxRooms: 'int', viewVisitors: 'bool', kickImmunity: 'bool', profileEffect: 'bool', customRoomTheme: 'bool', animatedAvatar: 'bool' };
 function cleanFeatures(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('Özellikler nesne olmalı.');
   const out = {};
@@ -277,6 +277,100 @@ function guessFormat(url) {
   const e = (m?.[1] ?? '').toLowerCase();
   return { mp4: 'mp4', svga: 'svga', json: 'lottie', webp: 'webp', gif: 'gif', png: 'png' }[e] ?? 'lottie';
 }
+// ---------------- Müşteri hizmetleri (admin + yardımcı admin) ----------------
+router.get('/support/threads', async (_req, res) => {
+  const r = await query(
+    `SELECT DISTINCT ON (m.user_id) m.user_id, m.body, m.from_staff, m.created_at, u.username, u.display_name, u.public_id, u.avatar_url,
+            (SELECT COUNT(*)::int FROM support_messages x WHERE x.user_id = m.user_id AND x.from_staff = FALSE
+               AND x.created_at > COALESCE((SELECT MAX(created_at) FROM support_messages y WHERE y.user_id = m.user_id AND y.from_staff = TRUE), 'epoch')) AS waiting
+     FROM support_messages m JOIN users u ON u.id = m.user_id
+     ORDER BY m.user_id, m.created_at DESC`,
+  );
+  const threads = r.rows.sort((a, b) => (b.waiting > 0) - (a.waiting > 0) || new Date(b.created_at) - new Date(a.created_at)).slice(0, 100);
+  res.json({ threads: threads.map((t) => ({
+    userId: t.user_id, username: t.username, displayName: t.display_name, publicId: t.public_id, avatarUrl: t.avatar_url,
+    lastMessage: t.body, lastFromStaff: t.from_staff, lastAt: t.created_at, waiting: t.waiting,
+  })) });
+});
+router.get('/support/:userId', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const r = await query(`SELECT * FROM support_messages WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`, [userId]);
+  res.json({ messages: r.rows.reverse().map((m) => ({ id: m.id, fromStaff: m.from_staff, category: m.category, text: m.body, createdAt: m.created_at })) });
+});
+router.post('/support/:userId/reply', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const body = text(req.body?.text, 'Mesaj', { min: 1, max: 1500, required: true });
+  await assertUser(userId);
+  const m = (await query(`INSERT INTO support_messages(user_id, from_staff, staff_id, body) VALUES($1,TRUE,$2,$3) RETURNING id`, [userId, req.user.id, body])).rows[0];
+  hub.sendToUser(userId, { type: 'support_message' });
+  res.status(201).json({ id: m.id });
+});
+
+// ---------------- Coin paketleri (yönetici) ----------------
+router.get('/coin-packages', requireSuperAdmin, async (_req, res) => {
+  const r = await query(`SELECT * FROM coin_packages ORDER BY is_active DESC, sort_order, coins`);
+  res.json({ packages: r.rows.map((x) => ({ id: x.id, coins: String(x.coins), priceCents: String(x.price_cents), currency: x.currency, isActive: x.is_active })) });
+});
+router.post('/coin-packages', requireSuperAdmin, async (req, res) => {
+  const coins = bigAmount(req.body?.coins, 'Coin');
+  const price = bigAmount(req.body?.priceCents, 'Fiyat (kuruş)');
+  const r = await query(`INSERT INTO coin_packages(coins, price_cents, sort_order) VALUES($1,$2,(SELECT COALESCE(MAX(sort_order),0)+1 FROM coin_packages)) RETURNING id`, [coins.toString(), price.toString()]);
+  res.status(201).json({ id: r.rows[0].id });
+});
+router.post('/coin-packages/:id/active', requireSuperAdmin, async (req, res) => {
+  if (typeof req.body?.isActive !== 'boolean') throw fail('isActive true/false olmalı.');
+  const r = await query(`UPDATE coin_packages SET is_active = $2 WHERE id = $1 RETURNING id`, [uuid(req.params.id, 'Kimlik'), req.body.isActive]);
+  if (!r.rowCount) throw fail('Paket bulunamadı.', 404);
+  res.json({ ok: true });
+});
+
+// Yönetici "öğe ver" listesi: kategoriye göre tüm katalog öğeleri.
+router.get('/grantables', requireSuperAdmin, async (req, res) => {
+  const category = oneOf(req.query.category, STORE_CATS, 'Kategori');
+  let items;
+  if (category === 'frame') {
+    items = (await query(`SELECT id::text AS key, name, image_url FROM frames WHERE is_active = TRUE ORDER BY name`)).rows;
+  } else if (category === 'entrance_effect') {
+    items = (await query(`SELECT id::text AS key, name, animation_url AS image_url FROM entrance_effects WHERE is_active = TRUE ORDER BY name`)).rows;
+  } else {
+    items = (await query(`SELECT id::text AS key, name, image_url FROM store_items WHERE category = $1 AND is_active = TRUE ORDER BY name`, [category])).rows;
+  }
+  res.json({ items: items.map((x) => ({ key: x.key, name: x.name, imageUrl: x.image_url })) });
+});
+
+// Seçilen katalog öğesini kullanıcıya ver. days boş/0 = süresiz.
+router.post('/users/:userId/grant', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const category = oneOf(req.body?.category, STORE_CATS, 'Kategori');
+  const key = text(req.body?.itemKey, 'Öğe', { min: 1, max: 80, required: true });
+  const days = req.body?.days ? positiveInt(req.body.days, 'Gün', 3650) : null;
+  await assertUser(userId);
+  let name; let asset;
+  if (category === 'frame') {
+    const f = (await query(`SELECT name, image_url FROM frames WHERE id::text = $1`, [key])).rows[0];
+    if (!f) throw fail('Çerçeve bulunamadı.', 404);
+    ({ name, image_url: asset } = f);
+  } else if (category === 'entrance_effect') {
+    const f = (await query(`SELECT name, animation_url FROM entrance_effects WHERE id::text = $1`, [key])).rows[0];
+    if (!f) throw fail('Efekt bulunamadı.', 404);
+    name = f.name; asset = f.animation_url;
+  } else {
+    const f = (await query(`SELECT name, image_url FROM store_items WHERE id::text = $1 AND category = $2`, [key, category])).rows[0];
+    if (!f) throw fail('Ürün bulunamadı.', 404);
+    ({ name, image_url: asset } = f);
+  }
+  const r = await query(
+    `INSERT INTO inventory_items(user_id, item_type, item_key, item_name, expires_at, metadata)
+     VALUES($1,$2,$3,$4, CASE WHEN $5::int IS NULL THEN NULL ELSE NOW() + ($5::int * INTERVAL '1 day') END, $6) RETURNING id`,
+    [userId, category, key, name, days, JSON.stringify({ assetUrl: asset, grantedBy: req.user.id })],
+  );
+  await query(
+    `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, reference_id, metadata) VALUES($1,$2,'admin_inventory_grant','inventory',$3,$4)`,
+    [req.user.id, userId, r.rows[0].id, JSON.stringify({ category, key, days })],
+  );
+  res.status(201).json({ id: r.rows[0].id, name });
+});
+
 router.post('/media', requireSuperAdmin, express.raw({ type: () => true, limit: MEDIA_MAX_BYTES }), async (req, res) => {
   const buf = req.body;
   if (!Buffer.isBuffer(buf) || !buf.length) throw fail('Dosya gönderilmedi.');
@@ -317,6 +411,48 @@ router.post('/entrance-effects', requireSuperAdmin, async (req, res) => {
     req.body?.durationMs === undefined ? 4000 : positiveInt(req.body.durationMs, 'Süre', 20000)]);
   res.status(201).json({ id: r.rows[0].id });
 });
+const STORE_CATS = ['frame', 'chat_bubble', 'entrance_effect', 'mini_card', 'mic_wave', 'vehicle', 'badge'];
+router.get('/store/items', requireSuperAdmin, async (_req, res) => {
+  const r = await query(`SELECT * FROM store_items ORDER BY is_active DESC, category, sort_order, created_at DESC LIMIT 500`);
+  res.json({ items: r.rows.map((x) => ({ id: x.id, category: x.category, name: x.name, imageUrl: x.image_url, priceCoins: String(x.price_coins), durationDays: x.duration_days, isActive: x.is_active, forSale: x.for_sale })) });
+});
+router.post('/store/items', requireSuperAdmin, async (req, res) => {
+  const category = oneOf(req.body?.category, STORE_CATS, 'Kategori');
+  const name = text(req.body?.name, 'Ad', { min: 2, max: 100, required: true });
+  const imageUrl = assetUrl(req.body?.imageUrl, 'Görsel adresi') ?? (() => { throw fail('Görsel adresi gerekli.'); })();
+  const price = bigAmount(req.body?.priceCoins ?? 0, 'Fiyat');
+  const days = req.body?.durationDays === undefined ? 14 : positiveInt(req.body.durationDays, 'Süre (gün)', 3650);
+  // Çerçeve ve giriş efekti: mevcut kataloğa da eklenir (profilde/odada aynı kodla gösterilir).
+  let refId = null;
+  if (category === 'frame') refId = (await query(`INSERT INTO frames(name, image_url) VALUES($1,$2) RETURNING id`, [name, imageUrl])).rows[0].id;
+  if (category === 'entrance_effect') refId = (await query(`INSERT INTO entrance_effects(name, animation_url, duration_ms) VALUES($1,$2,4000) RETURNING id`, [name, imageUrl])).rows[0].id;
+  const r = await query(
+    `INSERT INTO store_items(category, name, image_url, ref_id, price_coins, duration_days, for_sale) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [category, name, imageUrl, refId, price.toString(), days, req.body?.forSale !== false && category !== 'badge'],
+  );
+  res.status(201).json({ id: r.rows[0].id });
+});
+router.post('/store/items/:id/active', requireSuperAdmin, async (req, res) => {
+  if (typeof req.body?.isActive !== 'boolean') throw fail('isActive true/false olmalı.');
+  const r = await query(`UPDATE store_items SET is_active = $2 WHERE id = $1 RETURNING id`, [uuid(req.params.id, 'Kimlik'), req.body.isActive]);
+  if (!r.rowCount) throw fail('Ürün bulunamadı.', 404);
+  res.json({ ok: true });
+});
+// Silme: geçmişte kullanılmışsa (satın alma/hediye kaydı) kayıtlar bozulmasın diye gizlenir, aksi halde tamamen silinir.
+async function removeOrHide(res, table, id, usedBy) {
+  try {
+    const r = await query(`DELETE FROM ${table} WHERE id = $1 RETURNING id`, [id]);
+    if (!r.rowCount) throw fail('Kayıt bulunamadı.', 404);
+    res.json({ ok: true, hidden: false });
+  } catch (e) {
+    if (e?.code !== '23503') throw e;
+    await query(`UPDATE ${table} SET is_active = FALSE WHERE id = $1`, [id]);
+    res.json({ ok: true, hidden: true, note: usedBy });
+  }
+}
+router.delete('/gifts/:id', requireSuperAdmin, async (req, res) => removeOrHide(res, 'gifts', uuid(req.params.id, 'Kimlik'), 'Geçmişte gönderildiği için silinmedi, gizlendi.'));
+router.delete('/store/items/:id', requireSuperAdmin, async (req, res) => removeOrHide(res, 'store_items', uuid(req.params.id, 'Kimlik'), 'Geçmişte alındığı için silinmedi, gizlendi.'));
+router.delete('/frames/:id', requireSuperAdmin, async (req, res) => removeOrHide(res, 'frames', uuid(req.params.id, 'Kimlik'), 'Kullanıcılarda olduğu için silinmedi, gizlendi.'));
 router.get('/catalog', requireSuperAdmin, async (_req, res) => {
   const g = await query(`SELECT id, name, coin_price, icon_url, animation_url, animation_format, category, is_active FROM gifts ORDER BY is_active DESC, coin_price DESC, name`);
   const f = await query(`SELECT id, name, image_url, is_active FROM frames ORDER BY is_active DESC, name`);

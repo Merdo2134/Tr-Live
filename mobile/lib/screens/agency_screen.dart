@@ -21,7 +21,9 @@ String periodTitle(String key) {
 double _ratio(num value, num target) => target <= 0 ? 1 : (value / target).clamp(0, 1).toDouble();
 
 class AgencyScreen extends StatefulWidget {
-  const AgencyScreen({super.key});
+  /// 'broadcaster' → Yayıncı Merkezi (yayıncı başvurusu, ajansa katılma, maaş); 'agency' → Ajans Merkezi (yalnızca ajans sahibi).
+  final String mode;
+  const AgencyScreen({super.key, this.mode = 'broadcaster'});
 
   @override
   State<AgencyScreen> createState() => _AgencyScreenState();
@@ -99,7 +101,7 @@ class _AgencyScreenState extends State<AgencyScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Ajans ve yayıncı')),
+      appBar: AppBar(title: Text(widget.mode == 'agency' ? 'Ajans Merkezi' : 'Yayıncı Merkezi')),
       body: AsyncBody<Map<String, dynamic>>(
         key: ValueKey(_version),
         load: _load,
@@ -112,7 +114,14 @@ class _AgencyScreenState extends State<AgencyScreen> {
           final canBeBroadcaster = owned == null && (b == null || bStatus == 'rejected');
           return RefreshIndicator(
             onRefresh: reload,
-            child: ListView(padding: const EdgeInsets.all(12), children: [
+            child: ListView(padding: const EdgeInsets.all(12), children: widget.mode == 'agency'
+              ? [
+                  if (owned != null) _ownerCard(owned) else ...[
+                    const Padding(padding: EdgeInsets.all(16), child: Text('Henüz bir ajansınız yok. Ajans kurmak için Yayıncı Merkezi\'ni kullanın.')),
+                  ],
+                ]
+              : [
+              if (owned != null) const Padding(padding: EdgeInsets.all(12), child: Text('Ajans sahibisiniz. Ajansınızı Ajans Merkezi\'nden yönetebilirsiniz.', style: TextStyle(color: Colors.white60))),
               if (canBeBroadcaster)
                 Card(
                   child: Padding(
@@ -146,7 +155,6 @@ class _AgencyScreenState extends State<AgencyScreen> {
                 OutlinedButton.icon(onPressed: _browseAgencies, icon: const Icon(Icons.business), label: const Text('Ajanslara göz at ve başvur')),
               ],
               const SizedBox(height: 12),
-              if (owned != null) _ownerCard(owned),
               if (owned == null && (b == null || bStatus == 'rejected'))
                 OutlinedButton.icon(onPressed: _createAgency, icon: const Icon(Icons.add_business), label: const Text('Ajans kur')),
             ]),

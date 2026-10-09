@@ -6,6 +6,7 @@ import { userLimit } from '../firewall.js';
 import { hub } from '../realtime.js';
 import { config } from '../config.js';
 import { cleanMultiline, containsBanned, looksLikeFlood } from '../text_safety.js';
+import { areFriends } from './friends.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 
 export const router = Router();
@@ -73,10 +74,8 @@ router.post('/with/:userId', userLimit('dm10s', 6, 10e3), userLimit('dm1h', 200,
   // Engelleme durumu karşı tarafa belli edilmez: genel bir ret mesajı döner.
   if (blocked.rowCount) throw fail('Bu kullanıcıya mesaj gönderemezsiniz.', 403);
   if (peer.who_can_dm === 'nobody') throw fail('Bu kullanıcı özel mesaj almıyor.', 403);
-  if (peer.who_can_dm === 'following') {
-    const f = await query(`SELECT 1 FROM follows WHERE follower_id = $1 AND followed_id = $2`, [peerId, req.user.id]);
-    if (!f.rowCount) throw fail('Bu kullanıcı yalnızca takip ettiği kişilerden mesaj alıyor.', 403);
-  }
+  // Yalnızca arkadaş olan kişiler mesajlaşabilir.
+  if (!(await areFriends(req.user.id, peerId))) throw fail('Mesajlaşmak için önce arkadaş olmalısınız.', 403);
   const m = (await query(`INSERT INTO direct_messages(sender_id, receiver_id, body) VALUES($1,$2,$3) RETURNING *`, [req.user.id, peerId, body])).rows[0];
   const message = msgJson(m);
   hub.sendToUser(peerId, { type: 'dm', message });
