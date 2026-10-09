@@ -1,3 +1,28 @@
+## v2.33.0 — Oda ekranı Yoho ölçüleriyle
+- Koltuk yerleşimi Yoho ekran görüntülerinden ölçülen oranlarla her mod için ayrı: 2, 5, 8, 9, 12, 15, 20 ve yeni 30 mikrofon (6 x 5). Koltuklar başlığın altından sabit ölçüyle başlar; sohbet koltukların bittiği yerden akar. Boş koltuk: yarı saydam beyaz daire + ince çerçeve, altında numara.
+- Mikrofonlar artık hiçbir durumda küçülmez: klavye açılınca oda kararır, mesajlar karartının üstünde görünür, beyaz yazı şeridi klavyenin üstündedir (Yoho). Hediye paneli koltukları sıkıştırmaz.
+- Sohbet: renkli saydam balonlar (seviyeye göre lacivert/turkuaz/mavi/mor/pembe/altın), solda avatar, üstte ad ve seviye, altta balon; sistem mesajları sarı ("Oda sahibi yeni bir mikrofon moduna geçmiştir…").
+- Alt bar Yoho düzeni: mikrofonda değilken "Selam..." kutusu + hediye, mesajlar, oyun, menü; mikrofondayken sohbet, mikrofon, emoji, hediye, mesajlar, oyun, menü. Ses aç/kapat, kamera, sıraya gir ve mikrofondan in oda araçlarına taşındı.
+- Mikrofon modu penceresi Yoho gibi: beyaz pencere, mavi-mor başlık, ipuçları, önizlemeli 3 sütun, seçili yeşil çerçeve + tik, azaltırken "Tips" onayı, pencere açık kalır.
+- Yeni: "Mikrofonda olmak için istekte bulunmanız gerekiyor" modu. Açıkken kullanıcı koltuğa dokununca istek gönderir; yetkililer "Mikrofon istekleri" listesinden onaylar (davet) veya reddeder.
+- Sunucu: migration 025 (30 koltuk, rooms.mic_request), istek modu kontrolleri, DELETE /api/rooms/:id/mic/queue/:userId.
+
+## v2.32.0
+- Tüm uygulamada alt sistem çubuğu (Android gezinme çubuğu) payı: içerik artık çubuğun altında kalmıyor (Seviye Merkezi dahil tüm ekranlar).
+- Hediye paneli açılınca sohbet ve alt bar gizlenir, sahne panelin üstüne sıkışır ve mikrofonlar küçülür; klavye açılınca da mikrofonlar küçülür.
+- Oda sohbeti Yoho gibi şeffaf: balonlar saydam, üst kenarda solarak kaybolan kayar akış.
+
+## v2.31.1
+- WIP rozeti koltuk adlarından ve oda sohbetindeki adların yanından kaldırıldı (nick efekti kalır).
+- Her koltuk modu (2, 4, 5, 6, 8, 9, 12, 15, 20) için ayrı, sabit koltuk ölçüsü tablosu; yükseklik yetmezse orantılı küçülür.
+
+## v2.31.0
+- Mikrofon modu penceresi açılmama hatası düzeltildi ("Cannot modify an unmodifiable list": sabit listeye sort uygulanıyordu).
+- Koltuk adı: WIP rozeti küçük "W5" biçimine geçti, kesilme/taşma giderildi; ad satırı ölçüleri düzeltildi.
+- Oda küçültme balonu ve müzik balonu: yumuşak sürükle-bırak ve kenara yapışma, kapatma (X) düğmesi büyütüldü ve tıklanabilir alana alındı. Oda küçültülünce müzik balonu da görünür kalır.
+- Müzik sistemi yeniden yapıldı: tek çalma listesi. "Müzik ekle" ile telefondan bir veya birden çok şarkı seçilir, seçim sırasıyla listeye girer ve odada çalar (hiçbir şey çalmıyorsa ilk şarkı otomatik başlar). Telefonda ayrı dinleme/kitaplık kaldırıldı (iki yerden çalma sorunu bitti). Yetkililer için liste sınırı 40 şarkıya çıktı.
+- Profil: Ayarlar en alta alındı (üstteki dişli kalktı). Kullanıcı profilinde kapak yüksekliği küçüldü.
+
 ## v2.30.1
 - Derleme hatası düzeltildi (kullanıcı arama kutusu, common.dart: const InputDecoration).
 

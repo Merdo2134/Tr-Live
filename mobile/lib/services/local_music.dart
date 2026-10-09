@@ -108,6 +108,46 @@ class LocalMusic {
     return added;
   }
 
+
+  /// Seçilen dosyaları (seçim sırasıyla) tek tek odaya yükleyip çalma listesine ekler.
+  /// Hiçbir şey çalmıyorsa sunucu ilk şarkıyı kendisi başlatır. Sonuç: (eklenen, atlanan, ilk hata).
+  Future<({int added, int skipped, String? error})> addPickedToRoom(String roomId, List<PlatformFile> files, {void Function(int done, int total)? onProgress}) async {
+    var added = 0, skipped = 0;
+    String? error;
+    for (var i = 0; i < files.length; i++) {
+      onProgress?.call(i, files.length);
+      final f = files[i];
+      final path = f.path;
+      try {
+        if (path == null) throw ApiException('Dosya okunamadı.');
+        final size = await File(path).length();
+        if (size > maxBytes) throw ApiException('"${f.name}" 25 MB sınırını aşıyor.');
+        final dur = await _durationOf(path);
+        if (dur == null) throw ApiException('"${f.name}" çalınamayan bir dosya.');
+        final meta = parseName(f.name);
+        final bytes = await File(path).readAsBytes();
+        final up = await Api.postBytes('/api/rooms/$roomId/music/upload', bytes, contentTypeOf(path), query: {
+          'title': meta.title,
+          if (meta.artist.isNotEmpty) 'artist': meta.artist,
+          'durationMs': '$dur',
+        });
+        final id = (up['track'] as Map?)?['id'];
+        if (id == null) throw ApiException('Yükleme tamamlanamadı.');
+        await Api.post('/api/rooms/$roomId/music/queue', {'trackId': id});
+        added++;
+      } on ApiException catch (e) {
+        skipped++;
+        error ??= e.message;
+        if (e.message.contains('en fazla') || e.message.contains('Sıra dolu')) break; // limit doldu: devam etmenin anlamı yok
+      } catch (_) {
+        skipped++;
+        error ??= 'Bir şarkı eklenemedi.';
+      }
+    }
+    onProgress?.call(files.length, files.length);
+    return (added: added, skipped: skipped, error: error);
+  }
+
   Future<int?> _durationOf(String path) async {
     final p = AudioPlayer();
     try {

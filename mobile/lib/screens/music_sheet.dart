@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/local_music.dart';
@@ -35,19 +36,16 @@ class _MusicPanel extends StatefulWidget {
   State<_MusicPanel> createState() => _MusicPanelState();
 }
 
-class _MusicPanelState extends State<_MusicPanel> with TickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this);
+class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderStateMixin {
   late final AnimationController _disc = AnimationController(vsync: this, duration: const Duration(seconds: 10));
   Timer? _tick;
-  final _phoneSearch = TextEditingController();
     double? _dragging; // ilerleme çubuğu sürüklenirken
 
-  final Set<String> _sending = {}; // yüklenmekte olan dosya yolları
+  String? _progress; // "2/5 yükleniyor"
 
   @override
   void initState() {
     super.initState();
-    LocalMusic.instance.load();
     _tick = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (mounted && _dragging == null) setState(() {});
     });
@@ -55,11 +53,8 @@ class _MusicPanelState extends State<_MusicPanel> with TickerProviderStateMixin 
 
   @override
   void dispose() {
-    LocalMusic.instance.stopPreview();
     _tick?.cancel();
-    _tabs.dispose();
     _disc.dispose();
-    _phoneSearch.dispose();
     super.dispose();
   }
 
@@ -74,14 +69,17 @@ class _MusicPanelState extends State<_MusicPanel> with TickerProviderStateMixin 
   Widget build(BuildContext context) {
     return Column(children: [
       _player(),
-      TabBar(
-        controller: _tabs,
-        indicatorColor: Colors.pinkAccent,
-        labelColor: Colors.pinkAccent,
-        unselectedLabelColor: Colors.white60,
-        tabs: const [Tab(text: 'Müziklerim'), Tab(text: 'Sıra')],
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 2, 12, 4),
+        child: Row(children: [
+          const Expanded(child: Text('Çalma listesi', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+          if (_progress != null)
+            Padding(padding: const EdgeInsets.only(right: 10), child: Text(_progress!, style: const TextStyle(color: Colors.white70, fontSize: 12)))
+          else if (widget.canManage || widget.canQueue)
+            FilledButton.icon(onPressed: _addFiles, icon: const Icon(Icons.add), label: const Text('Müzik ekle')),
+        ]),
       ),
-      Expanded(child: TabBarView(controller: _tabs, children: [_phone(), _nowPlaying()])),
+      Expanded(child: _playlist()),
     ]);
   }
 
@@ -125,7 +123,7 @@ class _MusicPanelState extends State<_MusicPanel> with TickerProviderStateMixin 
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(track?['title']?.toString() ?? 'Şu an müzik çalmıyor', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                  Text((track?['artist'] ?? '').toString().isEmpty ? (playing ? 'Çalıyor' : 'Listeden bir şarkı seç') : track!['artist'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  Text((track?['artist'] ?? '').toString().isEmpty ? (playing ? 'Çalıyor' : (track != null ? 'Duraklatıldı' : 'Listeden bir şarkı seç')) : track!['artist'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 12)),
                 ]),
               ),
               IconButton(tooltip: 'Küçült', icon: const Icon(Icons.keyboard_arrow_down, size: 28), onPressed: () => Navigator.of(context).maybePop()),
@@ -188,21 +186,43 @@ class _MusicPanelState extends State<_MusicPanel> with TickerProviderStateMixin 
     );
   }
 
-  Widget _nowPlaying() {
+  /// Tek liste: üstte çalan şarkı, altında sıradakiler (ekleme sırasıyla).
+  Widget _playlist() {
     return ValueListenableBuilder<Map<String, dynamic>?>(
       valueListenable: MusicService.instance.state,
       builder: (context, s, _) {
         final queue = listOf(s?['queue']);
-        if (queue.isEmpty) return const Center(child: Text('Sıra boş. Müziklerim sekmesinden şarkı ekle.', style: TextStyle(color: Colors.white54)));
-        return ListView(children: [
-          for (final q in queue)
+        final current = mapOf(s?['track']);
+        final playing = s?['status'] == 'playing';
+        if (queue.isEmpty && current == null) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.library_music, size: 56, color: Colors.white38),
+                const SizedBox(height: 12),
+                Text(widget.canManage || widget.canQueue ? '"Müzik ekle" ile telefonundan bir veya birden çok şarkı seç.\nSeçtiğin sırayla listeye girer ve odada çalar.' : 'Listede şarkı yok.', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white60)),
+              ]),
+            ),
+          );
+        }
+        return ListView(padding: const EdgeInsets.only(bottom: 16), children: [
+          if (current != null)
             ListTile(
               dense: true,
-              leading: const Icon(Icons.queue_music, color: Colors.pinkAccent),
-              title: Text((mapOf(q['track'])?['title'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text((mapOf(q['track'])?['artist'] ?? '').toString()),
-              trailing: (widget.canManage || q['addedBy'] == Session.id)
-                  ? IconButton(icon: const Icon(Icons.close), onPressed: () => _call(() => Api.delete('$_base/queue/${q['id']}')))
+              tileColor: Colors.white10,
+              leading: Icon(playing ? Icons.graphic_eq : Icons.pause_circle_outline, color: Colors.pinkAccent),
+              title: Text((current['title'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
+              subtitle: Text('${(current['artist'] ?? '').toString().isEmpty ? 'Bilinmeyen sanatçı' : current['artist']} · ${_mmss((current['durationMs'] as num?) ?? 0)}'),
+            ),
+          for (var i = 0; i < queue.length; i++)
+            ListTile(
+              dense: true,
+              leading: CircleAvatar(radius: 13, backgroundColor: Colors.white12, child: Text('${i + 1}', style: const TextStyle(fontSize: 12))),
+              title: Text((mapOf(queue[i]['track'])?['title'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text('${(mapOf(queue[i]['track'])?['artist'] ?? '').toString().isEmpty ? 'Bilinmeyen sanatçı' : mapOf(queue[i]['track'])?['artist']} · ${_mmss((mapOf(queue[i]['track'])?['durationMs'] as num?) ?? 0)}'),
+              trailing: (widget.canManage || queue[i]['addedBy'] == Session.id)
+                  ? IconButton(icon: const Icon(Icons.close), onPressed: () => _call(() => Api.delete('$_base/queue/${queue[i]['id']}')))
                   : null,
             ),
         ]);
@@ -211,106 +231,20 @@ class _MusicPanelState extends State<_MusicPanel> with TickerProviderStateMixin 
   }
 
   Future<void> _addFiles() async {
-    try {
-      final n = await LocalMusic.instance.pickAndAdd();
-      if (mounted && n > 0) toast(context, '$n şarkı eklendi.');
-    } catch (e) {
-      if (mounted) toast(context, 'Dosyalar eklenemedi.');
+    final r = await FilePicker.platform.pickFiles(type: FileType.audio, allowMultiple: true);
+    if (r == null || r.files.isEmpty || !mounted) return;
+    setState(() => _progress = '1/${r.files.length} yükleniyor…');
+    final res = await LocalMusic.instance.addPickedToRoom(widget.roomId, r.files, onProgress: (d, t) {
+      if (mounted) setState(() => _progress = d >= t ? null : '${d + 1}/$t yükleniyor…');
+    });
+    if (!mounted) return;
+    setState(() => _progress = null);
+    if (res.added > 0 && res.skipped == 0) {
+      toast(context, '${res.added} şarkı listeye eklendi.');
+    } else if (res.added > 0) {
+      toast(context, '${res.added} şarkı eklendi, ${res.skipped} eklenemedi: ${res.error ?? ''}', error: true);
+    } else {
+      toast(context, res.error ?? 'Şarkı eklenemedi.', error: true);
     }
-  }
-
-  Future<void> _sendToRoom(LocalTrack t) async {
-    if (_sending.contains(t.path)) return;
-    setState(() => _sending.add(t.path));
-    try {
-      await LocalMusic.instance.sendToRoom(widget.roomId, t, playNow: widget.canManage);
-      if (mounted) toast(context, widget.canManage ? 'Odada çalınıyor.' : 'Sıraya eklendi.');
-    } on ApiException catch (e) {
-      if (mounted) toast(context, e.message);
-    } catch (_) {
-      if (mounted) toast(context, 'Şarkı odaya gönderilemedi.');
-    } finally {
-      if (mounted) setState(() => _sending.remove(t.path));
-    }
-  }
-
-  String _mb(int b) => '${(b / 1048576).toStringAsFixed(1)} MB';
-
-  Widget _phone() {
-    final canSend = widget.canManage || widget.canQueue;
-    return ValueListenableBuilder<List<LocalTrack>>(
-      valueListenable: LocalMusic.instance.tracks,
-      builder: (context, list, _) {
-        final q = _phoneSearch.text.trim().toLowerCase();
-        final shown = q.isEmpty ? list : list.where((t) => t.title.toLowerCase().contains(q) || t.artist.toLowerCase().contains(q)).toList();
-        return Column(children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-            child: Row(children: [
-              Expanded(
-                child: TextField(
-                  controller: _phoneSearch,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(hintText: 'Telefonumdaki şarkılarda ara', prefixIcon: Icon(Icons.search), border: OutlineInputBorder(), isDense: true),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.icon(onPressed: _addFiles, icon: const Icon(Icons.add), label: const Text('Ekle')),
-            ]),
-          ),
-          if (!canSend)
-            const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 0), child: Text('Şarkıyı odaya göndermek için mikrofonda olmalısınız. Telefonda dinleyebilirsiniz.', style: TextStyle(color: Colors.white54, fontSize: 12))),
-          Expanded(
-            child: list.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        const Icon(Icons.library_music, size: 56, color: Colors.white38),
-                        const SizedBox(height: 12),
-                        const Text('Telefonundaki şarkıları buradan seç.', textAlign: TextAlign.center),
-                        const SizedBox(height: 4),
-                        const Text('Seçtiğin şarkıyı odadakilerle birlikte dinleyebilirsin (en fazla 25 MB).', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 12)),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(onPressed: _addFiles, icon: const Icon(Icons.folder_open), label: const Text('Şarkı seç')),
-                      ]),
-                    ),
-                  )
-                : ListView(children: [
-                    for (final t in shown)
-                      ListTile(
-                        leading: ValueListenableBuilder<String?>(
-                          valueListenable: LocalMusic.instance.previewing,
-                          builder: (_, cur, __) => IconButton(
-                            tooltip: cur == t.path ? 'Durdur' : 'Telefonda dinle',
-                            icon: Icon(cur == t.path ? Icons.pause_circle_filled : Icons.play_circle_fill, size: 32),
-                            onPressed: () async {
-                              try {
-                                await LocalMusic.instance.togglePreview(t);
-                              } catch (_) {
-                                if (mounted) toast(context, 'Bu dosya çalınamadı.');
-                              }
-                            },
-                          ),
-                        ),
-                        title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text('${t.artist.isEmpty ? 'Bilinmeyen sanatçı' : t.artist} · ${_mmss(t.durationMs)} · ${_mb(t.sizeBytes)}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                          if (_sending.contains(t.path))
-                            const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)))
-                          else if (canSend)
-                            IconButton(
-                              tooltip: widget.canManage ? 'Odada çal' : 'Sıraya ekle',
-                              icon: Icon(widget.canManage ? Icons.cast : Icons.playlist_add),
-                              onPressed: () => _sendToRoom(t),
-                            ),
-                          IconButton(tooltip: 'Listeden kaldır', icon: const Icon(Icons.close), onPressed: () => LocalMusic.instance.remove(t)),
-                        ]),
-                      ),
-                  ]),
-          ),
-        ]);
-      },
-    );
   }
 }

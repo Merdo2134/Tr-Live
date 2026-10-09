@@ -13,7 +13,7 @@ import { loadPublicRow, loadPublicRows, activeEntranceEffect } from '../services
 import { leaveRoom, closeRoom, SUPPORTED_SEATS } from '../services/rooms.js';
 import { openMicSession, closeMicSessions } from '../services/mic.js';
 import { scoreboardOf } from '../services/scoreboard.js';
-import { queueOf, broadcastQueue, removeFromQueue, notifyNext } from '../services/micqueue.js';
+import { queueOf, broadcastQueue, removeFromQueue, notifyNext, grantMicInvite, hasMicInvite, consumeMicInvite } from '../services/micqueue.js';
 import { cleanPublic } from '../safe_text.js';
 import crypto from 'node:crypto';
 import { noteTask } from '../services/daily.js';
@@ -32,7 +32,7 @@ const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_ALPHABET[b %
 const roomJson = (r, { showCode = false } = {}) => ({
   id: r.id, roomNumber: r.room_number ?? null, announcement: r.announcement ?? '', coverUrl: r.cover_url ?? null, name: r.name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.created_at,
   tags: r.tags ?? [], locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled !== false,
-  hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false, lockedSeats: r.locked_seats ?? [],
+  hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false, lockedSeats: r.locked_seats ?? [], micRequest: r.mic_request === true,
   ...(showCode && r.join_code ? { joinCode: r.join_code } : {}),
 });
 
@@ -229,7 +229,7 @@ router.get('/:roomId', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const r = (await query(
     `SELECT r.id AS room_id, r.room_number, r.cover_url, r.announcement, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags, r.chat_enabled,
-       r.is_hidden AS room_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats,
+       r.is_hidden AS room_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats, r.mic_request,
        (r.password_hash IS NOT NULL) AS locked, ${USER_PUBLIC_COLUMNS}
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS} WHERE r.id = $1 AND r.is_active = TRUE`,
     [roomId],
@@ -242,7 +242,7 @@ router.get('/:roomId', requireAuth, async (req, res) => {
     room: {
       id: r.room_id, roomNumber: r.room_number ?? null, coverUrl: r.cover_url ?? null, announcement: r.announcement ?? '', name: r.room_name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.room_created_at,
       tags: r.tags ?? [], locked: r.locked, chatEnabled: r.chat_enabled !== false,
-      hidden: r.room_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [],
+      hidden: r.room_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [], micRequest: r.mic_request === true,
       ...(canSeeCode && r.join_code ? { joinCode: r.join_code } : {}),
       owner: publicUser(r, req.user.id),
     },
@@ -330,6 +330,7 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   if (b.announcement !== undefined) set('announcement', cleanPublic(text(b.announcement ?? '', 'Duyuru', { min: 0, max: 200 }), 'Duyuru') || null);
   if (b.chatEnabled !== undefined) { if (typeof b.chatEnabled !== 'boolean') throw fail('chatEnabled true/false olmalı.'); set('chat_enabled', b.chatEnabled); }
   if (b.theme !== undefined) set('theme', oneOf(b.theme, THEMES, 'Tema'));
+  if (b.micRequest !== undefined) { if (typeof b.micRequest !== 'boolean') throw fail('micRequest true/false olmalı.'); set('mic_request', b.micRequest); }
   let newSeats = null;
   if (b.seatCount !== undefined) {
     newSeats = Number(b.seatCount);
@@ -388,7 +389,7 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   hub.broadcastRoom(roomId, {
     type: 'room_settings', roomId, name: r.name, tags: r.tags, locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled,
     theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, hidden: r.is_hidden,
-    seatCount: r.seat_count, lockedSeats: r.locked_seats ?? [], announcement: r.announcement ?? '', coverUrl: r.cover_url ?? null,
+    seatCount: r.seat_count, lockedSeats: r.locked_seats ?? [], announcement: r.announcement ?? '', coverUrl: r.cover_url ?? null, micRequest: r.mic_request === true,
   });
   res.json({ room: roomJson(r, { showCode: true }) });
 });
@@ -405,7 +406,7 @@ router.put('/:roomId/cover', requireAuth, userLimit('room_cover', 10, 10 * 60e3)
   await removeUpload(before.cover_url);
   hub.broadcastRoom(roomId, { type: 'room_settings', roomId, name: before.name, tags: before.tags, locked: Boolean(before.password_hash), chatEnabled: before.chat_enabled,
     theme: before.theme, themeImageUrl: before.theme_image_url, scoreboardEnabled: before.scoreboard_enabled, hidden: before.is_hidden,
-    seatCount: before.seat_count, lockedSeats: before.locked_seats ?? [], announcement: before.announcement ?? '', coverUrl: url });
+    seatCount: before.seat_count, lockedSeats: before.locked_seats ?? [], announcement: before.announcement ?? '', coverUrl: url, micRequest: before.mic_request === true });
   res.json({ url });
 });
 
@@ -482,6 +483,10 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
   const room = await activeRoom(roomId);
   const member = await memberOf(roomId, userId);
   if (!member) throw fail('Önce odaya girin.', 403);
+  // İstek modu: yetkili olmayanlar mikrofona yalnızca davetle (yetkili onayı) çıkar.
+  if (room.mic_request && member.seat_index === null && !SEAT_MANAGERS.includes(member.role) && !hasMicInvite(roomId, userId)) {
+    throw fail('Bu odada mikrofona çıkmak için istek göndermelisiniz.', 409);
+  }
 
   const seatIndex = await tx(async (c) => {
     await c.query(`SELECT id FROM rooms WHERE id = $1 FOR UPDATE`, [roomId]); // koltuk atamalarını sıraya sokar
@@ -509,6 +514,7 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
     return target;
   });
   await setCanPublish(roomId, userId, true);
+  consumeMicInvite(roomId, userId);
   await removeFromQueue(roomId, userId);
   hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId, seatIndex, microphone: true });
   noteTask(userId, 'mic');
@@ -548,6 +554,17 @@ router.post('/:roomId/mic/queue', requireAuth, userLimit('mic_queue', 30, 60e3),
 router.delete('/:roomId/mic/queue', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   await removeFromQueue(roomId, req.user.id);
+  res.json({ ok: true, queue: await queueOf(roomId) });
+});
+
+// Yetkili: mikrofon isteğini reddeder (kullanıcıyı sıradan çıkarır).
+router.delete('/:roomId/mic/queue/:userId', requireAuth, async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const targetId = uuid(req.params.userId, 'Kullanıcı');
+  await activeRoom(roomId);
+  const me = await memberOf(roomId, req.user.id);
+  if (!me || !SEAT_MANAGERS.includes(me.role)) throw fail('Mikrofon isteklerini yalnızca oda yetkilileri yönetir.', 403);
+  await removeFromQueue(roomId, targetId);
   res.json({ ok: true, queue: await queueOf(roomId) });
 });
 
@@ -667,6 +684,7 @@ router.post('/:roomId/members/:userId/mic-invite', requireAuth, userLimit('mic_i
     seatIndex = Number(seatIndex);
     if (!Number.isInteger(seatIndex) || seatIndex < 1 || seatIndex >= room.seat_count) throw fail('Geçersiz koltuk.');
   }
+  grantMicInvite(roomId, targetId);
   hub.sendToUser(targetId, { type: 'mic_invite', roomId, seatIndex, fromUserId: req.user.id, fromName: req.user.display_name });
   res.json({ ok: true });
 });

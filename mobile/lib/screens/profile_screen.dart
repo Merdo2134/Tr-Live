@@ -334,7 +334,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
                   IconButton(tooltip: 'Müşteri hizmetleri', icon: const Icon(Icons.headset_mic_outlined), onPressed: () => _open(const CustomerServiceScreen())),
                   IconButton(tooltip: 'Profili düzenle', icon: const Icon(Icons.edit_outlined), onPressed: () => _open(const EditProfileScreen())),
-                  IconButton(tooltip: 'Ayarlar', icon: const Icon(Icons.settings), onPressed: () => _openSettings(p, isDealer)),
                 ]),
               ),
             ),
@@ -343,6 +342,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _moneyCards(p),
             _quickTiles(p),
             _menu(p, isDealer),
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              decoration: BoxDecoration(color: Pal.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: Pal.outline)),
+              child: ListTile(
+                leading: Container(width: 40, height: 40, decoration: BoxDecoration(color: Pal.cyan.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.settings, color: Pal.cyan)),
+                title: const Text('Ayarlar', style: TextStyle(fontWeight: FontWeight.w600)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _openSettings(p, isDealer),
+              ),
+            ),
           ]),
         );
       },

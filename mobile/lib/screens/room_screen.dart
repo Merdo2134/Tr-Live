@@ -10,6 +10,7 @@ import 'package:livekit_client/livekit_client.dart' as lk;
 import '../services/api.dart';
 import '../widgets/music_bubble.dart';
 import '../services/background_service.dart';
+import '../services/inbox_service.dart';
 import '../services/media_cache.dart';
 import '../services/music_service.dart';
 import '../services/room_dock.dart';
@@ -27,6 +28,7 @@ import 'gift_sheet.dart';
 import 'ludo_screen.dart';
 import 'pk_sheet.dart';
 import 'music_sheet.dart';
+import 'messages_screen.dart';
 import 'user_screens.dart';
 
 const _roleLabels = {'owner': 'Oda sahibi', 'cohost': 'Yardımcı sahip', 'moderator': 'Moderatör', 'user': 'Üye'};
@@ -242,7 +244,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final r = await guard(context, () => _inQueue ? Api.delete('/api/rooms/${widget.roomId}/mic/queue') : Api.post('/api/rooms/${widget.roomId}/mic/queue'));
     if (r == null || !mounted) return;
     setState(() => _queue = ((r['queue'] as List?) ?? const []).map((x) => x.toString()).toList());
-    if (_inQueue) toast(context, 'Sıraya girdiniz. Sıra size gelince haber verilir.');
+    if (_inQueue) toast(context, _micRequest ? 'Mikrofon isteğin gönderildi. Yetkili onaylayınca mikrofona çıkabilirsin.' : 'Sıraya girdiniz. Sıra size gelince haber verilir.');
   }
 
   Future<void> _toggleFavorite() async {
@@ -392,7 +394,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           ),
         ).then((ok) {
           _micInviteOpen = false;
-          if (ok == true && mounted) _takeMic(seat);
+          if (ok == true && mounted) _takeMic(seat, true);
         });
       }
       return;
@@ -441,6 +443,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         break;
       case 'room_chat_cleared':
         setState(() => _messages.clear());
+        _addSystemMessage('Sohbetler temizlendi.', color: const Color(0xFF34D399));
         break;
       case 'lucky_bag_new':
         final nb = mapOf(e['bag']);
@@ -504,11 +507,15 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         _flyGift(e);
         break;
       case 'room_settings':
+        if (e['seatCount'] != null && e['seatCount'] != _room?['seatCount']) {
+          _addSystemMessage('Oda sahibi yeni bir mikrofon moduna geçmiştir. Geçerli mikrofon konumu değiştirilecektir.');
+        }
         setState(() => _room = {
               ...?_room,
               'name': e['name'], 'tags': e['tags'], 'locked': e['locked'], 'chatEnabled': e['chatEnabled'],
               'theme': e['theme'], 'themeImageUrl': e['themeImageUrl'], 'scoreboardEnabled': e['scoreboardEnabled'], 'hidden': e['hidden'],
               if (e['seatCount'] != null) 'seatCount': e['seatCount'],
+              if (e['micRequest'] != null) 'micRequest': e['micRequest'],
               if (e['lockedSeats'] != null) 'lockedSeats': e['lockedSeats'],
             });
         break;
@@ -625,7 +632,18 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   }
 
   // ---------- Eylemler ----------
-  Future<void> _takeMic([int? seat]) async {
+  bool get _micRequest => _room?['micRequest'] == true;
+
+  Future<void> _takeMic([int? seat, bool invited = false]) async {
+    // İstek modu: yetkili olmayan kullanıcı koltuğa dokununca istek gönderir (davetle gelirse doğrudan çıkar).
+    if (_micRequest && !invited && !_onSeat && !_canSeatManage) {
+      if (_inQueue) {
+        toast(context, 'İsteğin zaten gönderildi; yetkili onayını bekle.');
+      } else {
+        await _toggleQueue();
+      }
+      return;
+    }
     final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/mic/take', {if (seat != null) 'seatIndex': seat}));
     if (r == null || !mounted) return;
     setState(() => _applySeat(Session.id, (r['seatIndex'] as num?)?.toInt(), true));
@@ -635,6 +653,53 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/mic/leave'));
     if (r == null || !mounted) return;
     setState(() => _applySeat(Session.id, null, false));
+  }
+
+  /// Yetkili: mikrofon isteklerini onayla (davet gönder) veya reddet.
+  void _micRequestsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) {
+          final list = [for (final id in _queue) _members.where((m) => m['userId'] == id).firstOrNull].whereType<Map<String, dynamic>>().toList();
+          return SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Padding(padding: EdgeInsets.only(bottom: 6), child: Text('Mikrofon istekleri', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
+              if (list.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('Bekleyen istek yok.', style: TextStyle(color: Colors.white54))),
+              Flexible(
+                child: ListView(shrinkWrap: true, children: [
+                  for (final m in list)
+                    ListTile(
+                      leading: UserAvatar(user: mapOf(m['user']), radius: 20),
+                      title: UserName(user: mapOf(m['user'])),
+                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                        IconButton(
+                          tooltip: 'Reddet',
+                          icon: const Icon(Icons.close, color: Colors.redAccent),
+                          onPressed: () async {
+                            final r = await guard(context, () => Api.delete('/api/rooms/${widget.roomId}/mic/queue/${m['userId']}'));
+                            if (r != null && mounted) setState(() => _queue = ((r['queue'] as List?) ?? const []).map((x) => x.toString()).toList());
+                            if (c.mounted) setS(() {});
+                          },
+                        ),
+                        FilledButton(
+                          onPressed: () async {
+                            final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/members/${m['userId']}/mic-invite', {}));
+                            if (r != null && mounted) toast(context, 'Mikrofona davet gönderildi.');
+                          },
+                          child: const Text('Onayla'),
+                        ),
+                      ]),
+                    ),
+                ]),
+              ),
+              const SizedBox(height: 8),
+            ]),
+          );
+        },
+      ),
+    );
   }
 
   bool _canModerate(String targetRole) =>
@@ -713,38 +778,34 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     setState(() => _flights.addAll(fresh));
   }
 
+  /// Mikrofon modu (Yoho): pencere açık kalır; seçim anında uygulanır, istek modu alttaki seçenekle açılıp kapanır.
   Future<void> _micMode() async {
-    final old = _seatCount;
-    int? n;
     try {
-      n = await showMicModeSheet(context, current: old);
+      await showMicModeSheet(
+        context,
+        current: _seatCount,
+        requestMode: _micRequest,
+        onSelect: (n) async {
+          final old = _seatCount;
+          try {
+            final r = await Api.patch('/api/rooms/${widget.roomId}', {'seatCount': n});
+            final room = mapOf(r['room']);
+            if (!mounted) return false;
+            if (n != old && _room?['seatCount'] == old) {
+              _addSystemMessage('Oda sahibi yeni bir mikrofon moduna geçmiştir. Geçerli mikrofon konumu değiştirilecektir.');
+            }
+            setState(() => _room = {...?_room, ...?room, 'seatCount': n});
+            await _loadMembers(); // taşan koltuktakiler dinleyiciye inmiş olabilir
+            return true;
+          } catch (e) {
+            if (mounted) toast(context, 'Mikrofon modu değişmedi: ${errorText(e)}', error: true);
+            return false;
+          }
+        },
+        onRequestMode: (on) => _patchRoom({'micRequest': on}),
+      );
     } catch (e) {
       if (mounted) toast(context, 'Mikrofon modu penceresi açılamadı: $e', error: true);
-      return;
-    }
-    if (n == null || n == old || !mounted) return;
-    if (n < old && !await confirm(context, 'Koltuk sayısı $n olacak. Fazla koltuklardakiler dinleyiciye iner. Devam edilsin mi?', action: 'Değiştir')) return;
-    if (!mounted) return;
-    // Anında göster (eski düzen kaybolur); sunucu reddederse geri alınır ve nedeni açıkça yazılır.
-    setState(() => _room = {...?_room, 'seatCount': n});
-    try {
-      final r = await Api.patch('/api/rooms/${widget.roomId}', {'seatCount': n});
-      final room = mapOf(r['room']);
-      if (room != null && mounted) setState(() => _room = {...?_room, ...room});
-      if (!mounted) return;
-      await _loadMembers(); // taşan koltuktakiler dinleyiciye inmiş olabilir
-      if (mounted) toast(context, 'Mikrofon modu: $_seatCount mikrofon.');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _room = {...?_room, 'seatCount': old});
-      await showDialog<void>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Mikrofon modu değişmedi'),
-          content: Text('Sunucu yanıtı: ${errorText(e)}'),
-          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Tamam'))],
-        ),
-      );
     }
   }
 
@@ -867,7 +928,18 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         final hidden = _room?['hidden'] == true;
         final locked = _room?['locked'] == true;
         final pkFree = _pk == null || !['pending', 'active'].contains(_pk!['status']);
+        final queueMode = !_onSeat && !_canSeatManage && (_micRequest || _noFreeSeat);
         final tools = <Widget>[
+          feature(_roomMuted ? Icons.volume_off : Icons.volume_up, _roomMuted ? 'Sesi\nAç' : 'Sesi\nKapat', () => run(_toggleRoomSound), color: _roomMuted ? Colors.redAccent : null),
+          if (_onSeat && _isVideo)
+            feature(_camOn ? Icons.videocam : Icons.videocam_off, 'Kamera', () => run(() {
+                  setState(() => _camOn = !_camOn);
+                  _syncPublish();
+                })),
+          if (queueMode)
+            feature(_inQueue ? Icons.hourglass_bottom : Icons.front_hand, _inQueue ? (_micRequest ? 'İsteği\nGeri Al' : 'Sıradan\nÇık') : (_micRequest ? 'Mikrofon\nİste' : 'Sıraya\nGir'), () => run(_toggleQueue), color: _inQueue ? Colors.orangeAccent : Colors.greenAccent),
+          if (_onSeat) feature(Icons.mic_off, 'Mikrofondan\nİn', () => run(_leaveMic)),
+          if (_canSeatManage && _micRequest) feature(Icons.how_to_reg, 'Mikrofon\nİstekleri', () => run(_micRequestsSheet), color: Colors.greenAccent),
           feature(Icons.share, 'Yayını\nPaylaş', () => run(_shareRoom)),
           feature(Icons.graphic_eq, 'Efekt\nve Ses', () => run(_effectsAndSound)),
           if (_isOwnerOrCohost) feature(chatOn ? Icons.speaker_notes_off : Icons.chat, chatOn ? 'Sohbet\nYasağı' : 'Sohbeti\nAç', () => need(_isOwnerOrCohost, () => _patchRoom({'chatEnabled': !chatOn})), color: chatOn ? null : Colors.greenAccent),
@@ -1010,68 +1082,109 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   void _openGames() => Navigator.push(context, MaterialPageRoute(builder: (_) => LudoScreen(roomId: widget.roomId, canManage: _isManager)));
 
-  /// Sohbet kartları (Figma): yüksek seviyeli kullanıcıların mesajı renkli kart, diğerleri düz.
-  Color? _bubbleColor(Map<String, dynamic>? u) {
+  /// Renkli saydam sohbet balonu: kullanıcı seviyesine göre renk (Yoho tarzı lacivert taban).
+  Color _bubbleColor(Map<String, dynamic>? u) {
     final lvl = (u?['coinLevel'] as num?)?.toInt() ?? 1;
-    if (lvl >= 50) return const Color(0xCC4B1E8C);
-    if (lvl >= 20) return const Color(0xCCB86A12);
-    return null;
+    if (lvl >= 60) return const Color(0x8CB7791F); // altın
+    if (lvl >= 45) return const Color(0x8CBE185D); // pembe
+    if (lvl >= 30) return const Color(0x8C6D28D9); // mor
+    if (lvl >= 20) return const Color(0x8C1D4ED8); // mavi
+    if (lvl >= 10) return const Color(0x8C0F766E); // turkuaz
+    return const Color(0x8C13285A); // lacivert
   }
 
-  Widget _chatPanel() {
-    return _messages.isEmpty
-        ? const Center(child: Text('Henüz mesaj yok.', style: TextStyle(color: Colors.white54)))
-        : ListView.builder(
-            controller: _chatScroll,
-            padding: const EdgeInsets.fromLTRB(10, 4, 70, 4),
-            itemCount: _messages.length,
-            itemBuilder: (_, i) {
-              final m = _messages[i];
-              final u = mapOf(m['user']);
-              final color = parseColor(u?['nameColor'] as String?) ?? Colors.white;
-              final bg = _bubbleColor(u);
-              return GestureDetector(
-                onLongPress: () => _messageActions(m),
-                onTap: () {
-                  final uid = u?['id']?.toString();
-                  final mem = _members.where((x) => x['userId'] == uid);
-                  if (mem.isNotEmpty) _memberSheet(mem.first);
-                },
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 3),
-                    padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
-                    decoration: BoxDecoration(color: bg ?? Colors.black26, borderRadius: BorderRadius.circular(14)),
-                    child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      UserAvatar(user: u, radius: 16),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Row(mainAxisSize: MainAxisSize.min, children: [
-                            Flexible(child: WipNameText('${u?['displayName'] ?? ''}', level: (u?['wipLevel'] as num?)?.toInt(), color: color, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
-                            const SizedBox(width: 6),
-                            _pill('${u?['coinLevel'] ?? 1}', Pal.pink, icon: Icons.star),
-                            if (u?['wipLevel'] != null) ...[const SizedBox(width: 4), _pill('WIP ${u?['wipLevel']}', Pal.amber)],
-                          ]),
-                          const SizedBox(height: 2),
-                          Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 14)),
-                        ]),
-                      ),
-                    ]),
-                  ),
-                ),
-              );
-            },
+  void _addSystemMessage(String text, {Color color = const Color(0xFFFFE27A)}) {
+    setState(() {
+      _messages.add({'id': 'sys-${DateTime.now().microsecondsSinceEpoch}', 'system': true, 'text': text, 'color': color.toARGB32()});
+      if (_messages.length > 200) _messages.removeAt(0);
+    });
+    _scrollChatToEnd();
+  }
+
+  /// Sohbet akışı (Yoho): koltukların altından alt bara kadar, saydam renkli balonlar.
+  /// [overlay]: klavye açıkken karartının üstünde balonsuz düz yazı.
+  Widget _chatPanel(double w, {bool overlay = false}) {
+    if (_messages.isEmpty) return const SizedBox.shrink();
+    final maxW = w * 0.78;
+    return ListView.builder(
+      controller: _chatScroll,
+      padding: EdgeInsets.fromLTRB(8, overlay ? 10 : 2, w * 0.2, 8),
+      itemCount: _messages.length,
+      itemBuilder: (_, i) {
+        final m = _messages[i];
+        if (m['system'] == true) {
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              constraints: BoxConstraints(maxWidth: maxW),
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              padding: overlay ? const EdgeInsets.symmetric(horizontal: 4, vertical: 2) : const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: overlay ? null : BoxDecoration(color: const Color(0x8C13285A), borderRadius: BorderRadius.circular(12)),
+              child: Text((m['text'] ?? '').toString(), style: TextStyle(fontSize: 14.5, height: 1.3, color: Color((m['color'] as int?) ?? 0xFFFFE27A))),
+            ),
           );
+        }
+        final u = mapOf(m['user']);
+        final color = parseColor(u?['nameColor'] as String?) ?? Colors.white;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onLongPress: () => _messageActions(m),
+          onTap: () {
+            final uid = u?['id']?.toString();
+            final mem = _members.where((x) => x['userId'] == uid);
+            if (mem.isNotEmpty) _memberSheet(mem.first);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              UserAvatar(user: u, radius: 17),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    Flexible(child: WipNameText('${u?['displayName'] ?? ''}', level: (u?['wipLevel'] as num?)?.toInt(), color: color, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                    const SizedBox(width: 6),
+                    _pill('${u?['coinLevel'] ?? 1}', Pal.pink, icon: Icons.star),
+                  ]),
+                  const SizedBox(height: 4),
+                  Container(
+                    constraints: BoxConstraints(maxWidth: maxW - 42),
+                    padding: overlay ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: overlay ? null : BoxDecoration(color: _bubbleColor(u), borderRadius: BorderRadius.circular(12)),
+                    child: Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 15, height: 1.25)),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
   }
 
-  /// Yazı alanı: alttaki sohbet düğmesine basınca açılır.
+  void _closeInput() {
+    _kbSeen = false;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (_inputOpen) setState(() => _inputOpen = false);
+  }
+
+  void _openInput() {
+    if (!_chatOpen) {
+      toast(context, 'Bu odada yazılı sohbet kapalı.', error: true);
+      return;
+    }
+    _kbSeen = false;
+    setState(() => _inputOpen = true);
+    _scrollChatToEnd();
+  }
+
+  /// Yazı alanı (Yoho): klavyenin hemen üstünde beyaz şerit; boşluğa dokununca kapanır.
   Widget _inputBar() {
-    if (!_inputOpen) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 4, 6, 4),
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
       child: Row(children: [
+        IconButton(tooltip: 'Kapat', onPressed: _closeInput, icon: const Icon(Icons.keyboard_hide_outlined, color: Colors.black54)),
         Expanded(
           child: TextField(
             controller: _chatCtl,
@@ -1080,10 +1193,21 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             enabled: !_chatMuted,
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => _sendChat(),
-            decoration: InputDecoration(isDense: true, counterText: '', hintText: _chatMuted ? 'Sohbette susturuldunuz' : 'Mesaj yaz...', filled: true, fillColor: Colors.black45, border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none)),
+            style: const TextStyle(color: Colors.black87),
+            decoration: InputDecoration(
+              isDense: true,
+              counterText: '',
+              hintText: _chatMuted ? 'Sohbette susturuldunuz' : 'Selam...',
+              hintStyle: const TextStyle(color: Colors.black38),
+              filled: true,
+              fillColor: const Color(0xFFF1F2F4),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide.none),
+              suffixIcon: IconButton(onPressed: _chatOpen ? _emojiSheet : null, icon: const Icon(Icons.sentiment_satisfied_alt, color: Colors.black54)),
+            ),
           ),
         ),
-        IconButton(onPressed: _sending || _chatMuted ? null : _sendChat, icon: const Icon(Icons.send)),
+        IconButton(onPressed: _sending || _chatMuted ? null : _sendChat, icon: const Icon(Icons.send, color: Color(0xFF16A34A))),
       ]),
     );
   }
@@ -1462,8 +1586,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   // ---------- Arayüz ----------
   // Koltuk ölçüleri sahne alanına göre _seatGrid içinde hesaplanır (kaydırma yok; her koltuk modu ekrana sığar).
   bool _showScoreRow = true;
-  bool get _seatCompact => _seatCount >= 12;
-  double get _seatNameH => _seatCompact ? 13 : 15;
+  double? _seatScale; // klavye açılınca koltuklar küçülmesin diye son ölçek saklanır
+  bool _kbSeen = false; // klavye geri tuşuyla kapanınca yazı alanı da kapansın
+  bool get _seatCompact => _seatCount >= 12; // 12+ modda koltuklar küçük (Yoho: genişliğin ~%10'u)
+  double get _seatNameH => _seatCompact ? 14 : 16;
   double get _seatScoreH => 16;
   bool get _scoreOn => _room?['scoreboardEnabled'] != false && _showScoreRow;
   // Bir koltuğun avatar alanı (slot) boyutu satıra göre değişir: üst (oda sahibi) satırı daha büyüktür.
@@ -1520,13 +1646,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         slotSize: slotSize,
         onTap: () => _emptySeatTap(index, reserved, locked),
         slot: Center(
-          child: CircleAvatar(
-            radius: seatR,
-            backgroundColor: Colors.white12,
-            child: Icon(reserved ? Icons.star_border : (locked ? Icons.lock : Icons.add), color: locked ? Colors.orangeAccent : Colors.white54),
+          child: Container(
+            width: seatR * 2,
+            height: seatR * 2,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.16), border: Border.all(color: Colors.white.withValues(alpha: 0.28), width: 1)),
+            child: Icon(reserved ? Icons.star_border : (locked ? Icons.lock : Icons.add), size: seatR * 0.95, color: locked ? Colors.orangeAccent : Colors.white),
           ),
         ),
-        name: Text('${index + 1}', style: TextStyle(color: Colors.white54, fontSize: _seatCompact ? 10 : 12)),
+        name: Text('${index + 1}', style: TextStyle(color: Colors.white, fontSize: _seatCompact ? 11 : 12.5, fontWeight: FontWeight.w600)),
       );
     }
     final userId = m['userId'].toString();
@@ -1577,10 +1704,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             (user?['displayName'] ?? '').toString(),
             level: (user?['wipLevel'] as num?)?.toInt(),
             color: nameColor ?? Colors.white,
-            style: TextStyle(fontSize: _seatCompact ? 11 : 12, fontWeight: nameColor != null ? FontWeight.w800 : FontWeight.normal),
+            style: TextStyle(fontSize: _seatCompact ? 10 : 11, height: 1.1, fontWeight: nameColor != null ? FontWeight.w800 : FontWeight.normal),
           ),
         ),
-        if (user?['wipLevel'] != null) Padding(padding: const EdgeInsets.only(left: 2), child: WipChip(level: user?['wipLevel'], colorHex: user?['nameColor'] as String?)),
       ]),
       score: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
@@ -1590,56 +1716,120 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _seatGrid() {
+  // Koltuk + sohbet bölgesi (Yoho): koltuklar başlığın altından sabit ölçüyle başlar, sohbet koltukların bittiği yerden akar.
+  // Klavye açılınca koltuklar küçülmez/yer değiştirmez; oda kararır, mesajlar karartının üstünde görünür.
+  Widget _stageBody() {
+    final kb = MediaQuery.viewInsetsOf(context).bottom;
+    if (_inputOpen && kb > 0) _kbSeen = true;
+    if (_inputOpen && _kbSeen && kb == 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _inputOpen && MediaQuery.viewInsetsOf(context).bottom == 0) _closeInput();
+      });
+    }
+    return LayoutBuilder(builder: (context, box) {
+      final w = box.maxWidth;
+      if (!_inputOpen || _seatScale == null) {
+        final need = _seatAreaHeight(w, 1);
+        _seatScale = ((box.maxHeight - 120) / need).clamp(0.6, 1.0).toDouble();
+      }
+      final sc = _seatScale!;
+      final seatH = _seatAreaHeight(w, sc);
+      return Stack(clipBehavior: Clip.hardEdge, children: [
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          height: seatH,
+          // Koltuklar sabit; yalnızca hızlı dikey kaydırma (fling) odayı değiştirir.
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onVerticalDragEnd: (d) {
+              final v = d.primaryVelocity ?? 0;
+              if (v < -1400) _switchRoom(1);
+              if (v > 1400) _switchRoom(-1);
+            },
+            child: _seatGrid(w, sc),
+          ),
+        ),
+        if (!_inputOpen) Positioned(left: 0, right: 0, top: seatH, bottom: 0, child: _chatPanel(w)),
+        if (_inputOpen) ...[
+          Positioned.fill(child: GestureDetector(onTap: _closeInput, child: const ColoredBox(color: Color(0xB8000000)))),
+          Positioned.fill(child: _chatPanel(w, overlay: true)),
+        ],
+        if (_canSeatManage && _micRequest && _queue.isNotEmpty && !_inputOpen)
+          Positioned(
+            right: 8,
+            top: seatH - 34,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: _micRequestsSheet,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: const Color(0xFF22C55E), borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 6)]),
+                child: Text('Mikrofon istekleri (${_queue.length})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+              ),
+            ),
+          ),
+      ]);
+    });
+  }
+
+  double get _labelsH => 2 + _seatNameH + (_scoreOn ? _seatScoreH + 2 : 0);
+
+  /// Koltuk alanının yüksekliği: son satırın merkezi + yarıçap + ad/puan satırları.
+  double _seatAreaHeight(double w, double sc) {
+    final spec = seatLayoutFor(_seatCount);
+    _showScoreRow = _scoreFits(spec, w * sc);
+    var cy = spec.topGap * w * sc + (spec.rows.first.dia * w * sc + 8) / 2;
+    for (final p in spec.pitch) {
+      cy += p * w * sc;
+    }
+    return cy + (spec.rows.last.dia * w * sc + 8) / 2 + _labelsH + 8;
+  }
+
+  /// Puan (elmas) satırı yalnızca satırlar arasında yer varsa gösterilir (çok koltuklu modlarda gizli, Yoho gibi).
+  bool _scoreFits(SeatLayoutSpec spec, double w) {
+    if (spec.pitch.isEmpty) return true;
+    var minGap = double.infinity;
+    for (var r = 0; r < spec.pitch.length; r++) {
+      final gap = spec.pitch[r] * w - (spec.rows[r].dia * w + 8) / 2 - (spec.rows[r + 1].dia * w + 8) / 2;
+      if (gap < minGap) minGap = gap;
+    }
+    return minGap >= 2 + _seatNameH + 2 + _seatScoreH + 6;
+  }
+
+  Widget _seatGrid(double w, double sc) {
     final bySeat = <int, Map<String, dynamic>>{
       for (final m in _members)
         if (m['seatIndex'] != null) (m['seatIndex'] as num).toInt(): m,
     };
-    final rows = seatRows(_seatCount);
-    final maxCols = rows.reduce((a, b) => a > b ? a : b);
-    return LayoutBuilder(builder: (context, box) {
-      // Sabit, kaydırmasız sahne: tüm satırlar mevcut yüksekliğe sığacak şekilde hesaplanır.
-      // Üstteki az koltuklu satır (oda sahibi) daha büyük çizilir (Yoho/Bigo düzeni).
-      final availW = box.maxWidth - 16;
-      final availH = box.maxHeight - 4;
-      const rowGap = 6.0;
-      _showScoreRow = rows.length <= 3;
-      final fixed = _seatNameH + 2 + (_scoreOn ? _seatScoreH + 2 : 0);
-      final cw = availW / maxCols;
-      double factor(int r) {
-        if (rows[r] >= maxCols) return 1.0;
-        return rows[r] == 1 ? 1.35 : (rows[r] == 2 && maxCols >= 4 ? 1.2 : 1.0);
+    final spec = seatLayoutFor(_seatCount);
+    final tiles = <Widget>[];
+    var i = 0;
+    var cy = spec.topGap * w * sc + (spec.rows.first.dia * w * sc + 8) / 2;
+    for (var r = 0; r < spec.rows.length; r++) {
+      final row = spec.rows[r];
+      final slot = row.dia * w * sc + 8;
+      // Hücre genişliği: komşu koltuklar arası mesafe (ad yazısı için), en az koltuk kadar.
+      var minDx = 1.0;
+      for (var k = 1; k < row.xs.length; k++) {
+        final dx = row.xs[k] - row.xs[k - 1];
+        if (dx < minDx) minDx = dx;
       }
-
-      double tileW(int r) => rows[r] < maxCols ? (availW / rows[r]).clamp(0.0, cw * 1.45) : cw;
-      final maxSlot = _seatCount <= 6 ? 112.0 : 84.0;
-      var sumF = 0.0;
-      for (var r = 0; r < rows.length; r++) {
-        sumF += factor(r);
+      final tileW = (row.xs.length == 1 ? slot * 1.9 : minDx * w - 2).clamp(slot, slot * 2.2).toDouble();
+      for (final x in row.xs) {
+        if (i >= _seatCount) break;
+        final idx = i++;
+        tiles.add(Positioned(
+          left: x * w - tileW / 2,
+          top: cy - slot / 2,
+          width: tileW,
+          child: Center(child: _seatTile(idx, bySeat[idx], slot)),
+        ));
       }
-      final byH = (availH - rows.length * fixed - (rows.length - 1) * rowGap) / sumF;
-      final base = [byH, cw - 6, maxSlot].reduce((a, b) => a < b ? a : b).clamp(30.0, maxSlot).toDouble();
-      final slots = <double>[
-        for (var r = 0; r < rows.length; r++) [base * factor(r), tileW(r) - 6, maxSlot * 1.35].reduce((a, b) => a < b ? a : b).clamp(30.0, maxSlot * 1.35).toDouble(),
-      ];
-      var next = 0;
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
-        child: Column(mainAxisAlignment: MainAxisAlignment.start, children: [
-          for (var r = 0; r < rows.length; r++)
-            Padding(
-              padding: EdgeInsets.only(bottom: r == rows.length - 1 ? 0 : rowGap),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                for (var k = 0; k < rows[r]; k++)
-                  Builder(builder: (_) {
-                    final i = next++;
-                    return SizedBox(width: tileW(r), child: Center(child: _seatTile(i, bySeat[i], slots[r])));
-                  }),
-              ]),
-            ),
-        ]),
-      );
-    });
+      if (r < spec.pitch.length) cy += spec.pitch[r] * w * sc;
+    }
+    return Stack(clipBehavior: Clip.none, children: tiles);
   }
 
   // ---------- Üst başlık (Figma) ----------
@@ -1877,53 +2067,112 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _roundBtn(IconData icon, String tip, VoidCallback? onTap, {Color? color, Color? bg}) => Tooltip(
-        message: tip,
+  /// Alt bar (Yoho ölçüleri): düğmeler ekran genişliğinin %14,35'i aralıkla, merkezleri sabit.
+  /// Mikrofonda değilken: "Selam..." yazı kutusu + hediye, mesajlar, oyun, menü.
+  /// Mikrofondayken: sohbet, mikrofon, emoji, hediye, mesajlar, oyun, menü.
+  Widget _bottomBar() {
+    return LayoutBuilder(builder: (context, box) {
+      final w = box.maxWidth;
+      final d = (w * 0.100).clamp(38.0, 50.0).toDouble();
+      final barH = d + 18;
+      Widget at(double cx, Widget child, {double? size}) {
+        final sz = size ?? d;
+        return Positioned(left: cx * w - sz / 2, top: (barH - sz) / 2 - 2, width: sz, height: sz, child: child);
+      }
+
+      Widget circle(IconData icon, String tip, VoidCallback? onTap, {Color? color}) => Tooltip(
+            message: tip,
+            child: Material(
+              color: Colors.black.withValues(alpha: 0.32),
+              shape: CircleBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.10))),
+              child: InkWell(customBorder: const CircleBorder(), onTap: onTap, child: Icon(icon, color: color ?? Colors.white, size: d * 0.52)),
+            ),
+          );
+
+      final gift = Tooltip(
+        message: 'Hediye gönder',
         child: InkWell(
           customBorder: const CircleBorder(),
-          onTap: onTap,
+          onTap: _members.isEmpty ? null : () => _openGifts(),
           child: Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: bg ?? Colors.black45, border: Border.all(color: Colors.white12)),
-            child: Icon(icon, color: color ?? Colors.white, size: 24),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF8B5CF6), Color(0xFF6366F1), Color(0xFF38BDF8)]),
+              boxShadow: [BoxShadow(color: Color(0x667C3AED), blurRadius: 10)],
+            ),
+            child: Icon(Icons.redeem, color: Colors.white, size: d * 0.56),
           ),
         ),
       );
+      final mail = ValueListenableBuilder<int>(
+        valueListenable: Inbox.unread,
+        builder: (_, n, __) => Badge(
+          isLabelVisible: n > 0,
+          label: Text('$n'),
+          offset: const Offset(-2, 2),
+          child: circle(Icons.mail_outline, 'Mesajlar', () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('Mesajlar')), body: const MessagesScreen())))),
+        ),
+      );
+      final games = Tooltip(
+        message: 'Oyunlar',
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: _openGames,
+          child: Container(
+            decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFFEC4899), Color(0xFFF59E0B)])),
+            child: Icon(Icons.sports_esports, color: Colors.white, size: d * 0.56),
+          ),
+        ),
+      );
+      final menu = circle(Icons.grid_view_rounded, 'Oda araçları', _openTools);
 
-  Widget _bottomBar() {
-    final queueMode = !_onSeat && _noFreeSeat && !_isManager;
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          _roundBtn(Icons.chat_bubble_outline, 'Sohbet', () {
-            if (!_chatOpen) return toast(context, 'Bu odada yazılı sohbet kapalı.', error: true);
-            setState(() => _inputOpen = !_inputOpen);
-          }),
-          _roundBtn(Icons.sentiment_satisfied_alt, 'Emoji', _chatOpen ? _emojiSheet : null),
-          _roundBtn(_roomMuted ? Icons.volume_off : Icons.volume_up, _roomMuted ? 'Sesi aç' : 'Sesi kapat', _toggleRoomSound, color: _roomMuted ? Colors.redAccent : null),
-          if (_onSeat && _isVideo)
-            _roundBtn(_camOn ? Icons.videocam : Icons.videocam_off, 'Kamera', () {
-              setState(() => _camOn = !_camOn);
+      const step = 0.1435;
+      final right = <Widget>[
+        at(0.5, gift, size: d * 1.08),
+        at(0.5 + step, mail),
+        at(0.5 + step * 2, games),
+        at(0.5 + step * 3, menu),
+      ];
+      final List<Widget> left;
+      if (_onSeat) {
+        left = [
+          at(0.5 - step * 3, circle(Icons.chat_bubble_outline, 'Sohbet', _openInput)),
+          at(0.5 - step * 2, GestureDetector(
+            onLongPress: _leaveMic,
+            child: circle(_micOn ? Icons.mic : Icons.mic_off, 'Mikrofon (uzun bas: mikrofondan in)', () {
+              setState(() => _micOn = !_micOn);
               _syncPublish();
-            }),
-          if (_onSeat)
-            GestureDetector(
-              onLongPress: _leaveMic,
-              child: _roundBtn(_micOn ? Icons.mic : Icons.mic_off, 'Mikrofon (uzun bas: mikrofondan in)', () {
-                setState(() => _micOn = !_micOn);
-                _syncPublish();
-              }, color: _micOn ? Colors.greenAccent : Colors.redAccent),
-            )
-          else
-            _roundBtn(queueMode ? (_inQueue ? Icons.hourglass_bottom : Icons.queue) : Icons.mic_none, queueMode ? (_inQueue ? 'Sıradan çık' : 'Sıraya gir') : 'Mikrofona çık', queueMode ? _toggleQueue : () => _takeMic()),
-          _roundBtn(Icons.card_giftcard, 'Hediye gönder', _members.isEmpty ? null : () => _openGifts(), color: Colors.amber),
-          _roundBtn(Icons.menu, 'Oda araçları', _openTools),
-        ]),
-      ),
-    );
+            }, color: _micOn ? Colors.white : Colors.redAccent),
+          )),
+          at(0.5 - step, circle(Icons.sentiment_satisfied_alt, 'Emoji', _chatOpen ? _emojiSheet : null)),
+        ];
+      } else {
+        final pillH = (w * 0.087).clamp(34.0, 44.0).toDouble();
+        left = [
+          Positioned(
+            left: w * 0.025,
+            width: w * 0.394,
+            top: (barH - pillH) / 2 - 2,
+            height: pillH,
+            child: Material(
+              color: Colors.black.withValues(alpha: 0.32),
+              shape: const StadiumBorder(),
+              child: InkWell(
+                customBorder: const StadiumBorder(),
+                onTap: _openInput,
+                child: Row(children: [
+                  const SizedBox(width: 10),
+                  const Icon(Icons.chat_bubble_outline, size: 22),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(_chatOpen ? 'Selam...' : 'Sohbet kapalı', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+                ]),
+              ),
+            ),
+          ),
+        ];
+      }
+      return SizedBox(height: barH + 6, child: Stack(clipBehavior: Clip.none, children: [...left, ...right]));
+    });
   }
 
   @override
@@ -1948,9 +2197,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 roomId: widget.roomId,
                 child: Stack(key: _stageKey, fit: StackFit.expand, children: [
                 Padding(
-                padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+                padding: EdgeInsets.only(bottom: _inputOpen ? MediaQuery.viewInsetsOf(context).bottom : 0),
                 child: Column(children: [
-                  _roomHeader(),
+                  Stack(children: [
+                    _roomHeader(),
+                    if (_inputOpen) Positioned.fill(child: GestureDetector(onTap: _closeInput, child: const ColoredBox(color: Color(0xB8000000)))),
+                  ]),
                   if (_lkError != null)
                     Material(
                       color: Colors.red.shade900,
@@ -1967,22 +2219,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                       roomId: widget.roomId,
                       onCancel: _myRole == 'owner' ? () => guard(context, () => Api.post('/api/pk/${_pk!['id']}/cancel')) : null,
                     ),
-                  Expanded(
-                    flex: _seatCount >= 20 ? 48 : (_seatCount >= 15 ? 45 : (_seatCount >= 12 ? 42 : 40)), // sahne / koltuklar (çok koltukta daha yüksek)
-                    // Koltuklar sabit; yalnızca hızlı dikey kaydırma (fling) odayı değiştirir, sahne kaymaz.
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onVerticalDragEnd: (d) {
-                        final v = d.primaryVelocity ?? 0;
-                        if (v < -1400) _switchRoom(1);
-                        if (v > 1400) _switchRoom(-1);
-                      },
-                      child: _seatGrid(),
-                    ),
-                  ),
-                  Expanded(flex: _seatCount >= 20 ? 27 : (_seatCount >= 15 ? 30 : (_seatCount >= 12 ? 33 : 35)), child: _chatPanel()), // sohbet akışı
-                  _inputBar(),
-                  _bottomBar(), // ~%10: alt bar
+                  Expanded(child: _stageBody()),
+                  if (_inputOpen) _inputBar() else _bottomBar(),
                 ]),
               ),
                 Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.36, child: EntranceStrip(queue: _entrance)),

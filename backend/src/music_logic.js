@@ -1,6 +1,6 @@
 // Müzik senkronizasyon mantığı (saf fonksiyonlar).
 // Konum her zaman VERİTABANININ saatiyle hesaplanan "elapsedMs" ile bulunur; uygulama/veritabanı saat farkı etkilemez.
-export const MAX_QUEUE = 20;
+export const MAX_QUEUE = 50;
 export const MAX_PER_USER = 3;
 export const MUSIC_MANAGERS = ['owner', 'cohost', 'moderator'];
 
@@ -20,8 +20,11 @@ export function hasEnded(status, positionMs, elapsedMs, durationMs) {
   return status === 'playing' && durationMs > 0 && Number(positionMs) + Math.max(0, Number(elapsedMs)) >= durationMs;
 }
 
-export function queueDecision({ queueLength, userCount }) {
+export const MAX_PER_MANAGER = 40; // oda yetkilileri çalma listesi oluşturabilir
+
+export function queueDecision({ queueLength, userCount, manager = false }) {
+  const perUser = manager ? MAX_PER_MANAGER : MAX_PER_USER;
   if (queueLength >= MAX_QUEUE) return { ok: false, message: `Sıra dolu (en fazla ${MAX_QUEUE} şarkı).` };
-  if (userCount >= MAX_PER_USER) return { ok: false, message: `Sıraya en fazla ${MAX_PER_USER} şarkı ekleyebilirsiniz.` };
+  if (userCount >= perUser) return { ok: false, message: `Sıraya en fazla ${perUser} şarkı ekleyebilirsiniz.` };
   return { ok: true };
 }

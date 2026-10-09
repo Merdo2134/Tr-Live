@@ -49,6 +49,7 @@ const AUDIO_TYPES = { 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/aac': 'aac
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const TEMP_TRACK_TTL_HOURS = 12;
 const MAX_TEMP_PER_USER = 5;
+const MAX_TEMP_PER_MANAGER = 45;
 
 /** Dosyanın gerçekten ses olduğunu ilk baytlarından doğrular; istemcinin bildirdiği türe güvenmez. */
 export function detectAudio(buf) {
@@ -66,7 +67,7 @@ export function detectAudio(buf) {
 }
 
 router.post('/rooms/:roomId/music/upload',
-  userLimit('music_upload', 10, 10 * 60e3),
+  userLimit('music_upload', 60, 10 * 60e3),
   express.raw({ type: () => true, limit: MAX_AUDIO_BYTES }),
   async (req, res) => {
     const roomId = uuid(req.params.roomId, 'Oda');
@@ -82,7 +83,8 @@ router.post('/rooms/:roomId/music/upload',
     const artist = String(req.query.artist ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 120) || null;
 
     const mine = (await query(`SELECT COUNT(*)::int AS n FROM music_tracks WHERE is_temp AND created_by = $1 AND expires_at > NOW()`, [req.user.id])).rows[0].n;
-    if (mine >= MAX_TEMP_PER_USER) throw fail(`Aynı anda en fazla ${MAX_TEMP_PER_USER} yüklenmiş parçanız olabilir. Biri bitince tekrar deneyin.`, 409);
+    const tempCap = MUSIC_MANAGERS.includes(member.role) ? MAX_TEMP_PER_MANAGER : MAX_TEMP_PER_USER;
+    if (mine >= tempCap) throw fail(`Aynı anda en fazla ${tempCap} yüklenmiş parçanız olabilir. Biri bitince tekrar deneyin.`, 409);
 
     const dir = path.join(config.uploadDir, 'music');
     await fs.mkdir(dir, { recursive: true });
@@ -103,7 +105,7 @@ router.get('/rooms/:roomId/music', async (req, res) => {
   res.json({ state: await musicState(roomId) });
 });
 
-router.post('/rooms/:roomId/music/queue', userLimit('music_queue', 20, 60e3), async (req, res) => {
+router.post('/rooms/:roomId/music/queue', userLimit('music_queue', 60, 60e3), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const trackId = uuid(req.body?.trackId, 'Şarkı');
   const member = await context(roomId, req.user.id);
@@ -116,7 +118,7 @@ router.post('/rooms/:roomId/music/queue', userLimit('music_queue', 20, 60e3), as
     const counts = (await c.query(
       `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE added_by = $2)::int AS mine FROM room_music_queue WHERE room_id = $1`, [roomId, req.user.id],
     )).rows[0];
-    const d = queueDecision({ queueLength: counts.total, userCount: counts.mine });
+    const d = queueDecision({ queueLength: counts.total, userCount: counts.mine, manager: MUSIC_MANAGERS.includes(member.role) });
     if (!d.ok) throw fail(d.message, 409);
     await c.query(`INSERT INTO room_music_queue(room_id, track_id, added_by) VALUES($1,$2,$3)`, [roomId, trackId, req.user.id]);
     // Hiçbir şey çalmıyorsa ilk eklenen şarkı hemen başlar.

@@ -88,7 +88,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     final wip = mapOf(p['wip']);
     final features = mapOf(wip?['features']);
     final w = MediaQuery.sizeOf(context).width;
-    final coverH = w * 0.95;
+    final coverH = w * 0.62;
     final medals = <Widget>[];
     return Column(children: [
       SizedBox(

@@ -121,12 +121,23 @@ class UserAvatar extends StatelessWidget {
 class WipChip extends StatelessWidget {
   final dynamic level;
   final String? colorHex;
-  const WipChip({super.key, required this.level, this.colorHex});
+  /// Küçük koltuk satırı için: dar, 12 px yüksekliğe sığar.
+  final bool compact;
+  const WipChip({super.key, required this.level, this.colorHex, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
     if (level == null) return const SizedBox.shrink();
     final color = parseColor(colorHex) ?? Colors.amber;
+    if (compact) {
+      return Container(
+        height: 12,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.2), border: Border.all(color: color, width: 0.8), borderRadius: BorderRadius.circular(5)),
+        child: Text('W$level', style: TextStyle(fontSize: 8, height: 1.0, color: color, fontWeight: FontWeight.w900)),
+      );
+    }
     return Container(
       margin: const EdgeInsets.only(left: 6),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),

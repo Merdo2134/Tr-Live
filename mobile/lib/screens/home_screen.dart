@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../widgets/music_bubble.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/banner_carousel.dart';
 import '../widgets/crown_icon.dart';
@@ -75,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               if (min) _miniBar(req),
+              if (min) MusicBubble(onOpen: RoomDock.expand),
             ]),
           );
         },
@@ -109,11 +111,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ]),
         ),
         Positioned(
-          right: -4,
-          top: -4,
+          right: 0,
+          top: 0,
           child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: () => RoomDock.exitHandler?.call(),
-            child: const CircleAvatar(radius: 11, backgroundColor: Colors.black87, child: Icon(Icons.close, size: 14, color: Colors.white)),
+            child: const Padding(padding: EdgeInsets.all(6), child: CircleAvatar(radius: 10, backgroundColor: Colors.black87, child: Icon(Icons.close, size: 13, color: Colors.white))),
           ),
         ),
       ]),

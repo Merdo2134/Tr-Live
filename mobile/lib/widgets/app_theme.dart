@@ -133,7 +133,7 @@ Widget appFrame(BuildContext context, Widget? child) {
     data: mq.copyWith(textScaler: scale),
     child: ColoredBox(
       color: Pal.bg,
-      child: Align(alignment: Alignment.topCenter, child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: Resp.maxContent), child: child)),
+      child: SafeArea(top: false, left: false, right: false, child: Align(alignment: Alignment.topCenter, child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: Resp.maxContent), child: child))),
     ),
   );
 }
