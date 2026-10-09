@@ -1,3 +1,4 @@
+import 'dart:io' show File;
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -601,6 +602,96 @@ class _CatalogTab extends StatelessWidget {
     if (r != null && context.mounted) toast(context, 'Çerçeve eklendi. Kimlik: ${r['id']}');
   }
 
+  /// Birçok dosyayı bir seferde yükler; her dosya için ad (dosya adından), fiyat ve sekme aynı olur.
+  Future<void> _bulk(BuildContext context, {required bool frames}) async {
+    final price = TextEditingController(text: '100');
+    var category = 'popular';
+    var alpha = 'left';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => AlertDialog(
+          title: Text(frames ? 'Toplu çerçeve yükle' : 'Toplu hediye yükle'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Sonraki ekranda birden fazla dosya seçersin. Ad dosya adından alınır.', style: TextStyle(color: Colors.white70)),
+              if (!frames) TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Hepsi için coin fiyatı')),
+              if (!frames)
+                DropdownButtonFormField<String>(
+                  value: category,
+                  decoration: const InputDecoration(labelText: 'Hediye sekmesi'),
+                  items: const [
+                    DropdownMenuItem(value: 'popular', child: Text('Popüler')),
+                    DropdownMenuItem(value: 'event', child: Text('Etkinlik')),
+                    DropdownMenuItem(value: 'private', child: Text('Kişiye Özel')),
+                    DropdownMenuItem(value: 'vip', child: Text('Vip')),
+                  ],
+                  onChanged: (v) => setS(() => category = v ?? 'popular'),
+                ),
+              DropdownButtonFormField<String>(
+                value: alpha,
+                decoration: const InputDecoration(labelText: 'MP4 şeffaflık maskesi'),
+                items: const [
+                  DropdownMenuItem(value: 'left', child: Text('Sol yarıda')),
+                  DropdownMenuItem(value: 'right', child: Text('Sağ yarıda')),
+                ],
+                onChanged: (v) => setS(() => alpha = v ?? 'left'),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Dosyaları seç')),
+          ],
+        ),
+      ),
+    );
+    final priceText = price.text.trim();
+    price.dispose();
+    if (ok != true || !context.mounted) return;
+    final r = await FilePicker.platform.pickFiles(type: FileType.any, allowMultiple: true);
+    if (r == null || r.files.isEmpty || !context.mounted) return;
+    final log = <String>[];
+    var done = 0;
+    for (final f in r.files) {
+      final path = f.path;
+      final base = f.name.contains('.') ? f.name.substring(0, f.name.lastIndexOf('.')) : f.name;
+      final name = base.length < 2 ? '$base ' : (base.length > 80 ? base.substring(0, 80) : base);
+      if (path == null) {
+        log.add('✗ ${f.name}: dosya okunamadı');
+        continue;
+      }
+      if (context.mounted) toast(context, 'Yükleniyor ${done + log.length + 1}/${r.files.length}: ${f.name}');
+      try {
+        final bytes = await File(path).readAsBytes();
+        final m = await Api.postBytes('/api/admin/media', bytes, 'application/octet-stream', query: {'alpha': alpha});
+        if (frames) {
+          await Api.post('/api/admin/frames', {'name': name, 'imageUrl': m['url']});
+        } else {
+          await Api.post('/api/admin/gifts', {
+            'name': name,
+            'coinPrice': priceText,
+            'animationUrl': m['url'],
+            'animationFormat': m['format'],
+            'category': category,
+          });
+        }
+        done++;
+      } catch (e) {
+        log.add('✗ ${f.name}: ${errorText(e)}');
+      }
+    }
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('$done / ${r.files.length} eklendi'),
+        content: SingleChildScrollView(child: Text(log.isEmpty ? 'Hepsi eklendi.' : log.join('\n'))),
+        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Tamam'))],
+      ),
+    );
+  }
+
   Future<void> _create(BuildContext context, String title, List<String> labels, String path, Map<String, dynamic> Function(Map<String, String>) body) async {
     final f = await formDialog(context, title, labels);
     if (f == null || !context.mounted) return;
@@ -617,6 +708,18 @@ class _CatalogTab extends StatelessWidget {
         icon: const Icon(Icons.card_giftcard),
         label: const Text('Hediye ekle'),
         onPressed: () => _giftForm(context),
+      ),
+      const SizedBox(height: 8),
+      FilledButton.icon(
+        icon: const Icon(Icons.library_add),
+        label: const Text('Toplu hediye yükle (çok dosya)'),
+        onPressed: () => _bulk(context, frames: false),
+      ),
+      const SizedBox(height: 8),
+      FilledButton.icon(
+        icon: const Icon(Icons.library_add),
+        label: const Text('Toplu çerçeve yükle (çok dosya)'),
+        onPressed: () => _bulk(context, frames: true),
       ),
       const SizedBox(height: 8),
       FilledButton.icon(

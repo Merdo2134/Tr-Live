@@ -1,5 +1,8 @@
 # Değişiklik ve inceleme raporu
 
+## v2.21.3
+- Katalog: "Toplu hediye yükle" ve "Toplu çerçeve yükle". Birden fazla dosya seçilir; ad dosya adından, fiyat/sekme tek seferde girilir; sonunda hangi dosyanın neden eklenmediği listelenir.
+
 ## v2.21.2
 - svgaplayer_flutter paketi kaldırıldı (http sürümüyle çakışıp derlemeyi durduruyordu). SVGA 2.x için dış paketsiz kendi oynatıcımız eklendi (widgets/svga_lite.dart): görsel katmanlar, konum/ölçek/dönüş/saydamlık. Desteklenmeyen: vektör şekiller, matte maskesi, gömülü ses.
 
