@@ -7,6 +7,11 @@ import { query, closeDb } from './database.js';
 import { authenticateToken } from './auth.js';
 import { attachRealtime } from './realtime.js';
 import { isRoomMember, startRoomSweeper } from './services/rooms.js';
+import { cachedMedia, rememberMedia } from './services/images.js';
+import { presenceSnapshot, recordPresence, canSignalTyping, isGhost } from './services/presence.js';
+import { pruneIdempotencyKeys } from './idempotency.js';
+import { promoteBootstrapAdmins } from './services/bootstrap.js';
+import { nonOverlapping } from './ticker.js';
 import { router as authRouter } from './routes/auth.js';
 import { router as meRouter } from './routes/me.js';
 import { router as usersRouter } from './routes/users.js';
@@ -29,6 +34,8 @@ import { router as leaderboardsRouter } from './routes/leaderboards.js';
 import { router as pkRouter } from './routes/pk.js';
 import { router as gamesRouter } from './routes/games.js';
 import { router as feedRouter } from './routes/feed.js';
+import { router as systemRouter } from './routes/system.js';
+import { getConfig, compareVersions } from './services/app_config.js';
 import { startMusicTicker } from './services/music.js';
 import { router as luckyRouter, startBagTicker } from './routes/luckybag.js';
 import { startAvatarSweeper } from './services/avatar_sweeper.js';
@@ -49,7 +56,7 @@ app.use(helmet({
 app.use(firewall()); // IP yasağı, WAF kuralları, IP başına hız sınırı (CORS ve gövde okumadan önce)
 app.use(cors({
   origin: config.corsOrigin.includes('*') ? true : config.corsOrigin,
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-App-Version', 'Idempotency-Key'],
 }));
 app.use(express.json({ limit: '100kb' }));
 app.use(bodyGuard()); // derin/dev JSON ve prototype pollution anahtarlarını reddeder
@@ -67,10 +74,18 @@ app.get(['/health', '/api/health'], async (req, res) => {
 app.get('/media/:file', async (req, res) => {
   const m = /^([0-9a-f-]{36})\.[a-z0-9]{2,5}$/.exec(req.params.file);
   if (!m) return res.status(404).end();
-  const r = await query('SELECT mime, data FROM media_files WHERE id = $1', [m[1]]);
-  if (!r.rowCount) return res.status(404).end();
-  res.set({ 'Content-Type': r.rows[0].mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'cross-origin' });
-  res.send(r.rows[0].data);
+  const headers = { 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'cross-origin', ETag: `"${m[1]}"` };
+  // Dosyalar değişmez (yeni yükleme = yeni kimlik): istemcide varsa gövde gönderilmez.
+  if (req.headers['if-none-match'] === headers.ETag) return res.status(304).set(headers).end();
+  let hit = cachedMedia(m[1]);
+  if (!hit) {
+    const r = await query('SELECT mime, data FROM media_files WHERE id = $1', [m[1]]);
+    if (!r.rowCount) return res.status(404).end();
+    hit = r.rows[0];
+    rememberMedia(m[1], hit.mime, hit.data);
+  }
+  res.set({ ...headers, 'Content-Type': hit.mime });
+  res.send(hit.data);
 });
 
 app.use('/uploads', express.static(config.uploadDir, {
@@ -78,7 +93,22 @@ app.use('/uploads', express.static(config.uploadDir, {
   setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
 }));
 
-app.use('/api/auth', ipLimit('auth', 60, 15 * 60e3), authRouter);
+// Giriş/kayıt IP başına sınırlı. Token yenileme ve çıkış bu ortak sınıra sayılmaz: operatörler (CGNAT) binlerce
+// kullanıcıyı aynı IP'den çıkarır, saatlik yenilemeler sınırı doldurup herkesi oturumdan atardı.
+// Zorunlu güncelleme: yönetim panelindeki "en düşük sürüm"ün altındaki uygulamalar (X-App-Version başlığı
+// göndermeyen eski sürümler dahil) 426 alır ve uygulama "Güncelleme gerekli" ekranını gösterir.
+const UPDATE_EXEMPT = new Set(['/health', '/app/config', '/client-errors', '/auth/logout']);
+app.use('/api', async (req, res, next) => {
+  if (UPDATE_EXEMPT.has(req.path)) return next();
+  const c = await getConfig();
+  if (compareVersions(c.minAppVersion, '0.0.0') === 0) return next();
+  if (compareVersions(req.get('X-App-Version'), c.minAppVersion) >= 0) return next();
+  res.status(426).json({ code: 'update_required', message: c.updateMessage, minVersion: c.minAppVersion, updateUrl: c.updateUrl || null });
+});
+app.use('/api', systemRouter);
+
+const authIpLimit = ipLimit('auth', 60, 15 * 60e3);
+app.use('/api/auth', (req, res, next) => (['/refresh', '/logout'].includes(req.path) ? next() : authIpLimit(req, res, next)), authRouter);
 app.use('/api/me', meRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/inventory', inventoryRouter);
@@ -135,6 +165,11 @@ attachRealtime(server, {
   ipOf: wsClientIp,
   isBanned,
   onViolation: (ip, type, opts) => noteViolation(ip, type, opts),
+  onPresence: (userId) => recordPresence(userId),
+  presenceSnapshot,
+  canTyping: canSignalTyping,
+  // Gizli kullanıcı, "durumumu gizle" ve hayalet (SWIP) kullanıcılar çevrimiçi görünmez.
+  isPresenceVisible: async (u) => u.show_presence !== false && !u.is_hidden && !(await isGhost(u.id)),
 });
 const sweeper = startRoomSweeper();
 const musicTicker = startMusicTicker();
@@ -144,7 +179,11 @@ const pkTicker = startPkTicker();
 const gameTicker = startGameTicker();
 closeStaleMicSessions().catch((e) => console.error('Mikrofon oturumları temizlenemedi:', e.message));
 const janitor = startFirewallJanitor();
+// Bir günden eski işlem (idempotency) anahtarları saatte bir silinir.
+const idemJanitor = setInterval(nonOverlapping(() => pruneIdempotencyKeys().catch((e) => console.error('İşlem anahtarı temizliği:', e.message))), 3600e3);
+idemJanitor.unref();
 loadBans().then((n) => n && console.log(`${n} aktif IP yasağı yüklendi.`)).catch((e) => console.error('IP yasakları yüklenemedi:', e.message));
+promoteBootstrapAdmins().catch((e) => console.error('ADMIN_USERNAMES uygulanamadı:', e.message));
 
 server.listen(config.port, () => console.log(`TR Live backend ${config.port} portunda çalışıyor.`));
 
@@ -160,6 +199,7 @@ async function shutdown(signal) {
   clearInterval(pkTicker);
   clearInterval(gameTicker);
   clearInterval(janitor);
+  clearInterval(idemJanitor);
   const force = setTimeout(() => process.exit(1), 10000);
   force.unref();
   server.close(async () => { await closeDb(); process.exit(0); });

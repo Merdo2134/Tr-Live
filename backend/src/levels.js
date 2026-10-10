@@ -4,7 +4,9 @@ export const GIFT_LEVEL_STEPS = COIN_LEVEL_STEPS;
 export const FAMILY_LEVEL_STEPS = [100000n, 500000n, 2000000n, 10000000n];
 export const FAMILY_CAPACITY = [30, 50, 80, 120, 200];
 export const WIP_MIN_LEVEL = 1;
-export const WIP_MAX_LEVEL = 5;
+// WIP 1–10 ve SWIP (11): hayalet mod dahil tüm ayrıcalıklar.
+export const WIP_MAX_LEVEL = 11;
+export const SWIP_LEVEL = 11;
 
 export function levelFor(total, steps) {
   const t = BigInt(total);

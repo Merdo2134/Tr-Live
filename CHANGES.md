@@ -1,3 +1,62 @@
+## v2.38.1 — Veritabanı taşıma
+- Neon'un ücretsiz planı ayda 100 işlem saatiyle sınırlı; sürekli açık sunucumuzda ay ortasında bitiyor. Önerilen ücretsiz sağlayıcı: **Aiven Free PostgreSQL** (saat kotası yok). Adımlar: `docs/VERITABANI.md`.
+- Sunucu artık bağlantı adresindeki `sslmode` parametresini yok sayıyor: Aiven/Supabase adresleri olduğu gibi yapıştırılabilir ("self-signed certificate" hatası olmaz). İsteğe bağlı `DATABASE_CA` ile tam sertifika doğrulaması.
+- GitHub Actions'a **"Veritabanını taşı"** iş akışı: eski veritabanını yeni, boş veritabanına birebir kopyalar, her tablonun satır sayısını karşılaştırır, en büyük tabloları gösterir. Bağlantı adresleri GitHub secret olarak verilir.
+- `ADMIN_USERNAMES` ortam değişkeni: sıfırdan kurulan veritabanında belirtilen kullanıcı adları yönetici yapılır.
+
+## v2.38.0 — WIP 1–10 + SWIP (hayalet mod), şanslı hediye
+- **WIP 1–10:** Yoho'daki VIP kademelerinin ayrıcalıkları 10 kademeye sıkıştırıldı (Yoho'nun en üst kademesi = WIP 10). Her kademenin kendi rengi, rozeti, **isim efekti** (renkli → parlayan → neon → altın/yeşim/buz/gökkuşağı parıltı → ateş), **sohbet balonu** (renk geçişli, kenar ışıklı, köşe süslü), **avatar çerçevesi** (WIP 6+ dönen, WIP 8+ yıldızlı; takılı mağaza çerçevesi varsa o görünür) ve **giriş aracı** (🛵 Scooter → 🐉 Ejderha) var.
+- Ayrıcalıklar: ziyaretçileri görme (2), Vip hediyeler (3), susturulamaz (4), profil ışık efekti (5), odadan atılamaz + özel oda teması (6), gizli ziyaret (7), hareketli profil fotoğrafı (8), oda sayısı 1→5. Hepsi Panel > WIP kademelerinden değiştirilebilir.
+- **SWIP (11. kademe):** WIP 10'un her şeyi + **hayalet mod** (Ayarlar > Hayalet mod): odaya giriş duyurulmaz, dinleyici listesinde, kişi sayısında, toplu hediye alıcılarında ve çevrimiçi göstergelerde görünmez; ziyaret iz bırakmaz, odadan çıkışı da duyurulmaz. Mikrofona çıkınca görünür, inince yeniden gizlenir; mod değişince odada ve çevrimiçi göstergelerde anında güncellenir.
+- **WIP ekranı yenilendi:** kademe seçici, seçilen kademenin canlı önizlemesi (çerçeve, isim, balon, giriş aracı), kilitli/açık ayrıcalık ızgarası, paketler.
+- Eski WIP üyelikleri oransal taşındı (1→2, 2→4, 3→6, 4→8, 5→10); süreler aynı. Yeni fiyatlar 30 gün: 5 bin → 1 milyon Coin, SWIP 2 milyon.
+- **Şanslı hediye (Yoho çanı):** hediye penceresinde "Şanslı" sekmesi (Şanslı Çan, Şanslı Yonca). Her adet bir şans: x2–x500 kat Coin geri kazanma. Alıcıya hediye değerinin %10'u Elmas geçer. Büyük kazançlar (x100+) tüm uygulamaya duyurulur. Panel > Uygulama ayarları > Şanslı hediye: aç/kapa, geri dönüş oranı (varsayılan %70), alıcı payı, en fazla kazanç (toplam en fazla %95).
+- Ajans/maaş, PK, sayı tahtası, aile puanı ve liderlik tablolarında alıcı tarafı artık alıcıya geçen Elmas'la hesaplanıyor (şanslı hediyede değerin tamamı değil, payı).
+- Sunucu: migration 029; `is_ghost()` SQL işlevi ve `active_ghosts` görünümü (oda listelerinde hızlı sayım); `users.ghost_mode`, `gift_transactions.diamond_amount`; `lucky_gift_win` cüzdan türü ve global olayı; `GET /api/gifts` yanıtında `lucky`; hediye yanıtında/olayında `lucky`.
+
+## v2.37.0 — Faz 2 (1. kısım): tekrar koruması, combo hediye, "yazıyor...", Coin geçmişi
+- **Para işlemlerinde tekrar koruması:** hediye, mağaza, WIP, Elmas bozdurma, bayi satışı, şanslı çanta ve yönetici Coin düzeltmesi tek kullanımlık işlem anahtarıyla gider. Zayıf ağda istek iki kez ulaşsa (ya da uygulama zaman aşımından sonra kendiliğinden tekrar denese) Coin bir kez düşer. Ağ hatasından sonra aynı hediyeye tekrar basılırsa da aynı anahtar kullanılır.
+- **Combo hediye (Yoho):** gönderimden sonra hediye penceresi açık kalır, 5 sn'lik geri sayımlı "COMBO xN" düğmesi aynı hediyeyi tek dokunuşla tekrar gönderir. Odadaki şerit yeni şerit açmak yerine büyüyen altın "xN" sayacıyla uzar. Hediye/adet/alıcı değişince combo biter.
+- **"Yazıyor...":** arkadaşın yazarken sohbet başlığında ve mesaj listesinde görünür (yalnızca mesajlaşabilen arkadaşlar arasında, engelliyse gitmez).
+- **Coin geçmişi:** Cüzdan ekranında tür süzgeçleri (Hediye, Yükleme, Bozdurma, Mağaza/WIP, Çanta) ve "Daha fazla göster" ile eski kayıtlar; tutarlar +/− işaretli.
+- Sunucu: migration 028 (idempotency_keys), saatlik temizlik; `/api/me/wallet?group=&before=`; hediye yanıtında ve `room_gift` olayında `combo`; WebSocket `typing`.
+- Bilinçli olarak eklenmedi: şanslı hediye (gönderenin rastgele Coin kazanması) — kumar sayılma ve Google Play riski. VIP 1–15 için kademe/fiyat/rozet kararı bekleniyor.
+
+## v2.36.0 — Faz 1: oturumlar, çevrimiçi durumu, kalıcı medya, canlı panel, otomatik moderasyon
+Belgeler
+- `docs/` klasörü: MIMARI, EKONOMI, YETKILER, GUVENLIK, TEST_PLANI, YOL_HARITASI (elle) ve `docs/generated/` altında koddan üretilen veritabanı (74 tablo), API (258 uç) ve WebSocket (34 olay) belgeleri (`node backend/scripts/gen_docs.mjs`).
+
+Oturum ve güvenlik
+- Cihaz oturumları: 1 saatlik erişim token'ı + her kullanımda değişen yenileme token'ı (veritabanında yalnızca özeti). Uygulama süresi dolmadan kendiliğinden yeniler; internet yokken oturum kapanmaz.
+- Çalıntı token tespiti: eski yenileme token'ı 15 dk ağ toleransından sonra tekrar kullanılırsa oturum kapanır. Giriş sürerken şifre değişirse/ban gelirse oturum açılmaz.
+- Ayarlar > Oturumlarım: cihaz adı/modeli, sürüm, IP (maskeli), son etkinlik; tek cihazdan veya diğer tüm cihazlardan çıkış. Çıkışta sunucudaki oturum da kapanır.
+- Şifre değişimi, ban, hesap silme tüm oturumları kapatır. Eski sürümden güncellenen uygulama yeniden giriş istemeden yeni oturuma geçer; eski APK'lar çalışmaya devam eder.
+- Zorunlu güncelleme: Panel > Uygulama ayarları > en düşük sürüm. Altındaki uygulamalar "Güncelleme gerekli" ekranı görür (indirme bağlantısı kopyalanabilir). Yeni sürüm yayınlanınca bir kez "yeni sürüm var" bildirimi.
+- Profil fotoğrafı/kapak artık dış adres olarak verilemez (yalnızca yükleme). Hesap silinince gönderiler gizlenir, yüklenen fotoğraflar silinir.
+
+Çevrimiçi durumu
+- Mesajlar listesinde çevrimiçi kişilerin avatarında yeşil nokta (canlı), sohbet başlığında "Çevrimiçi / Son görülme ... önce", kullanıcı profilinde çevrimiçi satırı.
+- Özel mesajda "Görüldü".
+- Ayarlar > "Çevrimiçi durumumu göster" (kapatılabilir). Gizli kullanıcı modu ve engellenen kişiler durumu göremez.
+
+Kalıcı medya
+- Profil fotoğrafı, kapak, gönderi görseli, oda kapağı ve banner'lar artık veritabanında: Render yeniden dağıtılınca görseller kaybolmuyor. Sık istenen küçük görseller sunucu belleğinde önbelleklenir; tarayıcı/uygulama önbelleği için ETag. Eski dosyalar silinirken yalnızca kullanıcının kendi yüklemesi silinir.
+
+Otomatik moderasyon
+- Link, site adresi, "nokta com" gibi gizlemeler, t.me/wa.me/discord ve "insta: @..." yönlendirmeleri; herkese açık alanlarda telefon numarası engellenir. "saat 10.30", "tamam.biz" gibi normal cümleler takılmaz.
+- 10 dk içinde 3 ihlal → 15 dk tüm sohbetlerde kısıt; 24 saatte tekrarında süre ikiye katlanır (en fazla 24 sa). Değerler panelden değiştirilir. Ad, biyografi, oda adı/duyurusu, aile/ajans adında link ve telefon reddedilir.
+
+Yönetim paneli
+- Yeni "Panel" sekmesi (10 sn'de bir yenilenir): çevrimiçi kullanıcı, açık bağlantı, aktif oda, mikrofondaki kişi, açık oturum; bugünkü kayıt/aktif kullanıcı/hediye/mesaj/ihlal; sunucu sürümü, açık kalma süresi, CPU, bellek, veritabanı gecikmesi/boyutu/bağlantı havuzu, LiveKit durumu, açık şikâyet.
+- Uygulama hata kayıtları (telefonlarda yakalanan hatalar otomatik gönderilir, en sık hatalar özeti), İşlem kaydı (yetkili işlemleri ve para hareketleri), Otomatik moderasyon listesi, Uygulama ayarları.
+- Kullanıcı kartı: sohbet kısıtı koy/kaldır (yardımcı admin de), Cihazlar (oturumlar, emülatör işareti, aynı cihazı kullanan diğer hesaplar), Tüm oturumları kapat.
+
+Sunucu
+- Migration 027 (user_sessions, moderation_strikes, client_errors, app_config, users.show_presence / chat_restricted_until, panel indeksleri).
+- Yeni uçlar: /api/auth/refresh, /api/auth/session, /api/auth/logout, /api/me/sessions…, /api/app/config, /api/client-errors, /api/admin/dashboard, /client-errors, /actions, /app-config, /moderation/strikes, /users/:id/chat-restriction, /users/:id/devices, /users/:id/sessions/revoke-all.
+- Yeni WebSocket olayları: presence_watch → presence_state / presence, dm_read, chat_restricted.
+- Testler: moderasyon/sürüm/cihaz birim testleri; oturum, moderasyon, çevrimiçi durumu ve panel için uçtan uca testler.
+
 ## v2.35.0
 - Üst çubuk inceltildi; TRLive yazısı ve taç küçüldü; oda açma düğmesi yalnızca simge (yazı yok). Düğme yalnızca Sesli sekmesinde (mikrofon) ve Görüntülü sekmesinde (kamera) görünür; Akış, Mesajlar ve Profil'de yok.
 - Mesajlar Yoho düzeninde: "Sohbet (okunmamış)" başlığı, Aile / Duyurular / Arkadaşlar düğmeleri, Arkadaşlık İsteği · Çevrimiçi Sohbet · Ajans Mesajı kartları, Tüm / Özel Takip (takip ettiklerin) sekmeleri, kart görünümlü sohbet listesi ve "1 Eki" tarih biçimi.

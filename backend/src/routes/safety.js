@@ -4,6 +4,8 @@ import { requireAuth } from '../auth.js';
 import { fail, uuid, oneOf, text } from '../http.js';
 import { userLimit } from '../firewall.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
+import { hub } from '../realtime.js';
+import { forgetTyping } from '../services/presence.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -30,6 +32,8 @@ router.post('/blocks/:userId', userLimit('block', 30, 3600e3), async (req, res) 
     await c.query(`INSERT INTO user_blocks(blocker_id, blocked_id) VALUES($1,$2) ON CONFLICT (blocker_id, blocked_id) DO NOTHING`, [req.user.id, targetId]);
     await c.query(`DELETE FROM follows WHERE (follower_id = $1 AND followed_id = $2) OR (follower_id = $2 AND followed_id = $1)`, [req.user.id, targetId]);
   });
+  hub.unwatchPair(req.user.id, targetId); // çevrimiçi durumu karşılıklı görünmez
+  forgetTyping(req.user.id, targetId);
   res.json({ ok: true });
 });
 

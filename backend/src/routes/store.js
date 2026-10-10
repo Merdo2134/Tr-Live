@@ -4,6 +4,7 @@ import { requireAuth } from '../auth.js';
 import { userLimit } from '../firewall.js';
 import { fail, uuid } from '../http.js';
 import { hub } from '../realtime.js';
+import { idempotent } from '../idempotency.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -32,7 +33,7 @@ router.get('/items', async (req, res) => {
 });
 
 // Satın al (kendin için) veya "Gönder" (başka bir kullanıcıya hediye). Süre: ürünün gün sayısı; aynı ürün tekrar alınırsa süre uzar.
-router.post('/buy', userLimit('store_buy', 30, 3600e3), async (req, res) => {
+router.post('/buy', userLimit('store_buy', 30, 3600e3), idempotent('store_buy'), async (req, res) => {
   const itemId = uuid(req.body?.itemId, 'Ürün');
   const toUserId = req.body?.toUserId ? uuid(req.body.toUserId, 'Alıcı') : req.user.id;
   const result = await tx(async (c) => {

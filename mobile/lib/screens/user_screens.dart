@@ -5,6 +5,7 @@ import '../widgets/anim_asset.dart';
 import '../services/session.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/presence_widgets.dart';
 import '../widgets/safety_actions.dart';
 import 'feed_screen.dart';
 import 'messages_screen.dart';
@@ -115,8 +116,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             right: 0,
             top: coverH - 70,
             child: Center(
-              child: Stack(alignment: Alignment.center, children: [
+              child: Stack(alignment: Alignment.center, clipBehavior: Clip.none, children: [
+                // Profil efekti (WIP 5+): avatarın arkasında ışık halesi.
+                if (features?['profileEffect'] == true && wipLevelOf(wip?['level']) != null)
+                  Positioned(left: -24, top: -24, right: -24, bottom: -24, child: IgnorePointer(child: WipAura(level: wipLevelOf(wip?['level'])!))),
                 UserAvatar(user: p, radius: 46),
+                // Takılı çerçeve yoksa WIP kademesinin çerçevesi.
+                if (frame == null) WipFrame.around(wipLevelOf(wip?['level']), 46),
                 if (frame != null) IgnorePointer(child: SizedBox(width: 46 * 2 * kFrameScale, height: 46 * 2 * kFrameScale, child: AnimAsset(url: frame, repeat: true, cache: false))),
               ]),
             ),
@@ -151,6 +157,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (!hidden) ...[
         const SizedBox(height: 4),
         Text('ID: ${p['publicId'] ?? '-'}', style: const TextStyle(color: Pal.textDim)),
+        // Çevrimiçi / son görülme (kişi gizlemediyse).
+        if (p['presence'] is Map) Padding(padding: const EdgeInsets.only(top: 4), child: PresenceLine(presence: mapOf(p['presence']), fontSize: 12.5)),
         const SizedBox(height: 8),
         Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 4, children: [
           if (p['age'] != null) _chip(Icons.cake, '${p['age']}', const Color(0xFF3D8BFF)),

@@ -14,8 +14,17 @@ import { hub } from '../realtime.js';
 import { leaveRoom } from '../services/rooms.js';
 import { banIpPersist, unbanIp, listBans, securityStats } from '../firewall.js';
 import net from 'node:net';
-import { saveUpload, removeUpload, IMAGE_TYPES } from '../services/images.js';
+import { saveUpload, removeUpload, removeAnimatedAvatar, IMAGE_TYPES, OWN_IMAGE_RE } from '../services/images.js';
+import { revokeAllSessions } from '../services/sessions.js';
 import { detectMedia, ensureVapc, mimeFor, MEDIA_MAX_BYTES } from '../services/media.js';
+import { mediaCacheStats } from '../services/images.js';
+import { getConfig, saveConfig, validateConfigPatch, compareVersions, CONFIG_DEFAULTS } from '../services/app_config.js';
+import { livekitHealth } from '../livekit.js';
+import { poolStats } from '../database.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import { idempotent } from '../idempotency.js';
+import { ghostNow, refreshGhost } from '../services/ghost.js';
 
 export const router = Router();
 router.use(requireAuth, requireStaff);
@@ -49,7 +58,7 @@ router.get('/users', async (req, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase();
   if (q.length < 2) throw fail('Arama için en az 2 karakter girin.');
   const r = await query(
-    `SELECT id, public_id, username, display_name, avatar_url, coins, diamonds, system_role, account_status, banned_until, ban_reason
+    `SELECT id, public_id, username, display_name, avatar_url, coins, diamonds, system_role, account_status, banned_until, ban_reason, chat_restricted_until
      FROM users WHERE lower(username) LIKE $1 ESCAPE '\\' OR lower(display_name) LIKE $1 ESCAPE '\\' OR id::text = $2 OR public_id = $2
      ORDER BY (public_id = $2) DESC, username LIMIT 20`,
     [`%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`, q],
@@ -58,6 +67,7 @@ router.get('/users', async (req, res) => {
     users: r.rows.map((u) => ({
       id: u.id, publicId: u.public_id ?? null, username: u.username, displayName: u.display_name, coins: String(u.coins), diamonds: String(u.diamonds),
       systemRole: u.system_role, accountStatus: u.account_status, avatarUrl: u.avatar_url, bannedUntil: u.banned_until, banReason: u.ban_reason,
+      chatRestrictedUntil: u.chat_restricted_until && new Date(u.chat_restricted_until) > new Date() ? u.chat_restricted_until : null,
       ...(req.user.system_role === 'admin' ? {} : { coins: undefined, diamonds: undefined }),
     })),
   });
@@ -87,6 +97,7 @@ router.post('/users/:userId/ban', async (req, res) => {
     );
     await auditStaff(c, req.user.id, userId, 'account_ban', { until, reason, by: req.user.system_role });
   });
+  await revokeAllSessions(userId, 'banned');
   hub.disconnectUser(userId, 'banned');
   // Banlanan kullanıcı odalardan çıkarılır; ses/görüntü (LiveKit) bağlantısı da kesilir, sahibi olduğu oda kapanır.
   for (const r of (await query(`SELECT room_id FROM room_members WHERE user_id = $1`, [userId])).rows) {
@@ -129,10 +140,15 @@ router.post('/users/:userId/avatar', async (req, res) => {
   const target = await assertUser(userId);
   if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
   if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  const before = (await query(`SELECT avatar_url, static_avatar_url, avatar_animated FROM users WHERE id = $1`, [userId])).rows[0];
   await tx(async (c) => {
     await c.query(`UPDATE users SET avatar_url = $2, avatar_animated = FALSE, static_avatar_url = NULL, updated_at = NOW() WHERE id = $1`, [userId, url]);
     await auditStaff(c, req.user.id, userId, 'profile_avatar', { removed: !url, by: req.user.system_role });
   });
+  // Kaldırılan fotoğrafın dosyası da silinir (yalnızca kullanıcının kendi yüklediği kayıt).
+  await removeUpload(before?.avatar_url, userId);
+  await removeUpload(before?.static_avatar_url, userId);
+  if (before?.avatar_animated) await removeAnimatedAvatar(before.avatar_url, userId);
   res.json({ ok: true, avatarUrl: url });
 });
 
@@ -157,7 +173,7 @@ router.get('/staff', requireSuperAdmin, async (req, res) => {
 });
 
 // ---------------- Coin (yalnızca yönetici) ----------------
-router.post('/users/:userId/coins', requireSuperAdmin, async (req, res) => {
+router.post('/users/:userId/coins', requireSuperAdmin, idempotent('admin_coins'), async (req, res) => {
   const userId = uuid(req.params.userId, 'Kullanıcı');
   const delta = bigAmount(req.body?.amount, 'Coin miktarı', { allowNegative: true });
   const reason = text(req.body?.reason, 'Neden', { max: 300 }) || 'Admin Coin düzenlemesi';
@@ -188,6 +204,7 @@ router.post('/users/:userId/wip', async (req, res) => {
   const level = wipLevel(req.body?.level);
   const days = positiveInt(req.body?.days, 'WIP süresi', 3650);
   await assertUser(userId);
+  const wasGhost = await ghostNow(userId);
   const r = await query(
     `INSERT INTO user_wip(user_id, level, starts_at, expires_at, is_active)
      VALUES($1,$2,NOW(),NOW() + ($3::int * INTERVAL '1 day'),TRUE)
@@ -199,17 +216,23 @@ router.post('/users/:userId/wip', async (req, res) => {
     `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, metadata) VALUES($1,$2,'admin_wip_grant','wip',$3)`,
     [req.user.id, userId, JSON.stringify({ level, days })],
   );
+  await refreshGhost(userId, wasGhost);
   res.json({ wip: r.rows[0] });
 });
 
 router.delete('/users/:userId/wip', async (req, res) => {
   const userId = uuid(req.params.userId, 'Kullanıcı');
+  const wasGhost = await ghostNow(userId);
   await query(`UPDATE user_wip SET is_active = FALSE WHERE user_id = $1`, [userId]);
   await query(`INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type) VALUES($1,$2,'admin_wip_revoke','wip')`, [req.user.id, userId]);
+  await refreshGhost(userId, wasGhost);
   res.json({ ok: true });
 });
 
-const FEATURE_TYPES = { nameColor: 'color', badge: 'string', maxRooms: 'int', viewVisitors: 'bool', kickImmunity: 'bool', profileEffect: 'bool', customRoomTheme: 'bool', animatedAvatar: 'bool' };
+const FEATURE_TYPES = {
+  nameColor: 'color', badge: 'string', maxRooms: 'int', viewVisitors: 'bool', vipGifts: 'bool', muteImmunity: 'bool', kickImmunity: 'bool',
+  profileEffect: 'bool', customRoomTheme: 'bool', invisibleVisit: 'bool', animatedAvatar: 'bool', ghostMode: 'bool',
+};
 function cleanFeatures(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('Özellikler nesne olmalı.');
   const out = {};
@@ -400,7 +423,7 @@ router.post('/gifts', requireSuperAdmin, async (req, res) => {
     [text(req.body?.name, 'Ad', { min: 2, max: 80, required: true }), bigAmount(req.body?.coinPrice, 'Fiyat').toString(),
       assetUrl(req.body?.iconUrl, 'İkon adresi'), assetUrl(req.body?.animationUrl, 'Animasyon adresi'),
       oneOf(req.body?.animationFormat ?? guessFormat(req.body?.animationUrl), ['lottie', 'svga', 'mp4', 'webp', 'gif', 'png'], 'Animasyon biçimi'), req.body?.hasAlpha !== false,
-      oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip'], 'Hediye sekmesi')],
+      oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip', 'lucky'], 'Hediye sekmesi')],
   );
   res.status(201).json({ id: r.rows[0].id });
 });
@@ -862,12 +885,12 @@ router.get('/banners', async (_req, res) => {
 });
 
 router.put('/banners/image', express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
-  res.json({ url: await saveUpload(req) });
+  res.json({ url: await saveUpload(req, 'banner') });
 });
 
 router.post('/banners', async (req, res) => {
   const imageUrl = String(req.body?.imageUrl ?? '');
-  if (!/^\/uploads\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(imageUrl)) throw fail('Önce bir görsel yükleyin.');
+  if (!OWN_IMAGE_RE.test(imageUrl)) throw fail('Önce bir görsel yükleyin.');
   const title = text(req.body?.title, 'Başlık', { max: 80 }) || null;
   const linkUrl = req.body?.linkUrl ? httpsUrl(req.body.linkUrl, 'Bağlantı') : null;
   const sortOrder = Number.isInteger(req.body?.sortOrder) ? req.body.sortOrder : 0;
@@ -907,4 +930,223 @@ router.delete('/announcements/:id', async (req, res) => {
   const r = await query(`DELETE FROM announcements WHERE id = $1`, [id]);
   if (!r.rowCount) throw fail('Duyuru bulunamadı.', 404);
   res.json({ ok: true });
+});
+
+// ================= Canlı panel, hata kayıtları, işlem kaydı, uzaktan ayarlar, moderasyon =================
+const PKG_VERSION = (() => {
+  try { return JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version; } catch { return null; }
+})();
+
+// CPU kullanımı: iki panel isteği arasındaki ortalama (tek çekirdeğe göre yüzde).
+let cpuSample = { at: Date.now(), usage: process.cpuUsage() };
+function cpuPercent() {
+  const now = Date.now();
+  const used = process.cpuUsage(cpuSample.usage);
+  const elapsed = Math.max(1, now - cpuSample.at);
+  cpuSample = { at: now, usage: process.cpuUsage() };
+  return Math.round(((used.user + used.system) / 1000 / elapsed) * 1000) / 10;
+}
+
+const mb = (n) => Math.round((Number(n) / 1048576) * 10) / 10;
+// "Bugün" Türkiye saatine göre gece yarısından başlar.
+const DASH_SQL = `
+  WITH d AS (SELECT (date_trunc('day', NOW() AT TIME ZONE 'Europe/Istanbul') AT TIME ZONE 'Europe/Istanbul') AS start)
+  SELECT
+    (SELECT COUNT(*)::int FROM users, d WHERE users.created_at >= d.start) AS new_users,
+    (SELECT COUNT(*)::int FROM users, d WHERE users.last_seen_at >= d.start) AS active_users,
+    (SELECT COUNT(*)::int FROM users WHERE account_status = 'active') AS total_users,
+    (SELECT COUNT(*)::int FROM gift_transactions g, d WHERE g.created_at >= d.start) AS gifts,
+    (SELECT COALESCE(SUM(g.coin_amount), 0)::text FROM gift_transactions g, d WHERE g.created_at >= d.start) AS gift_coins,
+    (SELECT COUNT(*)::int FROM room_messages m, d WHERE m.created_at >= d.start) AS room_messages,
+    (SELECT COUNT(*)::int FROM direct_messages m, d WHERE m.created_at >= d.start) AS direct_messages,
+    (SELECT COUNT(*)::int FROM moderation_strikes s, d WHERE s.created_at >= d.start AND s.kind <> 'auto_mute') AS strikes,
+    (SELECT COUNT(*)::int FROM moderation_strikes s, d WHERE s.created_at >= d.start AND s.kind = 'auto_mute') AS auto_mutes,
+    (SELECT COUNT(*)::int FROM reports WHERE status = 'open') AS open_reports,
+    (SELECT COUNT(*)::int FROM client_errors WHERE created_at > NOW() - INTERVAL '24 hours') AS errors_24h,
+    (SELECT COUNT(*)::int FROM rooms WHERE is_active) AS active_rooms,
+    (SELECT COUNT(*)::int FROM rooms WHERE is_active AND room_type = 'video') AS video_rooms,
+    (SELECT COUNT(*)::int FROM room_members) AS room_members,
+    (SELECT COUNT(*)::int FROM room_members WHERE microphone) AS on_mic,
+    (SELECT COUNT(*)::int FROM user_sessions WHERE revoked_at IS NULL AND expires_at > NOW()) AS sessions`;
+
+router.get('/dashboard', requireSuperAdmin, async (req, res) => {
+  const t0 = Date.now();
+  await query('SELECT 1');
+  const dbLatencyMs = Date.now() - t0;
+  const [stats, size, lk] = await Promise.all([
+    query(DASH_SQL),
+    query(`SELECT pg_database_size(current_database())::bigint AS bytes, (SELECT COALESCE(SUM(size_bytes), 0)::bigint FROM media_files) AS media`),
+    livekitHealth(),
+  ]);
+  const s = stats.rows[0];
+  const mem = process.memoryUsage();
+  res.json({
+    time: new Date().toISOString(),
+    server: {
+      version: PKG_VERSION, node: process.version, uptimeSec: Math.round(process.uptime()), cpuPercent: cpuPercent(), cores: os.cpus().length,
+      loadAvg: os.loadavg().map((x) => Math.round(x * 100) / 100),
+      memory: { rssMb: mb(mem.rss), heapUsedMb: mb(mem.heapUsed), heapTotalMb: mb(mem.heapTotal) },
+      host: { totalMb: mb(os.totalmem()), freeMb: mb(os.freemem()) },
+    },
+    realtime: hub.stats(),
+    db: { ok: true, latencyMs: dbLatencyMs, pool: poolStats(), sizeMb: mb(size.rows[0].bytes), mediaMb: mb(size.rows[0].media) },
+    livekit: lk,
+    mediaCache: { ...mediaCacheStats(), mb: mb(mediaCacheStats().bytes) },
+    live: { activeRooms: s.active_rooms, videoRooms: s.video_rooms, audioRooms: s.active_rooms - s.video_rooms, roomMembers: s.room_members, onMic: s.on_mic, sessions: s.sessions },
+    today: {
+      newUsers: s.new_users, activeUsers: s.active_users, gifts: s.gifts, giftCoins: s.gift_coins,
+      roomMessages: s.room_messages, directMessages: s.direct_messages, strikes: s.strikes, autoMutes: s.auto_mutes,
+    },
+    totals: { users: s.total_users },
+    alerts: { openReports: s.open_reports, errors24h: s.errors_24h },
+  });
+});
+
+router.get('/client-errors', requireSuperAdmin, async (req, res) => {
+  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 100, 300));
+  const [list, top] = await Promise.all([
+    query(
+      `SELECT e.id, e.source, e.message, e.stack, e.app_version, e.device, e.occurred_at, e.created_at, u.id AS uid, u.username, u.display_name
+       FROM client_errors e LEFT JOIN users u ON u.id = e.user_id ORDER BY e.id DESC LIMIT $1`,
+      [limit],
+    ),
+    query(
+      `SELECT source, LEFT(message, 140) AS message, COUNT(*)::int AS n, COUNT(DISTINCT user_id)::int AS users, MAX(created_at) AS last_at
+       FROM client_errors WHERE created_at > NOW() - INTERVAL '7 days' GROUP BY 1, 2 ORDER BY n DESC LIMIT 15`,
+    ),
+  ]);
+  res.json({
+    errors: list.rows.map((e) => ({
+      id: String(e.id), source: e.source, message: e.message, stack: e.stack, appVersion: e.app_version, device: e.device,
+      occurredAt: e.occurred_at, createdAt: e.created_at, user: e.uid ? { id: e.uid, username: e.username, displayName: e.display_name } : null,
+    })),
+    top: top.rows.map((t) => ({ source: t.source, message: t.message, count: t.n, users: t.users, lastAt: t.last_at })),
+  });
+});
+
+router.delete('/client-errors', requireSuperAdmin, async (req, res) => {
+  const r = await query(`DELETE FROM client_errors`);
+  res.json({ ok: true, deleted: r.rowCount });
+});
+
+// Yönetici/yardımcı admin işlemleri ve para hareketleri tek listede: kim, ne zaman, kime, ne yaptı.
+router.get('/actions', requireSuperAdmin, async (req, res) => {
+  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 100, 300));
+  const userId = req.query.userId ? uuid(String(req.query.userId), 'Kullanıcı') : null;
+  const scope = req.query.scope ? oneOf(String(req.query.scope), ['staff', 'user'], 'Kapsam') : null;
+  const r = await query(
+    `SELECT l.id, l.action, l.reference_type, l.reference_id, l.amount_coins, l.amount_diamonds, l.balance_before, l.balance_after, l.metadata, l.created_at,
+            a.id AS actor_id, a.username AS actor_username, a.display_name AS actor_name, a.system_role AS actor_role,
+            t.id AS target_id, t.username AS target_username, t.display_name AS target_name
+     FROM financial_audit_logs l LEFT JOIN users a ON a.id = l.admin_id LEFT JOIN users t ON t.id = l.user_id
+     WHERE ($1::uuid IS NULL OR l.user_id = $1 OR l.admin_id = $1)
+       AND ($2::text IS NULL OR ($2 = 'staff' AND l.admin_id IS NOT NULL) OR ($2 = 'user' AND l.admin_id IS NULL))
+     ORDER BY l.created_at DESC LIMIT $3`,
+    [userId, scope, limit],
+  );
+  res.json({
+    actions: r.rows.map((x) => ({
+      id: x.id, action: x.action, referenceType: x.reference_type, referenceId: x.reference_id,
+      amountCoins: x.amount_coins == null ? null : String(x.amount_coins), amountDiamonds: x.amount_diamonds == null ? null : String(x.amount_diamonds),
+      balanceBefore: x.balance_before == null ? null : String(x.balance_before), balanceAfter: x.balance_after == null ? null : String(x.balance_after),
+      metadata: x.metadata, createdAt: x.created_at,
+      actor: x.actor_id ? { id: x.actor_id, username: x.actor_username, displayName: x.actor_name, role: x.actor_role } : null,
+      target: x.target_id ? { id: x.target_id, username: x.target_username, displayName: x.target_name } : null,
+    })),
+  });
+});
+
+router.get('/app-config', requireSuperAdmin, async (req, res) => {
+  res.json({ config: await getConfig(), defaults: CONFIG_DEFAULTS });
+});
+
+router.put('/app-config', requireSuperAdmin, async (req, res) => {
+  const patch = validateConfigPatch(req.body);
+  // Kendi sürümünden yüksek bir "en düşük sürüm" yönetici dahil herkesi uygulamadan kilitlerdi.
+  if (patch.minAppVersion && compareVersions(patch.minAppVersion, '0.0.0') > 0) {
+    const mine = req.get('X-App-Version');
+    if (compareVersions(patch.minAppVersion, mine) > 0) {
+      throw fail(`En düşük sürüm, şu an kullandığınız sürümden (${mine || 'bilinmiyor'}) yüksek olamaz; yoksa siz de uygulamaya giremezsiniz.`);
+    }
+  }
+  // Şanslı hediye: gönderene dönen + alıcıya geçen pay hediye değerini aşamaz (platform zarar etmesin).
+  const merged = { ...(await getConfig()), ...patch };
+  if (merged.luckyRtpBps + merged.luckyReceiverBps > 9500) {
+    throw fail('Şanslı hediyede geri dönüş (RTP) + alıcı payı en fazla %95 olabilir.');
+  }
+  const cfg = await saveConfig(patch, req.user.id);
+  await auditStaff({ query }, req.user.id, null, 'app_config_update', patch);
+  res.json({ config: cfg });
+});
+
+router.get('/moderation/strikes', requireSuperAdmin, async (req, res) => {
+  const limit = Math.max(1, Math.min(Math.floor(Number(req.query.limit)) || 100, 300));
+  const r = await query(
+    `SELECT s.id, s.kind, s.context, s.sample, s.created_at, u.id AS uid, u.public_id, u.username, u.display_name, u.chat_restricted_until
+     FROM moderation_strikes s JOIN users u ON u.id = s.user_id ORDER BY s.id DESC LIMIT $1`,
+    [limit],
+  );
+  res.json({
+    strikes: r.rows.map((x) => ({
+      id: String(x.id), kind: x.kind, context: x.context, sample: x.sample, createdAt: x.created_at,
+      user: { id: x.uid, publicId: x.public_id, username: x.username, displayName: x.display_name },
+      restrictedUntil: x.chat_restricted_until && new Date(x.chat_restricted_until) > new Date() ? x.chat_restricted_until : null,
+    })),
+  });
+});
+
+// Sohbet kısıtı: dakika (0 = kaldır). Yardımcı admin de kullanabilir (yalnızca normal kullanıcılara).
+router.post('/users/:userId/chat-restriction', async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const target = await assertUser(userId);
+  if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  const minutes = req.body?.minutes;
+  if (!Number.isInteger(minutes) || minutes < 0 || minutes > 10080) throw fail('Süre 0-10080 dakika olmalı (0 = kısıtı kaldır).');
+  const r = await query(
+    `UPDATE users SET chat_restricted_until = CASE WHEN $2::int = 0 THEN NULL ELSE NOW() + make_interval(mins => $2::int) END WHERE id = $1 RETURNING chat_restricted_until`,
+    [userId, minutes],
+  );
+  await auditStaff({ query }, req.user.id, userId, 'chat_restriction', { minutes, by: req.user.system_role });
+  if (minutes > 0) hub.sendToUser(userId, { type: 'chat_restricted', minutes });
+  res.json({ ok: true, restrictedUntil: r.rows[0].chat_restricted_until });
+});
+
+// Cihazlar: kullanıcının oturumları ve aynı cihazı kullanan diğer hesaplar (çoklu hesap / hile tespiti).
+router.get('/users/:userId/devices', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  await assertUser(userId);
+  const [sessions, linked] = await Promise.all([
+    query(
+      `SELECT id, device_id, device_name, platform, app_version, emulator, ip, created_at, last_used_at, revoked_at, revoke_reason
+       FROM user_sessions WHERE user_id = $1 ORDER BY last_used_at DESC LIMIT 30`,
+      [userId],
+    ),
+    query(
+      `SELECT u.id, u.public_id, u.username, u.display_name, u.account_status, MAX(s.last_used_at) AS last_used_at
+       FROM user_sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.user_id <> $1 AND s.device_id IN (SELECT device_id FROM user_sessions WHERE user_id = $1 AND device_id IS NOT NULL)
+       GROUP BY u.id ORDER BY MAX(s.last_used_at) DESC LIMIT 50`,
+      [userId],
+    ),
+  ]);
+  res.json({
+    sessions: sessions.rows.map((x) => ({
+      id: x.id, deviceName: x.device_name, platform: x.platform, appVersion: x.app_version, emulator: x.emulator, ip: x.ip,
+      createdAt: x.created_at, lastUsedAt: x.last_used_at, revokedAt: x.revoked_at, revokeReason: x.revoke_reason,
+    })),
+    online: hub.isOnline(userId),
+    linkedAccounts: linked.rows.map((u) => ({ id: u.id, publicId: u.public_id, username: u.username, displayName: u.display_name, accountStatus: u.account_status, lastUsedAt: u.last_used_at })),
+  });
+});
+
+// Kullanıcının tüm cihazlarındaki oturumları kapatır (hesap çalındı şüphesi vb.).
+router.post('/users/:userId/sessions/revoke-all', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const target = await assertUser(userId);
+  if (!mayActOnUser(req.user.system_role, target.system_role) || userId === req.user.id) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  await query(`UPDATE users SET token_version = token_version + 1, updated_at = NOW() WHERE id = $1`, [userId]);
+  const n = await revokeAllSessions(userId, 'admin');
+  hub.disconnectUser(userId, 'sessions_revoked');
+  await auditStaff({ query }, req.user.id, userId, 'sessions_revoke', { count: n });
+  res.json({ ok: true, revoked: n });
 });

@@ -1,6 +1,7 @@
 import { query } from '../database.js';
 import { HIDDEN_NAME, selfUser } from '../views.js';
 import { BASE_FEATURES } from './wip.js';
+import { presenceView } from './presence.js';
 
 export async function equippedItems(userId, run = query) {
   const r = await run(
@@ -22,7 +23,7 @@ export async function equippedItems(userId, run = query) {
 // Profil sayfası. Gizli kullanıcılar başkalarına yalnızca minimal bilgiyle görünür.
 export async function loadProfile(viewerId, targetId) {
   const r = await query(
-    `SELECT u.*, uw.level AS wip_level, uw.expires_at AS wip_expires_at, wt.name AS wip_name, wt.features AS wip_features,
+    `SELECT u.*, uw.level AS wip_level, uw.expires_at AS wip_expires_at, wt.name AS wip_name, wt.features AS wip_features, is_ghost(u.id) AS ghost,
             CASE WHEN u.birth_date IS NULL THEN NULL ELSE DATE_PART('year', AGE(u.birth_date))::int END AS age
      FROM users u
      LEFT JOIN user_wip uw ON uw.user_id = u.id AND uw.is_active = TRUE AND uw.expires_at > NOW()
@@ -41,7 +42,7 @@ export async function loadProfile(viewerId, targetId) {
     };
   }
 
-  const [counts, following, friendRel, items, family, broadcaster, ownedAgency] = await Promise.all([
+  const [counts, following, friendRel, items, family, broadcaster, ownedAgency, blocked] = await Promise.all([
     query(
       `SELECT (SELECT COUNT(*)::int FROM follows WHERE followed_id = $1) AS followers,
               (SELECT COUNT(*)::int FROM follows WHERE follower_id = $1) AS following,
@@ -67,6 +68,11 @@ export async function loadProfile(viewerId, targetId) {
       [targetId],
     ),
     isSelf ? query(`SELECT id, name, status FROM agencies WHERE owner_id = $1 AND status <> 'rejected'`, [targetId]) : Promise.resolve({ rows: [] }),
+    // Engelleme ilişkisi varsa çevrimiçi durumu gösterilmez.
+    isSelf ? Promise.resolve({ rowCount: 0 }) : query(
+      `SELECT 1 FROM user_blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)`,
+      [viewerId, targetId],
+    ),
   ]);
 
   const f = family.rows[0];
@@ -102,6 +108,8 @@ export async function loadProfile(viewerId, targetId) {
       features: { ...BASE_FEATURES, ...u.wip_features },
     } : null,
     equipped: items,
+    // Çevrimiçi / son görülme (kişi gizlemediyse). Kendi profilinde gösterilmez.
+    presence: isSelf || blocked.rowCount ? null : presenceView(u),
     family: f ? { id: f.id, name: f.name, logoUrl: f.logo_url, level: f.level, role: f.role } : null,
     broadcaster: b && b.status === 'approved'
       ? { status: b.status, agency: b.agency_id ? { id: b.agency_id, name: b.agency_name, logoUrl: b.agency_logo } : null }

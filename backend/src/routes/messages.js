@@ -4,15 +4,15 @@ import { requireAuth } from '../auth.js';
 import { fail, uuid, positiveInt } from '../http.js';
 import { userLimit } from '../firewall.js';
 import { hub } from '../realtime.js';
-import { config } from '../config.js';
-import { cleanMultiline, containsBanned, looksLikeFlood } from '../text_safety.js';
+import { cleanMultiline } from '../text_safety.js';
+import { screenText } from '../services/moderation.js';
+import { presenceView } from '../services/presence.js';
 import { areFriends } from './friends.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 
 export const router = Router();
 router.use(requireAuth);
 
-const banned = config.bannedWords.map((w) => w.toLocaleLowerCase('tr'));
 const msgJson = (m) => ({ id: m.id, senderId: m.sender_id, receiverId: m.receiver_id, text: m.body, createdAt: m.created_at, readAt: m.read_at });
 
 router.get('/unread-count', async (req, res) => {
@@ -31,7 +31,7 @@ router.get('/conversations', async (req, res) => {
      )
      SELECT l.message_id, l.body, l.message_at, l.sender_id,
             (SELECT COUNT(*)::int FROM direct_messages d WHERE d.sender_id = l.peer AND d.receiver_id = $1 AND d.read_at IS NULL) AS unread,
-            ${USER_PUBLIC_COLUMNS}
+            u.show_presence, u.last_seen_at, is_ghost(u.id) AS ghost, ${USER_PUBLIC_COLUMNS}
      FROM latest l JOIN users u ON u.id = l.peer ${USER_PUBLIC_JOINS}
      WHERE u.account_status = 'active' AND NOT EXISTS (
        SELECT 1 FROM user_blocks b WHERE (b.blocker_id = $1 AND b.blocked_id = l.peer) OR (b.blocker_id = l.peer AND b.blocked_id = $1))
@@ -41,6 +41,7 @@ router.get('/conversations', async (req, res) => {
   res.json({
     conversations: r.rows.map((x) => ({
       peer: publicUser(x, req.user.id), lastMessage: x.body, lastMessageAt: x.message_at, lastFromMe: x.sender_id === req.user.id, unread: x.unread,
+      presence: presenceView(x),
     })),
   });
 });
@@ -54,7 +55,9 @@ router.get('/with/:userId', async (req, res) => {
      ORDER BY created_at DESC LIMIT $3`,
     [req.user.id, peerId, limit],
   );
-  await query(`UPDATE direct_messages SET read_at = NOW() WHERE receiver_id = $1 AND sender_id = $2 AND read_at IS NULL`, [req.user.id, peerId]);
+  const read = await query(`UPDATE direct_messages SET read_at = NOW() WHERE receiver_id = $1 AND sender_id = $2 AND read_at IS NULL`, [req.user.id, peerId]);
+  // Gönderen sohbet ekranındaysa mesajlarının altında "Görüldü" görünür.
+  if (read.rowCount) hub.sendToUser(peerId, { type: 'dm_read', userId: req.user.id, at: new Date().toISOString() });
   res.json({ messages: r.rows.reverse().map(msgJson) });
 });
 
@@ -63,8 +66,6 @@ router.post('/with/:userId', userLimit('dm10s', 6, 10e3), userLimit('dm1h', 200,
   if (peerId === req.user.id) throw fail('Kendinize mesaj gönderemezsiniz.');
   const body = cleanMultiline(req.body?.text, 1000);
   if (!body) throw fail('Mesaj boş olamaz.');
-  if (looksLikeFlood(body)) throw fail('Mesaj spam olarak algılandı.', 422);
-  if (containsBanned(body, banned)) throw fail('Mesajınız topluluk kurallarına aykırı ifadeler içeriyor.', 422);
 
   const peer = (await query(`SELECT who_can_dm, account_status FROM users WHERE id = $1`, [peerId])).rows[0];
   if (!peer || peer.account_status !== 'active') throw fail('Kullanıcı bulunamadı.', 404);
@@ -76,6 +77,8 @@ router.post('/with/:userId', userLimit('dm10s', 6, 10e3), userLimit('dm1h', 200,
   if (peer.who_can_dm === 'nobody') throw fail('Bu kullanıcı özel mesaj almıyor.', 403);
   // Yalnızca arkadaş olan kişiler mesajlaşabilir.
   if (!(await areFriends(req.user.id, peerId))) throw fail('Mesajlaşmak için önce arkadaş olmalısınız.', 403);
+  // İçerik denetimi alıcı kontrollerinden sonra: var olmayan / engelli kişiye yazma denemesi ihlal sayılmasın.
+  await screenText(req.user, body, 'dm');
   const m = (await query(`INSERT INTO direct_messages(sender_id, receiver_id, body) VALUES($1,$2,$3) RETURNING *`, [req.user.id, peerId, body])).rows[0];
   const message = msgJson(m);
   hub.sendToUser(peerId, { type: 'dm', message });

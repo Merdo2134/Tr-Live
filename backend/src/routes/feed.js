@@ -4,19 +4,17 @@ import { query } from '../database.js';
 import { requireAuth, optionalAuth } from '../auth.js';
 import { fail, uuid } from '../http.js';
 import { userLimit } from '../firewall.js';
-import { config } from '../config.js';
-import { cleanMultiline, containsBanned, looksLikeFlood } from '../text_safety.js';
+import { cleanMultiline } from '../text_safety.js';
+import { screenText } from '../services/moderation.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
-import { saveUpload, removeUpload, IMAGE_TYPES } from '../services/images.js';
+import { saveUpload, removeUpload, IMAGE_TYPES, OWN_IMAGE_RE } from '../services/images.js';
 
 export const router = Router();
-const banned = config.bannedWords.map((w) => w.toLocaleLowerCase('tr'));
 const PAGE = 20;
 
-function checkText(value, max) {
+async function checkText(user, value, max, context) {
   const body = cleanMultiline(value, max);
-  if (body && looksLikeFlood(body)) throw fail('Metin spam olarak algılandı.', 422);
-  if (body && containsBanned(body, banned)) throw fail('Metin topluluk kurallarına aykırı ifadeler içeriyor.', 422);
+  await screenText(user, body, context);
   return body;
 }
 
@@ -91,15 +89,15 @@ router.get('/posts', optionalAuth, async (req, res) => {
 });
 
 router.put('/posts/image', requireAuth, userLimit('post_image', 20, 3600e3), express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
-  res.json({ url: await saveUpload(req) });
+  res.json({ url: await saveUpload(req, 'post') });
 });
 
 router.post('/posts', requireAuth, userLimit('post_create', 20, 3600e3), async (req, res) => {
-  const body = checkText(req.body?.text, 1000);
+  const body = await checkText(req.user, req.body?.text, 1000, 'post');
   let imageUrl = null;
   if (req.body?.imageUrl !== undefined && req.body.imageUrl !== null) {
     imageUrl = String(req.body.imageUrl);
-    if (!/^\/uploads\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(imageUrl)) throw fail('Görsel adresi geçersiz.');
+    if (!OWN_IMAGE_RE.test(imageUrl)) throw fail('Görsel adresi geçersiz.');
     const own = await query(`SELECT 1 FROM upload_owners WHERE url = $1 AND owner_id = $2`, [imageUrl, req.user.id]);
     if (!own.rowCount) throw fail('Yalnızca kendi yüklediğin görseli paylaşabilirsin.', 403);
   }
@@ -125,7 +123,7 @@ router.delete('/posts/:id', requireAuth, async (req, res) => {
       `SELECT 1 FROM upload_owners uo WHERE uo.url = $1 AND uo.owner_id = $2
          AND NOT EXISTS (SELECT 1 FROM posts p WHERE p.image_url = $1 AND p.id <> $3 AND p.is_removed = FALSE)`,
       [post.image_url, post.user_id, id]);
-    if (own.rowCount) await removeUpload(post.image_url);
+    if (own.rowCount) await removeUpload(post.image_url, post.user_id);
   }
   res.json({ ok: true });
 });
@@ -158,7 +156,7 @@ router.get('/posts/:id/comments', optionalAuth, async (req, res) => {
 
 router.post('/posts/:id/comments', requireAuth, userLimit('post_comment', 60, 3600e3), async (req, res) => {
   const id = uuid(req.params.id);
-  const body = checkText(req.body?.text, 300);
+  const body = await checkText(req.user, req.body?.text, 300, 'comment');
   if (!body) throw fail('Yorum boş olamaz.');
   const post = (await query(`SELECT 1 FROM posts WHERE id = $1 AND is_removed = FALSE`, [id])).rowCount;
   if (!post) throw fail('Gönderi bulunamadı.', 404);

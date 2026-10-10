@@ -1,7 +1,7 @@
 name: tr_live
 description: TR Live - canlı sesli/görüntülü odalar, aile, WIP, ajans/yayıncı, hediyeler ve yönetim
 publish_to: none
-version: 2.35.0+1
+version: 2.38.1+1
 environment:
   sdk: '>=3.8.0 <4.0.0'
   flutter: '>=3.32.0'
@@ -19,6 +19,8 @@ dependencies:
   just_audio: ^0.10.4
   file_picker: ^8.1.2
   image_picker: ^1.2.0
+  # livekit_client zaten bu paketi kullanıyor; 'any' aynı sürümü seçer (yeni yerel kod eklenmez).
+  device_info_plus: any
   cupertino_icons: ^1.0.8
 dev_dependencies:
   flutter_test:

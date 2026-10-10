@@ -28,7 +28,7 @@ class _DealerScreenState extends State<DealerScreen> {
     if (!await confirm(context, '@${_username.text.trim()} kullanıcısına ${fmtNumber(amount)} Coin satılacak.', action: 'Sat')) return;
     if (!mounted) return;
     setState(() => _busy = true);
-    final r = await guard(context, () => Api.post('/api/dealer/sell', {'username': _username.text.trim(), 'amount': amount}));
+    final r = await guard(context, () => Api.postOnce('/api/dealer/sell', {'username': _username.text.trim(), 'amount': amount}));
     if (!mounted) return;
     setState(() => _busy = false);
     if (r != null) {

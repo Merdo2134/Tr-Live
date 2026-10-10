@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { query } from '../database.js';
 import { requireAuth } from '../auth.js';
-import { config } from '../config.js';
 import { fail, uuid, positiveInt } from '../http.js';
 import { userLimit } from '../firewall.js';
 import { hub } from '../realtime.js';
-import { cleanLine, containsBanned, looksLikeFlood } from '../text_safety.js';
+import { cleanLine } from '../text_safety.js';
+import { screenText } from '../services/moderation.js';
 import { canManage } from '../room_permissions.js';
 import { featuresFor } from '../services/wip.js';
 import { noteTask } from '../services/daily.js';
@@ -16,7 +16,6 @@ export const router = Router();
 router.use(requireAuth);
 
 const MANAGERS = ['owner', 'cohost', 'moderator'];
-const banned = config.bannedWords.map((w) => w.toLocaleLowerCase('tr'));
 
 async function roomAndMember(roomId, userId) {
   const room = (await query(`SELECT id, chat_enabled FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
@@ -38,8 +37,7 @@ router.post('/:roomId/messages', userLimit('chat10s', 8, 10e3), userLimit('chat1
 
   const body = cleanLine(req.body?.text, 300);
   if (!body) throw fail('Mesaj boş olamaz.');
-  if (looksLikeFlood(body)) throw fail('Mesaj spam olarak algılandı.', 422);
-  if (containsBanned(body, banned)) throw fail('Mesajınız topluluk kurallarına aykırı ifadeler içeriyor.', 422);
+  await screenText(req.user, body, 'room_chat');
 
   const m = (await query(`INSERT INTO room_messages(room_id, user_id, body) VALUES($1,$2,$3) RETURNING id, created_at`, [roomId, req.user.id, body])).rows[0];
   const row = await loadPublicRow(req.user.id);
@@ -97,7 +95,10 @@ router.post('/:roomId/members/:userId/chat-mute', userLimit('moderate', 60, 60e3
   const target = (await query(`SELECT role FROM room_members WHERE room_id = $1 AND user_id = $2`, [roomId, targetId])).rows[0];
   if (!target) throw fail('Kullanıcı odada değil.', 404);
   if (!canManage(member.role, target.role, 'moderate')) throw fail('Bu işlem için yetkiniz yok.', 403);
-  if (member.role !== 'owner' && (await featuresFor(targetId)).kickImmunity) throw fail('Bu kullanıcı susturulamaz (WIP ayrıcalığı).', 403);
+  if (member.role !== 'owner') {
+    const f = await featuresFor(targetId);
+    if (f.muteImmunity || f.kickImmunity) throw fail('Bu kullanıcı susturulamaz (WIP ayrıcalığı).', 403);
+  }
   await query(
     `UPDATE room_members SET chat_muted_until = CASE WHEN $3::int = 0 THEN NULL ELSE NOW() + ($3::int * INTERVAL '1 minute') END WHERE room_id = $1 AND user_id = $2`,
     [roomId, targetId, minutes],

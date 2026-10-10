@@ -24,6 +24,8 @@ class GiftRibbonOverlay extends StatefulWidget {
 class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   final List<Map<String, dynamic>> _queue = [];
   Map<String, dynamic>? _current;
+  int _currentSeq = 0; // şerit kimliği: combo güncellemesinde şerit yeniden kaymaz, yalnızca süresi uzar
+  int _bump = 0;
   Map<String, dynamic>? _entrance;
   StreamSubscription? _sub;
   Timer? _timer;
@@ -52,8 +54,8 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   void _onEvent(Map<String, dynamic> e) {
     if (!GiftRibbonOverlay.effectsOn) return;
     final type = e['type'];
-    if (type == 'lucky_bag_global') {
-      _enqueue(e); // süper çanta duyurusu: tüm odalarda ve ana ekranda
+    if (type == 'lucky_bag_global' || type == 'lucky_gift_win') {
+      _enqueue(e); // süper çanta / büyük şanslı hediye kazancı duyurusu: tüm odalarda ve ana ekranda
     } else if (type == 'global_gift_ribbon') {
       // Aynı odadaysak zaten room_gift ile göstereceğiz.
       if (widget.roomId != null && e['roomId'] == widget.roomId) return;
@@ -64,7 +66,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       Future.delayed(const Duration(milliseconds: 700), () {
         if (mounted) _enqueueAnim(g);
       });
-      _enqueue(e);
+      if (!_mergeCombo(e)) _enqueue(e);
     } else if (type == 'room_member_joined' && widget.roomId != null && e['roomId'] == widget.roomId) {
       final effect = mapOf(e['entranceEffect']);
       if (effect != null) _showEntrance(e, effect);
@@ -77,6 +79,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     final url = Api.absoluteUrl(gift?['animationUrl'] as String?);
     if (gift == null) return;
     if (url == null) {
+      if (gift['category'] == 'lucky') return; // şanslı hediyenin tam ekran animasyonu zorunlu değil
       // Kullanıcıya teknik mesaj gösterilmez; yalnızca yetkililere ve hata kaydına düşer.
       ErrorLog.add('Hediye animasyonu yok', '"${gift['name']}" için animasyon dosyası tanımlı değil');
       if (mounted && Session.isStaff) toast(context, '"${gift['name']}" hediyesinde animasyon dosyası yok (Yönetim → Katalog).', error: true);
@@ -118,6 +121,39 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     );
   }
 
+  /// Aynı gönderen → aynı alıcılar, aynı hediye (combo serisi).
+  String _comboKey(Map<String, dynamic> e) {
+    final receivers = e['receivers'] is List ? (e['receivers'] as List) : const [];
+    final ids = [for (final r in receivers) if (r is Map && r['user'] is Map) '${(r['user'] as Map)['id']}']..sort();
+    return '${mapOf(e['sender'])?['id']}|${mapOf(e['gift'])?['id']}|${ids.join(',')}';
+  }
+
+  /// Combo: ekranda (ya da sırada) aynı serinin şeridi varsa yeni şerit açılmaz; sayaç güncellenir, süre uzar.
+  bool _mergeCombo(Map<String, dynamic> e) {
+    final combo = (e['combo'] as num?)?.toInt() ?? 1;
+    if (combo < 2) return false;
+    final key = _comboKey(e);
+    final cur = _current;
+    if (cur != null && cur['type'] == 'room_gift' && _comboKey(cur) == key) {
+      _timer?.cancel();
+      // Şerit beklemeye baştan döner (kalan ~4,4 sn); sıradaki şerit boşluk kalmadan gelsin.
+      _timer = Timer(const Duration(milliseconds: 4600), _next);
+      setState(() {
+        _current = e;
+        _bump++;
+      });
+      return true;
+    }
+    for (var i = 0; i < _queue.length; i++) {
+      final q = _queue[i];
+      if (q['type'] == 'room_gift' && _comboKey(q) == key) {
+        _queue[i] = e;
+        return true;
+      }
+    }
+    return false;
+  }
+
   void _enqueue(Map<String, dynamic> e) {
     if (_queue.length < 10) _queue.add(e);
     if (_current == null) _next();
@@ -130,7 +166,12 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       return;
     }
     final e = _queue.removeAt(0);
-    if (mounted) setState(() => _current = e);
+    if (mounted) {
+      setState(() {
+        _current = e;
+        _currentSeq++;
+      });
+    }
     _timer = Timer(const Duration(milliseconds: 5200), _next);
   }
 
@@ -150,7 +191,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       widget.child,
       if (_anim != null) _buildAnim(),
       if (_entrance != null) _buildEntrance(top),
-      if (_current != null) Positioned(top: top, left: 0, right: 0, child: _SlideStrip(key: ObjectKey(_current), child: _buildRibbon(_current!))),
+      if (_current != null) Positioned(top: top, left: 0, right: 0, child: _SlideStrip(key: ValueKey(_currentSeq), bump: _bump, child: _buildRibbon(_current!))),
     ]);
   }
 
@@ -183,8 +224,40 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     );
   }
 
+  /// Büyük şanslı hediye kazancı (Yoho "çan" duyurusu).
+  Widget _buildLuckyRibbon(Map<String, dynamic> e) {
+    final sender = mapOf(e['sender']);
+    final gift = mapOf(e['gift']);
+    return IgnorePointer(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(colors: [Color(0x0000C853), Color(0xFF00C853), Color(0xFFFFD54F), Color(0xFF00C853), Color(0x0000C853)]),
+            boxShadow: [BoxShadow(color: Color(0xAA00E676), blurRadius: 14)],
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Text('🔔', style: TextStyle(fontSize: 22)),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                '${sender?['displayName'] ?? 'Biri'} ${gift?['name'] ?? 'şanslı hediye'} ile x${e['multiplier']} vurdu! +${fmtNumber(e['win'])} Coin',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 13, shadows: [Shadow(color: Colors.black54, blurRadius: 3)]),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _buildRibbon(Map<String, dynamic> e) {
     if (e['type'] == 'lucky_bag_global') return _buildBagRibbon(e);
+    if (e['type'] == 'lucky_gift_win') return _buildLuckyRibbon(e);
     final gift = mapOf(e['gift']) ?? {};
     final sender = mapOf(e['sender']);
     final receivers = e['receivers'] is List ? (e['receivers'] as List) : const [];
@@ -193,6 +266,10 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
         .whereType<String>()
         .toList();
     final icon = Api.absoluteUrl(gift['iconUrl'] as String?);
+    final combo = (e['combo'] as num?)?.toInt() ?? 1;
+    // Şanslı hediyede en yüksek çarpan şeritte gösterilir (x2 ve üzeri).
+    final lucky = mapOf(e['lucky']);
+    final luckyBest = (lucky?['best'] as num?)?.toInt() ?? 0;
     return IgnorePointer(
       child: Material(
         color: Colors.transparent,
@@ -212,6 +289,33 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
                 style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ),
+            if (luckyBest >= 2) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: const Color(0xFF00C853), borderRadius: BorderRadius.circular(8)),
+                child: Text('🔔 x$luckyBest', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12)),
+              ),
+            ],
+            if (combo > 1) ...[
+              const SizedBox(width: 8),
+              // Her combo'da sayı büyüyüp yerine oturur.
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 260),
+                transitionBuilder: (child, anim) => ScaleTransition(scale: Tween<double>(begin: 1.8, end: 1).animate(anim), child: child),
+                child: Text(
+                  'x$combo',
+                  key: ValueKey(combo),
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                    fontStyle: FontStyle.italic,
+                    color: Color(0xFFFFD54F),
+                    shadows: [Shadow(color: Color(0xFFFF6D00), blurRadius: 8)],
+                  ),
+                ),
+              ),
+            ],
           ]),
         ),
       ),
@@ -252,13 +356,21 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
 /// Şeridi sağdan sola kaydırarak geçirir (giriş → bekleme → çıkış).
 class _SlideStrip extends StatefulWidget {
   final Widget child;
-  const _SlideStrip({super.key, required this.child});
+  /// Değişince (combo) şerit ekranda kalır ve bekleme süresi baştan başlar.
+  final int bump;
+  const _SlideStrip({super.key, required this.child, this.bump = 0});
   @override
   State<_SlideStrip> createState() => _SlideStripState();
 }
 
 class _SlideStripState extends State<_SlideStrip> with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 5000))..forward();
+
+  @override
+  void didUpdateWidget(covariant _SlideStrip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.bump != widget.bump && _c.value > 0.12) _c.forward(from: 0.12);
+  }
 
   @override
   void dispose() {

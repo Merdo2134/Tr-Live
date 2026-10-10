@@ -7,17 +7,24 @@ Sesli/görüntülü canlı oda uygulaması: **Flutter** (mobil) + **Node.js/Expr
 > PostgreSQL'e karşı uçtan uca test (`backend/e2e`) ve `flutter analyze` hazırdır. **İlk işiniz CI'ı çalıştırıp çıkan
 > hataları düzeltmek olmalıdır.** Rakiplerle karşılaştırma ve eksikler: [`docs/COMPARISON.md`](docs/COMPARISON.md).
 
+**Belgeler:** [`docs/`](docs/README.md) — mimari, Coin ekonomisi, rol/yetki tablosu, güvenlik, test planı, yol haritası ve
+koddan otomatik üretilen veritabanı / API / WebSocket belgeleri.
+
 ## Özellikler
 - **Hesap/profil:** kayıt-giriş (kaba kuvvet kilidi), profil düzenleme, avatar/kapak yükleme, takip, ziyaretçiler, gizli mod, mesaj gizliliği, hesap silme.
 - **Odalar:** sesli ve görüntülü (LiveKit), 2–20 koltuk, mikrofon, **etiketler**, **şifreli oda**, yetkili rolleri, atma/engelleme/susturma, oda ayarları.
 - **Yazılı sohbet** (oda içi) ve **özel mesaj** (gizlilik + engelleme + şikâyet).
 - **Müzik çalar:** odada herkes için senkron müzik; lisans kaydı zorunlu kütüphane, sıra, duraklat/ara/sonraki, otomatik geçiş, yerel ses seviyesi.
 - **Hediye:** tekli / eşit / rastgele / seçilenlere; **kendine hediye serbest**; Coin→Diamond muhasebesi; global şerit; liderlik tabloları.
-- **WIP:** 5 kademe (renkli isim, rozet, oda sayısı, ziyaretçi listesi, atılamama, profil efekti).
+- **WIP:** 10 kademe + SWIP (Yoho VIP ayrıcalıkları; her kademede isim efekti, sohbet balonu, çerçeve, giriş aracı; SWIP'te hayalet mod).
+- **Şanslı hediye:** x2–x500 kazanma şansı; geri dönüş oranı ve alıcı payı panelden ayarlanır/kapatılır.
 - **Ajans/yayıncı (Yoho tarzı):** 8 haneli ajans kodu, kodla başvuru, davet, yayın saati + Diamond hedefli **maaş kademeleri**, hedef tutmazsa kesinti, kademeli ajans komisyonu, resmi etkinlik şartı, dönem kapatma ve hesap özetleri, KYC şartı, ödendi işaretleme (ödeme platform dışında). Oranlar örnektir, panelden ayarlanır.
-- **Oda ekleri:** gizli oda (davet kodu), 8 tema (+ WIP 4 özel görsel), koltuk başına hediye sayacı, sohbet temizleme, **PK**, oda içi **Ludo** (ücretsiz, bahissiz).
+- **Oda ekleri:** gizli oda (davet kodu), 8 tema (+ WIP 6 özel görsel), koltuk başına hediye sayacı, sohbet temizleme, **PK**, oda içi **Ludo** (ücretsiz, bahissiz).
 - **Aile:** rol, seviye/kapasite, puan, sahiplik devri.
-- **Bayilik, yönetim paneli, şikâyet yönetimi, güvenlik duvarı yönetimi.**
+- **Bayilik, yönetim paneli (canlı sunucu durumu, hata kayıtları, işlem kaydı, uzaktan ayarlar), şikâyet yönetimi, güvenlik duvarı yönetimi.**
+- **Oturum güvenliği:** cihaz oturumları (yenilenen token), Oturumlarım ekranı, uzaktan çıkış, zorunlu güncelleme.
+- **Otomatik moderasyon:** link/reklam/telefon engeli, tekrarlayan ihlalde süreli sohbet kısıtı.
+- **Çevrimiçi durumu:** yeşil nokta, son görülme, özel mesajda "Görüldü" (gizlenebilir).
 - **Güvenlik duvarı:** IP yasağı, WAF kuralları, kullanıcı/uç nokta limitleri, WebSocket sel koruması, otomatik yasaklama, denetim kaydı ([`deploy/README.md`](deploy/README.md)).
 
 ## Kurallar (kısaca)

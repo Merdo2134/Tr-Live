@@ -9,7 +9,7 @@ Kullanıcı bakiyesi **asla** başka kullanıcılara gösterilmez (`views.js`).
 
 ## Uç noktalar
 **Auth:** `POST /api/auth/register|login`
-**Profil (`/api/me`):** `GET /`, `PATCH /`, `PUT /avatar|cover` (ham png/jpeg/webp, ≤3 MB), `POST /password`, `DELETE /` (şifre ile), `GET /wallet`, `GET /visitors` (WIP 2+)
+**Profil (`/api/me`):** `GET /`, `PATCH /`, `PUT /avatar|cover` (ham png/jpeg/webp, ≤3 MB), `POST /password`, `DELETE /` (şifre ile), `GET /wallet`, `GET /visitors` (WIP 2+), `PATCH / {ghostMode}` (SWIP)
 **Kullanıcılar:** `GET /api/users/search?q=`, `GET /:id`, `POST|DELETE /:id/follow`, `GET /:id/followers|following`
 **Envanter:** `GET /api/inventory`, `POST /equip|unequip {itemId}`, `GET /catalog/frames|entrance-effects`
 **Odalar:** `GET /api/rooms?type=audio|video`, `GET /mine` (kalıcı oda profilleri), `POST /` (ilk seferde kurar, sonra açar; şifre yok), `GET /:id/managers`, `GET /:id`, `POST /:id/join|leave|close`, `GET /:id/members`,
@@ -67,7 +67,7 @@ Mobil: `RoomDock` (açık oda tek yerde yaşar, küçültülünce Offstage), `Di
 
 ## Oda özellikleri (v2.3)
 - **Gizli oda:** `hidden:true` ile 6 karakterlik davet kodu (0/O/1/I yok); listede görünmez; `POST /api/rooms/by-code`, `join {code}`. Kod yalnızca sahip/yardımcı sahibe görünür; tahmin denemeleri sınırlı.
-- **Tema:** default, neon, galaxy, sunset, forest, royal, ocean, rose; özel görsel `themeImageUrl` için WIP 4+ (`customRoomTheme`).
+- **Tema:** default, neon, galaxy, sunset, forest, royal, ocean, rose; özel görsel `themeImageUrl` için WIP 6+ (`customRoomTheme`).
 - **Koltuk hediye sayacı:** `room_gift_totals`; `GET /api/rooms/:id/scoreboard`, `POST .../scoreboard/reset`; olay `room_scoreboard`.
 - **Sohbet temizleme:** `DELETE /api/rooms/:id/messages` (sahip, yardımcı sahip, moderatör); olay `room_chat_cleared`.
 - **PK:** `POST /api/pk/challenge`, `/pk/:id/respond`, `/pk/:id/cancel`, `GET /api/rooms/:id/pk`, `/api/pk/rooms`. Skor: odanın sahibine gelen, kendine gönderilmeyen hediyeler. Olaylar: `pk_invite`, `pk_state`, `pk_tick`.

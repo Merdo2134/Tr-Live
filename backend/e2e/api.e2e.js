@@ -18,16 +18,17 @@ const PORT = Number(process.env.E2E_PORT || 3199);
 const BASE = `http://127.0.0.1:${PORT}`;
 const skip = !DB ? 'TEST_DATABASE_URL tanımlı değil' : false;
 
+const tag = Date.now().toString(36);
 const env = {
   ...process.env, NODE_ENV: 'test', PORT: String(PORT), DATABASE_URL: DB, DATABASE_SSL: 'false',
   JWT_SECRET: 'e2e-secret-e2e-secret-e2e-secret-1234567890', FIREWALL_ENABLED: 'false', GLOBAL_GIFT_MIN_COINS: '100',
+  ADMIN_USERNAMES: `e2e_${tag}_boss`,
   UPLOAD_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'trlive-up-')),
 };
 
 let server; let pool;
 const sql = (q, p = []) => pool.query(q, p);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const tag = Date.now().toString(36);
 
 async function api(method, p, { body, token, headers = {}, raw } = {}) {
   const res = await fetch(BASE + p, {
@@ -203,7 +204,7 @@ test('hediye: çoklu alıcı (her birine tam adet), Tüm Koltuk / Tüm Oda, sekm
   const list = await api('GET', '/api/gifts', { token: U.a.token });
   ok(list);
   assert.ok(list.body.globalMinCoins);
-  assert.ok(list.body.gifts.every((g) => ['event', 'popular', 'private', 'vip'].includes(g.category)));
+  assert.ok(list.body.gifts.every((g) => ['event', 'popular', 'private', 'vip', 'lucky'].includes(g.category)));
   const a0 = await coins(U.a);
   const each = await api('POST', `/api/rooms/${roomId}/gifts/send`, { token: U.a.token, body: { giftId: rose.id, quantity: 2, distribution: 'each', recipientIds: [U.b.id, U.c.id] } });
   ok(each, 'each');
@@ -237,9 +238,9 @@ test('moderasyon: yetki, mikrofon kapatma, atma, engelleme, rol, WIP dokunulmazl
   ok(await api('POST', `/api/rooms/${roomId}/members/${U.b.id}/role`, { token: U.a.token, body: { role: 'moderator' } }));
   status(await api('POST', `/api/rooms/${roomId}/members/${U.a.id}/kick`, { token: U.b.token }), 403, 'moderatör sahibi atamaz');
   status(await api('POST', `/api/rooms/${roomId}/members/${U.c.id}/role`, { token: U.b.token, body: { role: 'cohost' } }), 403, 'moderatör rol veremez');
-  // WIP 3+ olan kullanıcı moderatör tarafından atılamaz; oda sahibi atabilir
-  await sql(`INSERT INTO user_wip(user_id, level, starts_at, expires_at, is_active) VALUES($1,3,NOW(),NOW()+INTERVAL '1 day',TRUE)
-             ON CONFLICT (user_id) DO UPDATE SET level=3, expires_at=NOW()+INTERVAL '1 day', is_active=TRUE`, [U.f.id]);
+  // WIP 6+ (atılma dokunulmazlığı) olan kullanıcı moderatör tarafından atılamaz; oda sahibi atabilir
+  await sql(`INSERT INTO user_wip(user_id, level, starts_at, expires_at, is_active) VALUES($1,6,NOW(),NOW()+INTERVAL '1 day',TRUE)
+             ON CONFLICT (user_id) DO UPDATE SET level=6, expires_at=NOW()+INTERVAL '1 day', is_active=TRUE`, [U.f.id]);
   status(await api('POST', `/api/rooms/${roomId}/members/${U.f.id}/kick`, { token: U.b.token }), 403, 'WIP dokunulmazlığı');
   await sql(`UPDATE user_wip SET is_active = FALSE WHERE user_id = $1`, [U.f.id]);
   ok(await api('POST', `/api/rooms/${roomId}/members/${U.b.id}/role`, { token: U.a.token, body: { role: 'user' } }));
@@ -361,7 +362,7 @@ test('aile: kurma, katılma, çifte üyelik engeli, devir, dağıtma', { skip, t
 test('WIP: kademeler, satın alma, uzatma, düşük seviye engeli, oda sınırı artışı', { skip, timeout: 60000 }, async () => {
   const t = await api('GET', '/api/wip/tiers', { token: U.h.token });
   ok(t);
-  assert.equal(t.body.tiers.length, 5);
+  assert.equal(t.body.tiers.length, 11, 'WIP 1–10 + SWIP');
   const plan = (lvl) => t.body.tiers.find((x) => x.level === lvl).plans[0];
   const c0 = await coins(U.h);
   ok(await api('POST', '/api/wip/purchase', { token: U.h.token, body: { planId: plan(2).id } }));
@@ -509,8 +510,8 @@ test('oda: gizli oda + davet kodu, tema, WIP özel tema, sayı tahtası, sohbet 
   // tema
   status(await api('PATCH', `/api/rooms/${hid}`, { token: U.g.token, body: { theme: 'yok' } }), 400);
   ok(await api('PATCH', `/api/rooms/${hid}`, { token: U.g.token, body: { theme: 'galaxy' } }));
-  status(await api('PATCH', `/api/rooms/${hid}`, { token: U.g.token, body: { themeImageUrl: 'https://example.com/a.png' } }), 403, 'WIP 4 gerekir');
-  ok(await api('POST', `/api/admin/users/${U.g.id}/wip`, { token: U.d.token, body: { level: 4, days: 30 } }));
+  status(await api('PATCH', `/api/rooms/${hid}`, { token: U.g.token, body: { themeImageUrl: 'https://example.com/a.png' } }), 403, 'WIP 6 gerekir');
+  ok(await api('POST', `/api/admin/users/${U.g.id}/wip`, { token: U.d.token, body: { level: 6, days: 30 } }));
   ok(await api('PATCH', `/api/rooms/${hid}`, { token: U.g.token, body: { themeImageUrl: 'https://example.com/a.png' } }));
   // sayı tahtası: x mikrofona çıkar, g ona hediye gönderir
   const c = await sql(`UPDATE users SET coins = coins + 10000 WHERE id = $1 RETURNING id`, [U.g.id]);
@@ -599,6 +600,10 @@ test('Ludo: kurma, katılma, başlatma, zar/hamle yetkisi, ayrılma', { skip, ti
 });
 
 test('özel mesaj, gizlilik, engelleme', { skip, timeout: 60000 }, async () => {
+  // Özel mesaj yalnızca arkadaşlar arasında (v2.27+)
+  status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'selam C' } }), 403, 'arkadaş değil');
+  ok(await api('POST', `/api/friends/request/${U.c.id}`, { token: U.b.token }));
+  ok(await api('POST', `/api/friends/accept/${U.b.id}`, { token: U.c.token }));
   const send = await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'selam C' } });
   status(send, 201);
   assert.equal((await api('GET', '/api/messages/unread-count', { token: U.c.token })).body.unread, 1);
@@ -612,11 +617,9 @@ test('özel mesaj, gizlilik, engelleme', { skip, timeout: 60000 }, async () => {
   status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.c.token, body: { text: 'x' } }), 400, 'kendine mesaj');
   ok(await api('PATCH', '/api/me', { token: U.c.token, body: { whoCanDm: 'nobody' } }));
   status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'tekrar' } }), 403, 'kimse');
-  ok(await api('PATCH', '/api/me', { token: U.c.token, body: { whoCanDm: 'following' } }));
-  status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'tekrar' } }), 403, 'C, B yi takip etmiyor');
-  ok(await api('POST', `/api/users/${U.b.id}/follow`, { token: U.c.token }));
-  status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'artık olur' } }), 201);
   ok(await api('PATCH', '/api/me', { token: U.c.token, body: { whoCanDm: 'everyone' } }));
+  status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'artık olur' } }), 201);
+  ok(await api('POST', `/api/users/${U.b.id}/follow`, { token: U.c.token }));
   // engelleme: takip kalkar, mesaj/arama kapanır
   ok(await api('POST', `/api/blocks/${U.b.id}`, { token: U.c.token }));
   status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'engelli' } }), 403);
@@ -954,4 +957,320 @@ test('şanslı çanta ve günlük görev', { skip, timeout: 60000 }, async () =>
   assert.ok(Array.isArray(ct.body.contributions));
   status(await api('DELETE', `/api/rooms/${room}/staff/${c1.id}`, { token: c1.token }), 403, 'yalnız sahip yönetici siler');
   ok(await api('DELETE', `/api/rooms/${room}/staff/${c1.id}`, { token: s.token }), 'yönetici sil');
+});
+
+// ---------------------------------------------------------------- v2.36
+test('cihaz oturumu: giriş, token yenileme (rotasyon), çalıntı tespiti, uzaktan çıkış, eski token yükseltme', { skip, timeout: 60000 }, async () => {
+  const name = `e2e_${tag}_ss`;
+  const reg = await api('POST', '/api/auth/register', { body: { username: name, password: 'sifre123', displayName: 'Oturum' } });
+  ok(reg, 'kayıt (cihaz bilgisi yok → eski tip token)');
+  assert.equal(reg.body.refreshToken, undefined);
+  const uid = reg.body.user.id;
+  const dev = (id) => ({ id, name: 'Test Telefon', platform: 'android', appVersion: '2.36.0' });
+  const login = (id) => api('POST', '/api/auth/login', { body: { username: name, password: 'sifre123', device: dev(id) } });
+
+  const l1 = await login('device_one_123');
+  ok(l1, 'cihazlı giriş');
+  assert.ok(l1.body.refreshToken && l1.body.expiresIn === 3600);
+  ok(await api('GET', '/api/me', { token: l1.body.token }));
+  const r1 = await api('POST', '/api/auth/refresh', { body: { refreshToken: l1.body.refreshToken } });
+  ok(r1, 'yenileme');
+  assert.notEqual(r1.body.refreshToken, l1.body.refreshToken, 'yenileme token\'ı her seferinde değişir');
+  ok(await api('GET', '/api/me', { token: r1.body.token }));
+  // Yanıtı ağda kaybolan istek: kabul süresi içinde eski token tekrar gelirse çalışır.
+  const r2 = await api('POST', '/api/auth/refresh', { body: { refreshToken: l1.body.refreshToken } });
+  ok(r2, 'ağ kopması toleransı');
+  // Kabul süresi geçtikten sonra eski token = çalıntı → oturum kapanır.
+  await sql(`UPDATE user_sessions SET rotated_at = NOW() - INTERVAL '20 minutes' WHERE user_id = $1`, [uid]);
+  status(await api('POST', '/api/auth/refresh', { body: { refreshToken: r1.body.refreshToken } }), 401, 'eski token tekrar kullanıldı');
+  status(await api('POST', '/api/auth/refresh', { body: { refreshToken: r2.body.refreshToken } }), 401, 'oturum kapandı');
+  status(await api('GET', '/api/me', { token: r2.body.token }), 401, 'kapalı oturumun erişim token\'ı da geçersiz');
+  status(await api('POST', '/api/auth/refresh', { body: { refreshToken: 'rt_bozuk' } }), 401, 'bozuk token');
+
+  // Oturum listesi ve uzaktan çıkış
+  const a = await login('device_aaa_111');
+  const b = await login('device_bbb_222');
+  const list = await api('GET', '/api/me/sessions', { token: a.body.token });
+  ok(list);
+  assert.equal(list.body.sessions.length, 2);
+  assert.equal(list.body.sessions.filter((s) => s.current).length, 1);
+  const other = list.body.sessions.find((s) => !s.current);
+  status(await api('DELETE', `/api/me/sessions/${other.id}`, { token: U.a.token }), 404, 'başkasının oturumu kapatılamaz');
+  ok(await api('DELETE', `/api/me/sessions/${other.id}`, { token: a.body.token }), 'uzaktan çıkış');
+  status(await api('GET', '/api/me', { token: b.body.token }), 401, 'çıkış yapılan cihaz');
+  status(await api('POST', '/api/auth/refresh', { body: { refreshToken: b.body.refreshToken } }), 401);
+  // Aynı cihazdan yeniden giriş eski oturumun yerini alır.
+  const a2 = await login('device_aaa_111');
+  status(await api('GET', '/api/me', { token: a.body.token }), 401, 'aynı cihazın eski oturumu');
+  // Diğer tüm cihazlardan çıkış: bu cihaz yeni token alır.
+  const c = await login('device_ccc_333');
+  const ro = await api('POST', '/api/me/sessions/revoke-others', { token: a2.body.token });
+  ok(ro, 'diğerlerinden çıkış');
+  assert.ok(ro.body.token);
+  status(await api('GET', '/api/me', { token: c.body.token }), 401);
+  status(await api('GET', '/api/me', { token: reg.body.token }), 401, 'eski tip 30 günlük token da geçersiz');
+  ok(await api('GET', '/api/me', { token: ro.body.token }), 'bu cihazın yeni token\'ı');
+  ok(await api('POST', '/api/auth/refresh', { body: { refreshToken: a2.body.refreshToken } }), 'bu cihazın yenileme token\'ı sürüyor');
+
+  // Eski tip token → cihaz oturumuna geçiş, çıkış
+  const legacy = await api('POST', '/api/auth/login', { body: { username: name, password: 'sifre123' } });
+  ok(legacy);
+  const up = await api('POST', '/api/auth/session', { token: legacy.body.token, body: { device: dev('device_ddd_444') } });
+  ok(up, 'yükseltme');
+  ok(await api('GET', '/api/me', { token: up.body.token }));
+  status(await api('POST', '/api/auth/session', { token: up.body.token, body: {} }), 409, 'zaten oturum var');
+  ok(await api('POST', '/api/auth/logout', { body: { refreshToken: up.body.refreshToken } }), 'çıkış');
+  status(await api('GET', '/api/me', { token: up.body.token }), 401, 'çıkıştan sonra');
+});
+
+test('otomatik moderasyon: link/telefon engeli, tekrarında süreli kısıt, yönetici kaldırır', { skip, timeout: 60000 }, async () => {
+  const m = await register('mod1');
+  const own = await register('mod2');
+  const created = await api('POST', '/api/rooms', { token: own.token, body: { name: 'Moderasyon Odası' } });
+  status(created, 201);
+  const room = created.body.room.id;
+  ok(await api('POST', `/api/rooms/${room}/join`, { token: m.token, body: {} }));
+  const say = (text) => api('POST', `/api/rooms/${room}/messages`, { token: m.token, body: { text } });
+  ok(await say('merhaba arkadaşlar'), 'normal mesaj');
+  ok(await say('saat 10.30 da buluşalım, tamam.biz de geliyoruz'), 'link olmayan noktalı cümle');
+  status(await say('www.site.com gelin'), 422, 'link');
+  status(await say('numaram 0532 123 45 67'), 422, 'telefon');
+  const third = await say('insta: @hesabim123');
+  status(third, 422, 'yönlendirme');
+  assert.match(third.body.message, /dakika/, 'üçüncü ihlalde süreli kısıt');
+  status(await say('merhaba'), 403, 'kısıt sürerken temiz mesaj da gitmez');
+  const me = await api('GET', '/api/me', { token: m.token });
+  assert.ok(me.body.user.chatRestrictedUntil, 'kısıt profilde görünür');
+  const strikes = await api('GET', '/api/admin/moderation/strikes', { token: U.d.token });
+  ok(strikes);
+  assert.ok(strikes.body.strikes.filter((s) => s.user.id === m.id).length >= 4, 'ihlaller + otomatik kısıt kaydı');
+  status(await api('POST', `/api/admin/users/${m.id}/chat-restriction`, { token: U.a.token, body: { minutes: 0 } }), 403, 'normal kullanıcı');
+  ok(await api('POST', `/api/admin/users/${m.id}/chat-restriction`, { token: U.d.token, body: { minutes: 0 } }), 'yönetici kaldırır');
+  ok(await say('tekrar merhaba'), 'kısıt kalkınca');
+  status(await api('PATCH', '/api/me', { token: m.token, body: { bio: 'beni ekleyin instagram.com/hesabim' } }), 422, 'biyografide link');
+  status(await api('PATCH', '/api/me', { token: m.token, body: { avatarUrl: 'https://x.test/a.png' } }), 400, 'dış adresli fotoğraf');
+});
+
+test('çevrimiçi durumu: soket bağlıyken çevrimiçi, gizleyince görünmez', { skip, timeout: 60000 }, async () => {
+  const { WebSocket } = await import('ws');
+  const p1 = await register('pr1');
+  const p2 = await register('pr2');
+  const open = (token) => new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${encodeURIComponent(token)}`);
+    const t = setTimeout(() => reject(new Error('soket bağlanmadı')), 10000);
+    ws.on('message', (raw) => { if (JSON.parse(String(raw)).type === 'connected') { clearTimeout(t); resolve(ws); } });
+    ws.on('error', reject);
+  });
+  const next = (ws, type) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${type} gelmedi`)), 10000);
+    const on = (raw) => { const m = JSON.parse(String(raw)); if (m.type === type) { clearTimeout(t); ws.off('message', on); resolve(m); } };
+    ws.on('message', on);
+  });
+  const w1 = await open(p1.token);
+  const w2 = await open(p2.token);
+  const prof = await api('GET', `/api/users/${p1.id}`, { token: p2.token });
+  ok(prof);
+  assert.equal(prof.body.profile.presence?.online, true, 'profilde çevrimiçi');
+  const snap = next(w2, 'presence_state');
+  w2.send(JSON.stringify({ type: 'presence_watch', userIds: [p1.id] }));
+  const st = await snap;
+  assert.ok(st.users.some((u) => u.userId === p1.id && u.online === true), 'izleme anlık görüntüsü');
+  const hidden = next(w2, 'presence');
+  ok(await api('PATCH', '/api/me', { token: p1.token, body: { showPresence: false } }));
+  const ev = await hidden;
+  assert.equal(ev.userId, p1.id);
+  assert.equal(ev.online, false, 'gizleyince izleyen çevrimdışı görür');
+  assert.equal((await api('GET', `/api/users/${p1.id}`, { token: p2.token })).body.profile.presence, null);
+  w1.close(); w2.close();
+});
+
+test('yönetim paneli: canlı durum, hata kayıtları, işlem kaydı, zorunlu güncelleme', { skip, timeout: 60000 }, async () => {
+  const dash = await api('GET', '/api/admin/dashboard', { token: U.d.token });
+  ok(dash, 'panel');
+  assert.equal(dash.body.db.ok, true);
+  assert.ok(dash.body.today.newUsers >= 1);
+  assert.ok(typeof dash.body.realtime.sockets === 'number');
+  status(await api('GET', '/api/admin/dashboard', { token: U.a.token }), 403, 'normal kullanıcı');
+  ok(await api('POST', '/api/client-errors', {
+    token: U.a.token,
+    body: { appVersion: '2.36.0', device: 'Test', errors: [{ source: 'test', message: 'Örnek hata', stack: '#0 main', at: new Date().toISOString() }] },
+  }), 'hata kaydı gönder');
+  const errs = await api('GET', '/api/admin/client-errors', { token: U.d.token });
+  ok(errs);
+  assert.ok(errs.body.errors.some((e) => e.message === 'Örnek hata' && e.user?.id === U.a.id));
+  const acts = await api('GET', '/api/admin/actions?scope=staff', { token: U.d.token });
+  ok(acts);
+  assert.ok(acts.body.actions.some((x) => x.action === 'chat_restriction'), 'işlem kaydında sohbet kısıtı');
+  // Zorunlu güncelleme
+  const hdr = { 'X-App-Version': '2.36.0' };
+  status(await api('PUT', '/api/admin/app-config', { token: U.d.token, headers: hdr, body: { minAppVersion: '9.0.0' } }), 400, 'kendi sürümünden yüksek olamaz');
+  status(await api('PUT', '/api/admin/app-config', { token: U.d.token, headers: hdr, body: { bilinmeyen: 1 } }), 400);
+  ok(await api('PUT', '/api/admin/app-config', { token: U.d.token, headers: hdr, body: { minAppVersion: '2.36.0', updateUrl: 'https://example.com/app.apk' } }));
+  const old = await api('GET', '/api/me', { token: U.a.token });
+  status(old, 426, 'sürüm göndermeyen eski uygulama');
+  assert.equal(old.body.code, 'update_required');
+  ok(await api('GET', '/api/me', { token: U.a.token, headers: hdr }), 'güncel sürüm');
+  const cfg = await api('GET', '/api/app/config');
+  ok(cfg, 'sürüm bilgisi herkese açık');
+  assert.equal(cfg.body.minAppVersion, '2.36.0');
+  ok(await api('PUT', '/api/admin/app-config', { token: U.d.token, headers: hdr, body: { minAppVersion: '0.0.0' } }), 'kapat');
+  ok(await api('GET', '/api/me', { token: U.a.token }), 'kapatınca eski sürümler de girer');
+});
+
+// ---------------------------------------------------------------- v2.37
+test('para işlemi tekrar koruması, hediye combo, coin geçmişi süzme', { skip, timeout: 60000 }, async () => {
+  const s = await register('idem1');
+  const r = await register('idem2');
+  await sql('UPDATE users SET coins = 1000 WHERE id = $1', [s.id]);
+  const created = await api('POST', '/api/rooms', { token: s.token, body: { name: 'Combo Odası' } });
+  status(created, 201);
+  const room = created.body.room.id;
+  ok(await api('POST', `/api/rooms/${room}/join`, { token: r.token, body: {} }));
+  const body = { giftId: rose.id, quantity: 1, distribution: 'single', recipientId: r.id };
+  const send = (key, b = body) => api('POST', `/api/rooms/${room}/gifts/send`, { token: s.token, body: b, headers: key ? { 'Idempotency-Key': key } : {} });
+
+  const k1 = `e2eIdem_${tag}_0001`;
+  const first = await send(k1);
+  ok(first, 'ilk gönderim');
+  assert.equal(first.body.combo, 1);
+  const again = await send(k1);
+  ok(again, 'aynı anahtarla tekrar');
+  assert.equal(again.body.balance, first.body.balance, 'ilk yanıt aynen döner');
+  assert.equal(await coins(s), 990n, 'bir kez ödendi');
+  status(await api('POST', '/api/me/diamonds/exchange', { token: s.token, body: { diamonds: '5' }, headers: { 'Idempotency-Key': k1 } }), 422, 'anahtar başka işlemde');
+  status(await send('kisa'), 400, 'geçersiz anahtar');
+
+  // Hatalı istek anahtarı tüketmez; düzeltilip aynı anahtarla gönderilebilir.
+  const k2 = `e2eIdem_${tag}_0002`;
+  status(await send(k2, { ...body, quantity: 0 }), 400);
+  const second = await send(k2);
+  ok(second, 'hata sonrası aynı anahtar');
+  assert.equal(second.body.combo, 2, 'birkaç saniye içinde tekrar: combo 2');
+  const third = await send(null);
+  ok(third, 'anahtarsız (eski uygulama)');
+  assert.equal(third.body.combo, 3);
+  assert.equal(await coins(s), 970n);
+
+  // Coin geçmişi: türe göre süzme ve geriye doğru sayfalama
+  const p1 = await api('GET', '/api/me/wallet?group=gift&limit=2', { token: s.token });
+  ok(p1);
+  assert.equal(p1.body.transactions.length, 2);
+  assert.ok(p1.body.transactions.every((t) => t.type === 'gift_sent'));
+  assert.ok(p1.body.nextBefore, 'devamı var');
+  const p2 = await api('GET', `/api/me/wallet?group=gift&limit=2&before=${encodeURIComponent(p1.body.nextBefore)}`, { token: s.token });
+  ok(p2);
+  assert.equal(p2.body.transactions.length, 1);
+  assert.equal(p2.body.nextBefore, null);
+  status(await api('GET', '/api/me/wallet?group=yok', { token: s.token }), 400);
+  assert.equal((await api('GET', '/api/me/wallet?group=exchange', { token: s.token })).body.transactions.length, 0);
+});
+
+// ---------------------------------------------------------------- v2.38
+const giveWip = (u, level) => sql(
+  `INSERT INTO user_wip(user_id, level, starts_at, expires_at, is_active) VALUES($1,$2,NOW(),NOW()+INTERVAL '1 day',TRUE)
+   ON CONFLICT (user_id) DO UPDATE SET level=$2, expires_at=NOW()+INTERVAL '1 day', is_active=TRUE`, [u.id, level]);
+
+test('WIP 10 + SWIP: kademeler, Vip hediye kilidi, hayalet mod', { skip, timeout: 60000 }, async () => {
+  const owner = await register('swipO');
+  const ghost = await register('swipG');
+  const plain = await register('swipP');
+  const tiers = (await api('GET', '/api/wip/tiers', { token: plain.token })).body.tiers;
+  assert.equal(tiers.at(-1).level, 11);
+  assert.equal(tiers.at(-1).features.ghostMode, true, 'yalnızca SWIP hayalet');
+  assert.ok(tiers.filter((x) => x.level <= 10).every((x) => x.features.ghostMode !== true));
+
+  const created = await api('POST', '/api/rooms', { token: owner.token, body: { name: 'Hayalet Odası' } });
+  status(created, 201);
+  const room = created.body.room.id;
+  await sql('UPDATE users SET coins = 100000 WHERE id = ANY($1::uuid[])', [[owner.id, ghost.id, plain.id]]);
+  ok(await api('POST', `/api/rooms/${room}/join`, { token: plain.token, body: {} }));
+
+  // Vip sekmesi: WIP 3 ve üzeri
+  const crown = (await api('GET', '/api/gifts', { token: plain.token })).body.gifts.find((g) => g.category === 'vip');
+  if (crown) {
+    const vipBody = { giftId: crown.id, quantity: 1, distribution: 'single', recipientId: owner.id };
+    status(await api('POST', `/api/rooms/${room}/gifts/send`, { token: plain.token, body: vipBody }), 403, 'WIP yok → Vip hediye yok');
+    await giveWip(plain, 3);
+    ok(await api('POST', `/api/rooms/${room}/gifts/send`, { token: plain.token, body: vipBody }), 'WIP 3 Vip hediye');
+  }
+
+  // Hayalet mod yalnızca SWIP
+  status(await api('PATCH', '/api/me', { token: ghost.token, body: { ghostMode: true } }), 403, 'SWIP değil');
+  await giveWip(ghost, 10);
+  status(await api('PATCH', '/api/me', { token: ghost.token, body: { ghostMode: true } }), 403, 'WIP 10 da hayalet olamaz');
+  await giveWip(ghost, 11);
+  ok(await api('PATCH', '/api/me', { token: ghost.token, body: { ghostMode: true } }), 'SWIP hayalet açar');
+  assert.equal((await api('GET', '/api/me', { token: ghost.token })).body.user.ghostMode, true);
+
+  ok(await api('POST', `/api/rooms/${room}/join`, { token: ghost.token, body: {} }));
+  const seen = (u) => api('GET', `/api/rooms/${room}/members`, { token: u.token }).then((r) => r.body.members.map((m) => m.userId));
+  assert.ok(!(await seen(owner)).includes(ghost.id), 'hayalet üye listesinde görünmez');
+  assert.ok((await seen(ghost)).includes(ghost.id), 'kendisi görür');
+  const listed = (await api('GET', '/api/rooms', { token: owner.token })).body.rooms?.find((r) => r.id === room);
+  if (listed) assert.equal(listed.memberCount, 2, 'hayalet sayılmaz');
+  // Toplu hediyede hayalet dinleyici alıcı olmaz
+  const bulk = await api('POST', `/api/rooms/${room}/gifts/send`, { token: owner.token, body: { giftId: rose.id, quantity: 1, distribution: 'all_room' } });
+  ok(bulk, 'all_room');
+  assert.ok(!bulk.body.transactions.some((t) => t.receiverId === ghost.id));
+  // Mikrofona çıkınca görünür
+  ok(await api('POST', `/api/rooms/${room}/mic/take`, { token: ghost.token, body: {} }));
+  assert.ok((await seen(owner)).includes(ghost.id), 'mikrofondaki hayalet görünür');
+  // Üyelik bitince hayalet mod kendiliğinden etkisiz
+  ok(await api('POST', `/api/rooms/${room}/mic/leave`, { token: ghost.token, body: {} }));
+  await sql('UPDATE user_wip SET expires_at = NOW() - INTERVAL \'1 second\' WHERE user_id = $1', [ghost.id]);
+  assert.ok((await seen(owner)).includes(ghost.id), 'SWIP bitince görünür');
+});
+
+test('şanslı hediye: alıcı payı, kazanç, ayar sınırları', { skip, timeout: 60000 }, async () => {
+  const s = await register('luckS');
+  const r = await register('luckR');
+  const created = await api('POST', '/api/rooms', { token: s.token, body: { name: 'Çan Odası' } });
+  status(created, 201);
+  const room = created.body.room.id;
+  ok(await api('POST', `/api/rooms/${room}/join`, { token: r.token, body: {} }));
+  await sql('UPDATE users SET coins = 100000, diamonds = 0 WHERE id = ANY($1::uuid[])', [[s.id, r.id]]);
+  const bell = (await api('GET', '/api/gifts', { token: s.token })).body.gifts.find((g) => g.category === 'lucky' && g.name === 'Şanslı Çan');
+  assert.ok(bell, 'tohum şanslı hediye');
+  const price = BigInt(bell.coinPrice);
+  const send = (quantity) => api('POST', `/api/rooms/${room}/gifts/send`, { token: s.token, body: { giftId: bell.id, quantity, distribution: 'single', recipientId: r.id } });
+
+  // Ayar sınırı: RTP + alıcı payı ≤ %95
+  status(await api('PUT', '/api/admin/app-config', { token: U.d.token, body: { luckyRtpBps: 9000 } }), 400, 'toplam %100');
+  // RTP 0 → kazanç yok; matematik kesin
+  ok(await api('PUT', '/api/admin/app-config', { token: U.d.token, body: { luckyRtpBps: 0, luckyReceiverBps: 1000 } }));
+  const a = await send(10);
+  ok(a, 'şanslı gönderim');
+  assert.equal(a.body.lucky.win, '0');
+  assert.equal(await coins(s), 100000n - price * 10n);
+  const rd = (await sql('SELECT diamonds FROM users WHERE id=$1', [r.id])).rows[0].diamonds;
+  assert.equal(BigInt(rd), (price * 10n * 1000n) / 10000n, 'alıcıya %10 Elmas');
+  const gt = (await sql('SELECT coin_amount, diamond_amount FROM gift_transactions WHERE id = $1', [a.body.transactions[0].id])).rows[0];
+  assert.equal(BigInt(gt.coin_amount), price * 10n);
+  assert.equal(BigInt(gt.diamond_amount), (price * 10n) / 10n);
+
+  // Yüksek RTP'de çok adet → kazanç bakiyeye eklenir ve geçmişte görünür
+  ok(await api('PUT', '/api/admin/app-config', { token: U.d.token, body: { luckyRtpBps: 9000, luckyReceiverBps: 500 } }));
+  const before = await coins(s);
+  const b = await send(2000);
+  ok(b);
+  const win = BigInt(b.body.lucky.win);
+  assert.ok(win > 0n, '2000 çekilişte kazanç çıkmalı');
+  assert.equal(await coins(s), before - price * 2000n + win);
+  assert.equal(BigInt(b.body.balance), before - price * 2000n + win);
+  const hist = await api('GET', '/api/me/wallet?group=gift&limit=5', { token: s.token });
+  assert.ok(hist.body.transactions.some((t) => t.type === 'lucky_gift_win' && BigInt(t.coinAmount) === win));
+
+  // Kapatılınca gönderilemez
+  ok(await api('PUT', '/api/admin/app-config', { token: U.d.token, body: { luckyEnabled: false } }));
+  status(await send(1), 403, 'kapalı');
+  ok(await api('PUT', '/api/admin/app-config', { token: U.d.token, body: { luckyEnabled: true, luckyRtpBps: 7000, luckyReceiverBps: 1000 } }));
+});
+
+test('ADMIN_USERNAMES: listedeki kullanıcı kayıtta yönetici olur, diğerleri olmaz', { skip, timeout: 30000 }, async () => {
+  const boss = await api('POST', '/api/auth/register', { body: { username: `e2e_${tag}_boss`, password: 'sifre123' } });
+  status(boss, 201);
+  assert.equal(boss.body.user.systemRole, 'admin');
+  ok(await api('GET', '/api/admin/app-config', { token: boss.body.token }), 'yönetici paneli açılır');
+  const other = await register('notboss');
+  status(await api('GET', '/api/admin/app-config', { token: other.token }), 403);
 });

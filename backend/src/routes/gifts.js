@@ -12,6 +12,11 @@ import { levelFromExp, familyLevelFor, giftDisplayLevel } from '../levels.js';
 import { scorePk, pkView } from '../services/pk.js';
 import { scoreboardOf } from '../services/scoreboard.js';
 import { loadPublicRows } from '../services/users.js';
+import { idempotent } from '../idempotency.js';
+import { nextCombo } from '../combo.js';
+import { drawLucky, LUCKY_BASE } from '../lucky.js';
+import { getConfig } from '../services/app_config.js';
+import { featuresFor, minLevelFor, wipLabel } from '../services/wip.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -27,7 +32,13 @@ const giftJson = (g) => ({
 
 router.get('/gifts', async (req, res) => {
   const r = await query(`SELECT * FROM gifts WHERE is_active = TRUE ORDER BY coin_price`);
-  res.json({ gifts: r.rows.map(giftJson), globalMinCoins: String(config.globalGiftMinCoins) });
+  const cfg = await getConfig();
+  // Şanslı hediyeler kapalıyken sekme hiç görünmez.
+  const rows = cfg.luckyEnabled ? r.rows : r.rows.filter((g) => g.category !== 'lucky');
+  res.json({
+    gifts: rows.map(giftJson), globalMinCoins: String(config.globalGiftMinCoins),
+    lucky: { enabled: cfg.luckyEnabled, receiverBps: cfg.luckyReceiverBps, multipliers: LUCKY_BASE.map(([m]) => m) },
+  });
 });
 
 // Uygulama açılışında şeridi doldurmak için son global hediyeler.
@@ -54,7 +65,7 @@ router.get('/gifts/global/recent', async (req, res) => {
 // Hediye gönderimi: tek PostgreSQL işlemi. Kendine hediye serbesttir (gönderen alıcı olabilir):
 //  - Coin düşer, Diamond artar (muhasebe kaydı tutulur).
 //  - Kendine hediye; ajans/maaş hesabına, PK puanına ve liderlik tablolarına SAYILMAZ (suistimali önlemek için).
-router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req, res) => {
+router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent('gift_send'), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const giftId = uuid(req.body?.giftId, 'Hediye');
   const quantity = positiveInt(req.body?.quantity ?? 1, 'Hediye adedi', 10000);
@@ -64,17 +75,34 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
   const eachIds = distribution === 'each' ? uuidArray(req.body?.recipientIds, 'Alıcılar', MAX_BULK_RECIPIENTS) : [];
   if (distribution === 'each' && !eachIds.length) throw fail('En az bir alıcı seçin.');
   const senderId = req.user.id;
+  // Ayarlar işlem dışında okunur (önbellek süresi dolduysa havuzdan bağlantı ister; işlem içinde beklemek kilitlenmeye yol açar).
+  const cfg = await getConfig();
+  // Şanslı hediye değerleri çekiliş anında da sınırlanır (panel denetimini aşan/bozuk değerlere karşı): RTP + alıcı payı ≤ %95.
+  const luckyRecvBps = Math.min(Math.max(Math.trunc(Number(cfg.luckyReceiverBps)) || 0, 0), 5000);
+  const luckyRtpBps = Math.min(Math.max(Math.trunc(Number(cfg.luckyRtpBps)) || 0, 0), 9500 - luckyRecvBps);
+  const luckyMaxWin = BigInt(Math.max(Math.trunc(Number(cfg.luckyMaxWin)) || 1, 1));
 
   const result = await tx(async (c) => {
     const room = (await c.query(`SELECT id, is_hidden FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
     if (!room) throw fail('Oda bulunamadı.', 404);
     const gift = (await c.query(`SELECT * FROM gifts WHERE id = $1 AND is_active = TRUE`, [giftId])).rows[0];
     if (!gift) throw fail('Hediye bulunamadı.', 404);
+    // Vip sekmesindeki hediyeler WIP ayrıcalığıdır.
+    if (gift.category === 'vip' && !(await featuresFor(senderId, (t, p) => c.query(t, p))).vipGifts) {
+      const lvl = await minLevelFor('vipGifts', (t, p) => c.query(t, p));
+      throw fail(`Vip hediyeleri ${lvl ? `${wipLabel(lvl)} ve üzeri` : 'WIP'} üyelere özeldir.`, 403);
+    }
+    const lucky = gift.category === 'lucky';
+    if (lucky && cfg.luckyEnabled === false) throw fail('Şanslı hediyeler şu an kapalı.', 403);
+    // Şanslı hediyede alıcıya hediye değerinin bir payı Elmas olarak geçer (geri kalanı gönderenin şans havuzudur).
+    const creditOf = (coinAmount) => (lucky ? (coinAmount * BigInt(luckyRecvBps)) / 10000n : coinAmount);
 
+    // Hayalet (SWIP) dinleyiciler toplu hediyelerde alıcı olmaz (mikrofondaysa olur).
     const members = (await c.query(
       `SELECT rm.user_id, rm.microphone FROM room_members rm
-       JOIN users u ON u.id = rm.user_id AND u.account_status = 'active' WHERE rm.room_id = $1`,
-      [roomId],
+       JOIN users u ON u.id = rm.user_id AND u.account_status = 'active'
+       WHERE rm.room_id = $1 AND (rm.microphone OR rm.user_id = $2 OR NOT is_ghost(rm.user_id))`,
+      [roomId, senderId],
     )).rows;
     if (!members.some((m) => m.user_id === senderId)) throw fail('Hediye göndermek için odada olmalısınız.', 403);
 
@@ -116,42 +144,45 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
     const qualifying = [];
     for (const item of allocation) {
       const coinAmount = BigInt(gift.coin_price) * BigInt(item.quantity);
+      const credit = creditOf(coinAmount); // alıcıya geçen Elmas (normal hediyede = coinAmount)
       const recv = (await c.query(
         `UPDATE users SET diamonds = diamonds + $1, total_received_diamonds = total_received_diamonds + $1, updated_at = NOW()
          WHERE id = $2 RETURNING total_received_diamonds`,
-        [coinAmount.toString(), item.userId],
+        [credit.toString(), item.userId],
       )).rows[0];
       await c.query(`UPDATE users SET gift_level = $1 WHERE id = $2`, [levelFromExp(recv.total_received_diamonds), item.userId]);
 
       const gt = (await c.query(
-        `INSERT INTO gift_transactions(room_id, sender_id, receiver_id, gift_id, quantity, coin_amount, receiver_agency_id)
-         VALUES($1,$2,$3,$4,$5,$6,(SELECT b.agency_id FROM broadcasters b JOIN agencies a ON a.id = b.agency_id
+        `INSERT INTO gift_transactions(room_id, sender_id, receiver_id, gift_id, quantity, coin_amount, diamond_amount, receiver_agency_id)
+         VALUES($1,$2,$3,$4,$5,$6,$7,(SELECT b.agency_id FROM broadcasters b JOIN agencies a ON a.id = b.agency_id
                                    WHERE b.user_id = $3 AND b.status = 'approved' AND a.status = 'active')) RETURNING id`,
-        [roomId, senderId, item.userId, gift.id, item.quantity, coinAmount.toString()],
+        [roomId, senderId, item.userId, gift.id, item.quantity, coinAmount.toString(), lucky ? credit.toString() : null],
       )).rows[0];
       // Oda içi sayı tahtası (mikrofon koltuğu başına toplam). Kendine hediye de tahtada görünür.
       await c.query(
         `INSERT INTO room_gift_totals(room_id, user_id, total_coins, total_count) VALUES($1,$2,$3,$4)
          ON CONFLICT (room_id, user_id) DO UPDATE SET total_coins = room_gift_totals.total_coins + EXCLUDED.total_coins,
            total_count = room_gift_totals.total_count + EXCLUDED.total_count, updated_at = NOW()`,
-        [roomId, item.userId, coinAmount.toString(), item.quantity],
+        [roomId, item.userId, credit.toString(), item.quantity],
       );
-      const pkId = await scorePk(c, roomId, item.userId, senderId, coinAmount);
+      const pkId = await scorePk(c, roomId, item.userId, senderId, credit, coinAmount);
       if (pkId) pkIds.add(pkId);
       await c.query(
         `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'gift_sent',$2,$3,$4)`,
         [senderId, (-coinAmount).toString(), gt.id, `Hediye: ${gift.name} x${item.quantity}`],
       );
-      await c.query(
-        `INSERT INTO wallet_transactions(user_id, transaction_type, diamond_amount, reference_id, description) VALUES($1,'gift_received',$2,$3,$4)`,
-        [item.userId, coinAmount.toString(), gt.id, `Hediye: ${gift.name} x${item.quantity}`],
-      );
+      if (credit > 0n) {
+        await c.query(
+          `INSERT INTO wallet_transactions(user_id, transaction_type, diamond_amount, reference_id, description) VALUES($1,'gift_received',$2,$3,$4)`,
+          [item.userId, credit.toString(), gt.id, `Hediye: ${gift.name} x${item.quantity}`],
+        );
+      }
 
       // Aile puanı: alıcının ailesine.
       const fam = (await c.query(
         `UPDATE families SET total_points = total_points + $1
          WHERE is_active = TRUE AND id = (SELECT family_id FROM family_members WHERE user_id = $2) RETURNING id, total_points`,
-        [coinAmount.toString(), item.userId],
+        [credit.toString(), item.userId],
       )).rows[0];
       if (fam) await c.query(`UPDATE families SET level = $1 WHERE id = $2`, [familyLevelFor(fam.total_points), fam.id]);
 
@@ -164,9 +195,37 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
         );
         qualifying.push({ userId: item.userId, coinAmount, quantity: item.quantity });
       }
-      transactions.push({ id: gt.id, receiverId: item.userId, quantity: item.quantity, coinAmount: coinAmount.toString() });
+      transactions.push({
+        id: gt.id, receiverId: item.userId, quantity: item.quantity, coinAmount: coinAmount.toString(), diamondAmount: credit.toString(),
+      });
     }
-    return { gift, quantity, totalCoins, balance: sent.coins, transactions, qualifying, allocation, pkIds: [...pkIds] };
+
+    // Şanslı hediye çekilişi: her adet ayrı çekiliş; kazanç = toplam çarpan × hediye fiyatı (tek gönderimde üst sınırlı).
+    let luckyResult = null;
+    let balance = sent.coins;
+    if (lucky) {
+      const draw = drawLucky(Number(totalUnits), luckyRtpBps);
+      let win = BigInt(draw.multiplier) * BigInt(gift.coin_price);
+      if (win > luckyMaxWin) win = luckyMaxWin;
+      if (win > 0n) {
+        balance = (await c.query(
+          `UPDATE users SET coins = coins + $1, updated_at = NOW() WHERE id = $2 RETURNING coins`,
+          [win.toString(), senderId],
+        )).rows[0].coins;
+        await c.query(
+          `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'lucky_gift_win',$2,$3,$4)`,
+          [senderId, win.toString(), transactions[0].id, `Şanslı hediye kazancı: ${gift.name} (en yüksek x${draw.best})`],
+        );
+      }
+      luckyResult = { win: win.toString(), best: draw.best, hits: draw.hits };
+    }
+    return {
+      gift, quantity, totalCoins, balance, transactions, qualifying, allocation, pkIds: [...pkIds], lucky: luckyResult,
+      // Duyuru: hem çarpan yüksek hem tek isabetin değeri global hediye eşiğinin üstünde olmalı (10 Coin'lik çanla toplu
+      // gönderimde her seferinde x100 çıkıp tüm uygulamaya şerit düşmesin).
+      announce: lucky && !room.is_hidden && luckyResult.best >= cfg.luckyAnnounceMultiplier
+        && BigInt(luckyResult.best) * BigInt(gift.coin_price) >= BigInt(config.globalGiftMinCoins),
+    };
   });
 
   // ---- Olaylar (işlem başarıyla bittikten sonra) ----
@@ -180,16 +239,25 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
   const byId = new Map(userRows.map((u) => [u.id, u]));
   const giftInfo = {
     id: result.gift.id, name: result.gift.name, iconUrl: result.gift.icon_url, animationUrl: result.gift.animation_url,
-    animationFormat: result.gift.animation_format,
+    animationFormat: result.gift.animation_format, category: result.gift.category,
   };
   const sender = publicUser(byId.get(senderId));
   const receivers = result.transactions.map((t) => ({
     user: publicUser(byId.get(t.receiverId)), quantity: t.quantity, coinAmount: t.coinAmount,
   }));
 
+  // Combo (Yoho): aynı kişiye aynı hediye birkaç saniye içinde tekrar gönderilirse sayaç artar (x2, x3 ...).
+  const combo = nextCombo(`${roomId}|${senderId}|${giftId}|${distribution}|${result.allocation.map((a) => a.userId).sort().join(',')}`);
   hub.broadcastRoom(roomId, {
-    type: 'room_gift', roomId, gift: giftInfo, quantity: result.quantity, totalCoins: result.totalCoins.toString(), sender, receivers,
+    type: 'room_gift', roomId, gift: giftInfo, quantity: result.quantity, totalCoins: result.totalCoins.toString(), sender, receivers, combo,
+    lucky: result.lucky,
   });
+  // Büyük şanslı kazanç tüm uygulamaya duyurulur (Yoho "çan" şeridi).
+  if (result.announce) {
+    hub.broadcastGlobal({
+      type: 'lucky_gift_win', roomId, gift: giftInfo, sender, multiplier: result.lucky.best, win: result.lucky.win,
+    });
+  }
 
   scoreboardOf(roomId).then((scoreboard) => hub.broadcastRoom(roomId, { type: 'room_scoreboard', roomId, scoreboard })).catch(() => {});
   for (const id of result.pkIds) {
@@ -216,6 +284,6 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), async (req
   noteTask(senderId, 'gift');
   res.json({
     gift: giftJson(result.gift), quantity: result.quantity, totalCoins: result.totalCoins.toString(),
-    balance: String(result.balance), transactions: result.transactions, ribbon,
+    balance: String(result.balance), transactions: result.transactions, ribbon, combo, lucky: result.lucky,
   });
 });

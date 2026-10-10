@@ -1,8 +1,26 @@
 import { query } from '../database.js';
 
 export const BASE_FEATURES = Object.freeze({
-  nameColor: null, badge: null, maxRooms: 1, viewVisitors: false, kickImmunity: false, profileEffect: false, customRoomTheme: false, animatedAvatar: false,
+  nameColor: null, badge: null, maxRooms: 1, viewVisitors: false, vipGifts: false, muteImmunity: false, kickImmunity: false,
+  profileEffect: false, customRoomTheme: false, invisibleVisit: false, animatedAvatar: false, ghostMode: false,
 });
+
+/** Bir ayrıcalığın açıldığı en düşük kademe (hata mesajlarında "WIP 6 ve üzeri" demek için; panelden değişebilir). */
+export async function minLevelFor(feature, run = query) {
+  const r = await run(`SELECT MIN(level) AS level FROM wip_tiers WHERE COALESCE((features->>$1)::boolean, FALSE)`, [feature]);
+  return r.rows[0]?.level ?? null;
+}
+
+export const wipLabel = (level) => (level >= 11 ? 'SWIP' : `WIP ${level}`);
+
+/** Ayrıcalık yoksa açıklayıcı hata (hangi kademede açıldığını söyler). */
+export async function requireFeature(userId, feature, what) {
+  if ((await featuresFor(userId))[feature]) return;
+  const lvl = await minLevelFor(feature);
+  const err = new Error(lvl ? `${what} ${wipLabel(lvl)} ve üzeri üyeliğe özeldir.` : `${what} şu an hiçbir WIP kademesinde açık değil.`);
+  err.status = 403;
+  throw err;
+}
 
 // run: (text, params) => Promise<{rows}>  (transaction içinde client.query kullanılabilir)
 export async function activeWip(userId, run = query) {

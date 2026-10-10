@@ -52,7 +52,7 @@ Future<void> showBagSend(BuildContext context, String roomId) async {
                   icon: const Icon(Icons.redeem),
                   label: Text('Gönder (${fmtNumber(t.$3)} Coin)'),
                   onPressed: () async {
-                    final r = await guard(c, () => Api.post('/api/rooms/$roomId/lucky-bags', {'tier': picked, if (t.$2) 'note': noteCtl.text.trim()}));
+                    final r = await guard(c, () => Api.postOnce('/api/rooms/$roomId/lucky-bags', {'tier': picked, if (t.$2) 'note': noteCtl.text.trim()}));
                     if (r != null && c.mounted) Navigator.pop(c);
                   },
                 ),

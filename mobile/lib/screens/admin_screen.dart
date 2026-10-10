@@ -9,6 +9,7 @@ import '../services/session.dart';
 import '../widgets/anim_asset.dart';
 import '../widgets/common.dart';
 import 'admin_content.dart';
+import 'admin_dashboard.dart';
 import 'admin_payouts.dart';
 import 'support_screens.dart';
 
@@ -218,6 +219,7 @@ class AdminScreen extends StatelessWidget {
     // Yönetici: tüm paneller. Yardımcı admin: yalnızca kullanıcı (nick, fotoğraf, ban).
     final admin = Session.isAdmin;
     final tabs = <Tab>[
+      if (admin) const Tab(text: 'Panel'),
       const Tab(text: 'Kullanıcı'),
       const Tab(text: 'Destek'),
       if (admin) const Tab(text: 'Yetkililer'),
@@ -237,6 +239,7 @@ class AdminScreen extends StatelessWidget {
           bottom: TabBar(isScrollable: true, tabs: tabs),
         ),
         body: TabBarView(children: [
+          if (admin) const DashboardTab(),
           const _UsersTab(),
           const SupportAdminTab(),
           if (admin) const _StaffTab(),
@@ -362,13 +365,14 @@ class _UsersTabState extends State<_UsersTab> {
     if (f == null || !mounted) return;
     final amount = int.tryParse(f['Miktar (çıkarmak için - ile)'] ?? '');
     if (amount == null || amount == 0) return toast(context, 'Geçerli bir miktar girin.', error: true);
-    await _run(() => Api.post('/api/admin/users/${_user!['id']}/coins', {'amount': amount, 'reason': f['Neden']}), 'Coin güncellendi.');
+    await _run(() => Api.postOnce('/api/admin/users/${_user!['id']}/coins', {'amount': amount, 'reason': f['Neden']}), 'Coin güncellendi.');
   }
 
   Future<void> _wip() async {
-    final f = await formDialog(context, 'WIP ver', ['Seviye (1-5)', 'Gün'], initial: {'Seviye (1-5)': '1', 'Gün': '30'});
+    const lvlLabel = 'Seviye (1-10, SWIP = 11)';
+    final f = await formDialog(context, 'WIP ver', [lvlLabel, 'Gün'], initial: {lvlLabel: '1', 'Gün': '30'});
     if (f == null || !mounted) return;
-    final level = int.tryParse(f['Seviye (1-5)'] ?? '');
+    final level = int.tryParse(f[lvlLabel] ?? '');
     final days = int.tryParse(f['Gün'] ?? '');
     if (level == null || days == null) return toast(context, 'Seviye ve gün sayı olmalı.', error: true);
     await _run(() => Api.post('/api/admin/users/${_user!['id']}/wip', {'level': level, 'days': days}), 'WIP verildi.');
@@ -396,6 +400,26 @@ class _UsersTabState extends State<_UsersTab> {
     await _run(() => Api.post('/api/admin/users/${_user!['id']}/display-name', {'displayName': f['Yeni ad']}), 'Ad değiştirildi.');
   }
 
+  Future<void> _restrict() async {
+    final f = await formDialog(context, 'Sohbet kısıtı', ['Süre (dakika; 0 = kısıtı kaldır)'], initial: {'Süre (dakika; 0 = kısıtı kaldır)': '60'});
+    if (f == null || !mounted) return;
+    final minutes = int.tryParse(f['Süre (dakika; 0 = kısıtı kaldır)'] ?? '');
+    if (minutes == null || minutes < 0 || minutes > 10080) return toast(context, 'Süre 0-10080 dakika olmalı.', error: true);
+    await _run(() => Api.post('/api/admin/users/${_user!['id']}/chat-restriction', {'minutes': minutes}), minutes == 0 ? 'Sohbet kısıtı kaldırıldı.' : 'Sohbet kısıtlandı.');
+  }
+
+  Future<void> _revokeSessions() async {
+    if (!await confirm(context, 'Bu kullanıcının tüm cihazlardaki oturumları kapatılsın mı? Yeniden giriş yapması gerekir.', action: 'Oturumları kapat', destructive: true)) return;
+    if (!mounted) return;
+    await _run(() => Api.post('/api/admin/users/${_user!['id']}/sessions/revoke-all'), 'Tüm oturumlar kapatıldı.');
+  }
+
+  String _restrictLine(Map<String, dynamic> u) {
+    final until = DateTime.tryParse((u['chatRestrictedUntil'] ?? '').toString())?.toLocal();
+    if (until == null) return '';
+    return '\nSohbet kısıtı: ${until.toString().substring(0, 16)} kadar';
+  }
+
   String _banLine(Map<String, dynamic> u) {
     if (u['accountStatus'] != 'banned') return '';
     final until = u['bannedUntil'];
@@ -417,7 +441,7 @@ class _UsersTabState extends State<_UsersTab> {
             leading: UserAvatar(user: u),
             title: Text((u['displayName'] ?? '').toString()),
             subtitle: Text('ID: ${u['publicId'] ?? '-'} · @${u['username']} · ${u['systemRole']} · ${u['accountStatus']}'
-                '${admin ? '\nCoin: ${fmtNumber(u['coins'])} · Diamond: ${fmtNumber(u['diamonds'])}' : ''}${_banLine(u)}'),
+                '${admin ? '\nCoin: ${fmtNumber(u['coins'])} · Diamond: ${fmtNumber(u['diamonds'])}' : ''}${_banLine(u)}${_restrictLine(u)}'),
             isThreeLine: true,
           ),
         ),
@@ -438,7 +462,10 @@ class _UsersTabState extends State<_UsersTab> {
             OutlinedButton.icon(style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent), onPressed: _ban, icon: const Icon(Icons.gavel), label: const Text('Banla'))
           else if (u['accountStatus'] == 'banned')
             OutlinedButton.icon(onPressed: () => _run(() => Api.post('/api/admin/users/${u['id']}/unban', {}), 'Ban kaldırıldı.'), icon: const Icon(Icons.lock_open), label: const Text('Banı kaldır')),
+          OutlinedButton.icon(onPressed: _restrict, icon: const Icon(Icons.speaker_notes_off_outlined), label: Text(u['chatRestrictedUntil'] != null ? 'Sohbet kısıtını değiştir' : 'Sohbet kısıtı')),
           // Yalnızca yönetici
+          if (admin) OutlinedButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => UserDevicesScreen(user: u))), icon: const Icon(Icons.devices), label: const Text('Cihazlar')),
+          if (admin) OutlinedButton.icon(style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent), onPressed: _revokeSessions, icon: const Icon(Icons.logout), label: const Text('Oturumları kapat')),
           if (admin) OutlinedButton.icon(onPressed: _coins, icon: const Icon(Icons.monetization_on), label: const Text('Coin düzenle')),
           if (admin) OutlinedButton.icon(onPressed: _wip, icon: const Icon(Icons.workspace_premium), label: const Text('WIP ver')),
           if (admin) OutlinedButton.icon(onPressed: () => _run(() => Api.delete('/api/admin/users/${u['id']}/wip'), 'WIP kaldırıldı.'), icon: const Icon(Icons.remove_circle_outline), label: const Text('WIP al')),
@@ -726,7 +753,8 @@ class _CatalogTab extends StatelessWidget {
                   DropdownMenuItem(value: 'popular', child: Text('Popüler')),
                   DropdownMenuItem(value: 'event', child: Text('Etkinlik')),
                   DropdownMenuItem(value: 'private', child: Text('Kişiye Özel')),
-                  DropdownMenuItem(value: 'vip', child: Text('Vip')),
+                  DropdownMenuItem(value: 'vip', child: Text('Vip (WIP 3+)')),
+                  DropdownMenuItem(value: 'lucky', child: Text('Şanslı')),
                 ],
                 onChanged: (v) => setS(() => category = v ?? 'popular'),
               ),
@@ -913,7 +941,8 @@ class _CatalogTab extends StatelessWidget {
                     DropdownMenuItem(value: 'popular', child: Text('Popüler')),
                     DropdownMenuItem(value: 'event', child: Text('Etkinlik')),
                     DropdownMenuItem(value: 'private', child: Text('Kişiye Özel')),
-                    DropdownMenuItem(value: 'vip', child: Text('Vip')),
+                    DropdownMenuItem(value: 'vip', child: Text('Vip (WIP 3+)')),
+                    DropdownMenuItem(value: 'lucky', child: Text('Şanslı')),
                   ],
                   onChanged: (v) => setS(() => category = v ?? 'popular'),
                 ),

@@ -294,7 +294,7 @@ router.get('/broadcaster/me', async (req, res) => {
   const cfg = await loadConfig();
   const progress = await hostProgress(req.user.id, cfg);
   const total = (await query(
-    `SELECT COALESCE(SUM(coin_amount), 0) AS diamonds FROM gift_transactions WHERE receiver_id = $1 AND sender_id <> $1`, [req.user.id],
+    `SELECT COALESCE(SUM(COALESCE(diamond_amount, coin_amount)), 0) AS diamonds FROM gift_transactions WHERE receiver_id = $1 AND sender_id <> $1`, [req.user.id],
   )).rows[0];
   const kyc = (await query(`SELECT kyc_status FROM users WHERE id = $1`, [req.user.id])).rows[0].kyc_status;
   res.json({

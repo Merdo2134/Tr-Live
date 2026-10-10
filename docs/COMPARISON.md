@@ -18,7 +18,8 @@ Bu uygulamaların iç mimarisini bilmiyorum; aşağıdaki karşılaştırma **ö
 | Kendine hediye | ✅ | istismar korumalı (komisyon/sıralama dışı) |
 | Liderlik tabloları | ✅ | günlük/haftalık/aylık/tümü; gönderen, alan, aile |
 | Aile | ✅ | seviye, rol, puan. Aile görevleri/savaşları yok |
-| WIP (5 kademe) | ✅ | |
+| WIP (10 kademe + SWIP hayalet) | ✅ | Yoho VIP ayrıcalıkları sıkıştırıldı |
+| Şanslı hediye | ✅ | x2–x500, oran panelden |
 | Ajans / yayıncı | ✅ | kod, panel, hedefli maaş kademeleri, kademeli komisyon, dönem kapatma. **Ödeme platform dışında; KYC manuel; oranlar örnek** |
 | Profil (takip, ziyaretçi, çerçeve, kapak) | ✅ | |
 | Oda etiketleri, şifreli oda | ✅ | |

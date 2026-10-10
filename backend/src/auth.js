@@ -4,6 +4,7 @@ import { query } from './database.js';
 import { jwtSecret } from './config.js';
 import { fail } from './http.js';
 import { banExpired, banMessage } from './staff_logic.js';
+import { touchSession } from './services/sessions.js';
 
 export const hashPassword = (p) => bcrypt.hash(p, 12);
 export const checkPassword = (p, h) => bcrypt.compare(p, h);
@@ -13,6 +14,8 @@ export function passwordRules(password) {
   if (Buffer.byteLength(password, 'utf8') > 72) throw fail('Şifre en fazla 72 bayt olabilir.');
 }
 
+// Eski uygulama sürümleri (cihaz bilgisi göndermeyen) için 30 günlük tek token. Yeni sürümler cihaz oturumu
+// (services/sessions.js: 1 saatlik erişim + yenileme token'ı) kullanır.
 export const signToken = (u) => jwt.sign({ sub: u.id, tv: u.token_version ?? 0 }, jwtSecret(), { expiresIn: '30d', algorithm: 'HS256' });
 
 export async function loadUser(id) {
@@ -33,12 +36,29 @@ export async function authenticateToken(token) {
   if (!token) throw fail('Yetkisiz erişim.', 401);
   let payload;
   try { payload = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }); } catch { throw fail('Yetkisiz erişim.', 401); }
-  let user = await loadUser(payload.sub);
-  if (user && banExpired(user)) user = await liftBan(user);
+  let user;
+  if (payload.sid) {
+    // Cihaz oturumlu token: oturum kapatılmışsa (uzaktan çıkış, şifre değişimi) token süresi dolmamış olsa da geçersiz.
+    const r = await query(
+      `SELECT u.*, s.revoked_at AS session_revoked_at FROM users u JOIN user_sessions s ON s.id = $2 AND s.user_id = u.id WHERE u.id = $1`,
+      [payload.sub, payload.sid],
+    );
+    user = r.rows[0] || null;
+    if (user) {
+      const revoked = user.session_revoked_at;
+      delete user.session_revoked_at;
+      if (revoked) throw fail('Bu cihazdaki oturum kapatıldı. Lütfen yeniden giriş yapın.', 401);
+      user.session_id = payload.sid;
+    }
+  } else {
+    user = await loadUser(payload.sub);
+  }
+  if (user && banExpired(user)) user = { ...(await liftBan(user)), session_id: user.session_id };
   if (user && user.account_status === 'banned') throw fail(banMessage(user), 401);
   if (!user || user.account_status !== 'active' || (user.token_version ?? 0) !== (payload.tv ?? 0)) {
     throw fail('Hesap aktif değil veya oturum sona erdi.', 401);
   }
+  touchSession(user.session_id);
   return user;
 }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/media_cache.dart';
@@ -34,8 +36,8 @@ class _GiftSheet extends StatefulWidget {
   State<_GiftSheet> createState() => _GiftSheetState();
 }
 
-class _GiftSheetState extends State<_GiftSheet> {
-  static const _tabs = [('event', 'Etkinlik'), ('popular', 'Popüler'), ('private', 'Kişiye Özel'), ('vip', 'Vip')];
+class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMixin {
+  static const _tabs = [('event', 'Etkinlik'), ('popular', 'Popüler'), ('lucky', 'Şanslı'), ('private', 'Kişiye Özel'), ('vip', 'Vip')];
   static const _quantities = [1, 5, 10, 20, 50, 100, 500, 1000];
   static const _perPage = 8;
 
@@ -52,10 +54,26 @@ class _GiftSheetState extends State<_GiftSheet> {
   final Set<String> _picked = {};
   bool _sending = false;
   final _pages = PageController();
+  // Combo (Yoho): gönderimden sonra 5 sn boyunca "Combo" düğmesi aynı hediyeyi tek dokunuşla tekrar gönderir.
+  late final AnimationController _comboCtl;
+  int _combo = 0;
+  // Ağ hatasında aynı işlem tekrar denenirse aynı anahtar kullanılır: sunucu ilk istek işlendiyse tekrar ödetmez.
+  String? _pendingKey;
+  String? _pendingSig;
+  // Şanslı hediye: alıcı payı (baz puan) ve son kazanç bildirimi.
+  int _luckyReceiverBps = 1000;
+  List<int> _luckyMultipliers = const [500, 100, 50, 10, 5, 2];
+  Map<String, dynamic>? _luckyWin;
+  int _luckySeq = 0;
+  Timer? _luckyTimer;
 
   @override
   void initState() {
     super.initState();
+    _comboCtl = AnimationController(vsync: this, duration: const Duration(seconds: 5))
+      ..addStatusListener((st) {
+        if (st == AnimationStatus.completed && mounted) setState(() => _combo = 0);
+      });
     final first = widget.recipientId ?? (_onMic.isNotEmpty ? _onMic.first['userId'] as String : (widget.members.isNotEmpty ? widget.members.first['userId'] as String : null));
     if (first != null) _picked.add(first);
     _expanded = first != null && !_onMic.any((m) => m['userId'] == first);
@@ -64,6 +82,8 @@ class _GiftSheetState extends State<_GiftSheet> {
 
   @override
   void dispose() {
+    _luckyTimer?.cancel();
+    _comboCtl.dispose();
     _pages.dispose();
     super.dispose();
   }
@@ -80,6 +100,10 @@ class _GiftSheetState extends State<_GiftSheet> {
         _gifts = listOf(r['gifts']);
         MediaCache.prefetch([for (final g in _gifts) Api.absoluteUrl(g['animationUrl'] as String?)]);
         _globalMin = BigInt.tryParse((r['globalMinCoins'] ?? '1000').toString()) ?? BigInt.from(1000);
+        final lucky = mapOf(r['lucky']);
+        _luckyReceiverBps = (lucky?['receiverBps'] as num?)?.toInt() ?? _luckyReceiverBps;
+        final mult = lucky?['multipliers'];
+        if (mult is List && mult.isNotEmpty) _luckyMultipliers = [for (final m in mult) if (m is num) m.toInt()];
         final shown = _tabGifts;
         if (shown.isEmpty) {
           // Boş sekmede takılı kalmamak için dolu ilk sekmeye geç.
@@ -129,23 +153,94 @@ class _GiftSheetState extends State<_GiftSheet> {
     if (targets.isEmpty) return toast(context, _scope == null ? 'Alıcı seçin.' : 'Bu seçimde başka kimse yok.', error: true);
     setState(() => _sending = true);
     final String dist = _scope == 'mic' ? 'all_mic' : (_scope == 'room' ? 'all_room' : (targets.length == 1 ? 'single' : 'each'));
-    final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/gifts/send', {
-          'giftId': gift['id'],
-          'quantity': _quantity,
-          'distribution': dist,
-          if (dist == 'single') 'recipientId': targets.first,
-          if (dist == 'each') 'recipientIds': targets,
-        }));
+    final body = <String, dynamic>{
+      'giftId': gift['id'],
+      'quantity': _quantity,
+      'distribution': dist,
+      if (dist == 'single') 'recipientId': targets.first,
+      if (dist == 'each') 'recipientIds': targets,
+    };
+    final sig = jsonEncode(body);
+    final key = (_pendingKey != null && _pendingSig == sig) ? _pendingKey! : Api.newIdempotencyKey();
+    _pendingKey = key;
+    _pendingSig = sig;
+    Map<String, dynamic>? r;
+    try {
+      r = await Api.postOnce('/api/rooms/${widget.roomId}/gifts/send', body, key: key);
+      _pendingKey = null; // sonuç kesin: sonraki dokunuş yeni işlem
+    } catch (e) {
+      // Anahtar yalnızca başarıda bırakılır. Sunucu hatalı isteğin anahtarını zaten siler; "işlem sürüyor" (409)
+      // veya ağ hatasında aynı anahtarla tekrar denenmeli ki ilk istek işlendiyse ikinci kez ödenmesin.
+      if (mounted) toast(context, errorText(e), error: true);
+    }
     if (!mounted) return;
     setState(() => _sending = false);
     if (r == null) return;
     Session.setCoins((r['balance'] ?? Session.coins).toString());
-    Navigator.pop(context);
-    toast(context, '${gift['name']} x$_quantity gönderildi.');
+    // Pencere açık kalır (Yoho): combo düğmesi 5 sn görünür, her dokunuşta süre yeniden başlar.
+    final combo = (r['combo'] as num?)?.toInt() ?? 1;
+    setState(() => _combo = combo);
+    _comboCtl.forward(from: 0);
+    final lucky = mapOf(r['lucky']);
+    if (lucky != null) _showLucky(lucky);
+  }
+
+  /// Şanslı hediye sonucu: kazanç varsa pencerede kısa bir kutlama, yoksa "Bu sefer çıkmadı".
+  void _showLucky(Map<String, dynamic> lucky) {
+    _luckyTimer?.cancel();
+    setState(() {
+      _luckyWin = lucky;
+      _luckySeq++;
+    });
+    final won = (BigInt.tryParse('${lucky['win'] ?? 0}') ?? BigInt.zero) > BigInt.zero;
+    _luckyTimer = Timer(Duration(milliseconds: won ? 2600 : 1400), () {
+      if (mounted) setState(() => _luckyWin = null);
+    });
+  }
+
+  Widget _luckyBanner() {
+    final l = _luckyWin;
+    if (l == null) return const SizedBox.shrink(key: ValueKey('none'));
+    final win = BigInt.tryParse('${l['win'] ?? 0}') ?? BigInt.zero;
+    final best = (l['best'] as num?)?.toInt() ?? 0;
+    final won = win > BigInt.zero;
+    return Container(
+      key: ValueKey(_luckySeq),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: won ? const [Color(0xFF00C853), Color(0xFFFFB300)] : const [Color(0xFF263238), Color(0xFF37474F)]),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: won ? const [BoxShadow(color: Color(0x8800E676), blurRadius: 12)] : null,
+      ),
+      child: Row(children: [
+        Text(won ? '🎉' : '🔔', style: const TextStyle(fontSize: 22)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            won ? 'x$best vurdun! +${fmtNumber(win.toString())} Coin kazandın' : 'Bu sefer çıkmadı, şansını tekrar dene!',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  String get _luckyShare {
+    final pct = _luckyReceiverBps / 100;
+    return _luckyReceiverBps % 100 == 0 ? pct.toStringAsFixed(0) : pct.toStringAsFixed(1);
+  }
+
+  /// Hediye, adet veya alıcı değişince combo biter (combo yalnızca aynı gönderimin tekrarıdır).
+  void _stopCombo() {
+    if (_combo == 0) return;
+    _comboCtl.stop();
+    _combo = 0;
   }
 
   void _togglePerson(String id) {
     setState(() {
+      _stopCombo();
       if (_scope != null) {
         // Toplu seçimden tek tek seçime geçerken seçili kişilerden başla.
         _picked
@@ -182,6 +277,20 @@ class _GiftSheetState extends State<_GiftSheet> {
         const SizedBox(height: 10),
         _tabRow(),
         const SizedBox(height: 8),
+        if (_tab == 'lucky')
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              'Her adet bir şans: x${_luckyMultipliers.reversed.join(', x')} kat Coin geri kazanabilirsin. '
+              'Alıcıya hediye değerinin %$_luckyShare kadarı Elmas olarak geçer.',
+              style: const TextStyle(fontSize: 11.5, color: Colors.white60),
+            ),
+          ),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: FadeTransition(opacity: anim, child: child)),
+          child: _luckyBanner(),
+        ),
         _giftPages(),
         const SizedBox(height: 6),
         _bottomRow(),
@@ -259,6 +368,7 @@ class _GiftSheetState extends State<_GiftSheet> {
           child: InkWell(
             onTap: () {
               setState(() {
+                _stopCombo();
                 _tab = t.$1;
                 _page = 0;
                 _gift = _tabGifts.isNotEmpty ? _tabGifts.first : null;
@@ -277,7 +387,10 @@ class _GiftSheetState extends State<_GiftSheet> {
         ),
       PopupMenuButton<String?>(
         tooltip: 'Toplu seçim',
-        onSelected: (v) => setState(() => _scope = v == _scope ? null : v),
+        onSelected: (v) => setState(() {
+          _stopCombo();
+          _scope = v == _scope ? null : v;
+        }),
         itemBuilder: (_) => const [
           PopupMenuItem(value: 'mic', child: Text('Tüm Koltuk')),
           PopupMenuItem(value: 'room', child: Text('Tüm Oda')),
@@ -341,7 +454,10 @@ class _GiftSheetState extends State<_GiftSheet> {
       selected: selected,
       label: '${g['name']} ${g['coinPrice']} Coin',
       child: GestureDetector(
-        onTap: () => setState(() => _gift = g),
+        onTap: () => setState(() {
+          if (_gift?['id'] != g['id']) _stopCombo();
+          _gift = g;
+        }),
         child: Container(
           decoration: BoxDecoration(
             color: const Color(0xFF16233A),
@@ -353,14 +469,15 @@ class _GiftSheetState extends State<_GiftSheet> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(6, 8, 6, 22),
                 child: icon != null
-                    ? Image.network(icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard, color: Colors.white54, size: 34))
-                    : const Icon(Icons.card_giftcard, color: Colors.white54, size: 34),
+                    ? Image.network(icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => _fallbackIcon(g))
+                    : _fallbackIcon(g),
               ),
             ),
             Positioned(
               left: 5,
               top: 5,
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (g['category'] == 'lucky') _badge(Icons.casino_outlined, const Color(0xFF00C853)),
                 if (animated) _badge(Icons.auto_awesome, const Color(0xFF1FA2FF)),
                 if (price >= _globalMin) ...[const SizedBox(height: 3), _badge(Icons.public, Pal.pink)],
               ]),
@@ -381,6 +498,14 @@ class _GiftSheetState extends State<_GiftSheet> {
     );
   }
 
+  /// Görseli olmayan hediye: şanslı hediyelerde çan/yonca, diğerlerinde hediye kutusu.
+  Widget _fallbackIcon(Map<String, dynamic> g) {
+    if (g['category'] != 'lucky') return const Icon(Icons.card_giftcard, color: Colors.white54, size: 34);
+    final name = (g['name'] ?? '').toString().toLowerCase();
+    final emoji = name.contains('yonca') ? '🍀' : (name.contains('çan') ? '🔔' : '🎁');
+    return FittedBox(child: Text(emoji, style: const TextStyle(fontSize: 40)));
+  }
+
   Widget _badge(IconData icon, Color c) => Container(
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(5)),
@@ -391,6 +516,25 @@ class _GiftSheetState extends State<_GiftSheet> {
     final million = BigInt.from(1000000);
     if (v >= million && v % million == BigInt.zero) return '${v ~/ million}M';
     return v.toString();
+  }
+
+  /// Combo düğmesi: kalan süre halkası + "COMBO xN" (dokununca aynı hediye tekrar gider).
+  Widget _comboLabel() {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(
+        width: 20,
+        height: 20,
+        child: AnimatedBuilder(
+          animation: _comboCtl,
+          builder: (_, __) => CircularProgressIndicator(value: 1 - _comboCtl.value, strokeWidth: 2.4, color: Colors.white, backgroundColor: Colors.white24),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('COMBO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12, height: 1.0)),
+        Text('x$_combo', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15, height: 1.1)),
+      ]),
+    ]);
   }
 
   // ---------- Alt satır ----------
@@ -423,7 +567,10 @@ class _GiftSheetState extends State<_GiftSheet> {
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             PopupMenuButton<int>(
               tooltip: 'Adet',
-              onSelected: (v) => setState(() => _quantity = v),
+              onSelected: (v) => setState(() {
+                if (v != _quantity) _stopCombo();
+                _quantity = v;
+              }),
               itemBuilder: (_) => [for (final q in _quantities) PopupMenuItem(value: q, child: Text('$q'))],
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -434,15 +581,15 @@ class _GiftSheetState extends State<_GiftSheet> {
               onTap: (_sending || _gift == null) ? null : _send,
               child: Container(
                 height: 40,
-                padding: const EdgeInsets.symmetric(horizontal: 22),
+                padding: EdgeInsets.symmetric(horizontal: _combo > 0 ? 12 : 22),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: [Pal.purple, Pal.pink]),
+                  gradient: LinearGradient(colors: _combo > 0 ? const [Pal.orange, Pal.pink] : const [Pal.purple, Pal.pink]),
                   borderRadius: const BorderRadius.horizontal(right: Radius.circular(9)),
                 ),
-                child: _sending
+                child: _combo > 0 ? _comboLabel() : (_sending
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Gönder', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
+                    : const Text('Gönder', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15))),
               ),
             ),
           ]),

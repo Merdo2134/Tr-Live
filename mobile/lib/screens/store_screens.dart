@@ -141,7 +141,7 @@ class _StoreScreenState extends State<StoreScreen> {
     final who = toName == null ? '' : '\n$toName adlı arkadaşına hediye edilecek.';
     if (!await confirm(context, '"${item['name']}" ${item['durationDays']} gün için $price coin karşılığında alınsın mı?$who', action: toUserId == null ? 'Satın al' : 'Gönder')) return;
     if (!mounted) return;
-    final r = await guard(context, () => Api.post('/api/store/buy', {'itemId': item['id'], if (toUserId != null) 'toUserId': toUserId}));
+    final r = await guard(context, () => Api.postOnce('/api/store/buy', {'itemId': item['id'], if (toUserId != null) 'toUserId': toUserId}));
     if (r == null || !mounted) return;
     toast(context, toUserId == null ? 'Satın alındı. Görünüm sayfasından etkinleştirebilirsin.' : 'Hediye gönderildi.');
     try {

@@ -2,19 +2,19 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { query, tx } from '../database.js';
 import { requireAuth } from '../auth.js';
-import { config } from '../config.js';
 import { fail, uuid } from '../http.js';
 import { userLimit } from '../firewall.js';
 import { hub } from '../realtime.js';
-import { cleanLine, containsBanned } from '../text_safety.js';
+import { cleanLine } from '../text_safety.js';
+import { screenText } from '../services/moderation.js';
 import { loadPublicRow } from '../services/users.js';
 import { publicUser } from '../views.js';
 import { BAG_TIERS } from '../services/rewards_config.js';
 import { noteTask, dailyState } from '../services/daily.js';
+import { idempotent } from '../idempotency.js';
 
 export const router = Router();
 router.use(requireAuth);
-const banned = config.bannedWords.map((w) => w.toLocaleLowerCase('tr'));
 
 /** Toplamı rastgele paylara böler; her pay en az toplamın (ortalamanın %20'si) kadardır. */
 export function splitBag(total, slots) {
@@ -51,7 +51,7 @@ router.get('/rooms/:roomId/lucky-bags', async (req, res) => {
   res.json({ bags });
 });
 
-router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), async (req, res) => {
+router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), idempotent('lucky_bag_send'), async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const tierKey = String(req.body?.tier ?? '');
   const tier = Object.hasOwn(BAG_TIERS, tierKey) ? BAG_TIERS[tierKey] : null;
@@ -60,7 +60,7 @@ router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), 
   if (tier.kind === 'super') {
     note = cleanLine(req.body?.note, 100);
     if (!note || note.length < 2) throw fail('Süper çanta için bir not yazın (en az 2 karakter).');
-    if (containsBanned(note, banned)) throw fail('Not topluluk kurallarına aykırı ifadeler içeriyor.', 422);
+    await screenText(req.user, note, 'bag_note');
   }
   const userId = req.user.id;
   const out = await tx(async (c) => {

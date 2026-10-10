@@ -4,6 +4,7 @@ import { requireAuth } from '../auth.js';
 import { userLimit } from '../firewall.js';
 import { fail, uuid } from '../http.js';
 import { hub } from '../realtime.js';
+import { forgetTyping } from '../services/presence.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 
 export const router = Router();
@@ -98,6 +99,7 @@ router.delete('/:userId', async (req, res) => {
      WHERE (requester_id = $1 AND target_id = $2) OR (requester_id = $2 AND target_id = $1 AND status = 'accepted')`,
     [req.user.id, other],
   );
+  forgetTyping(req.user.id, other);
   hub.sendToUser(other, { type: 'friend_update' });
   res.json({ ok: true, status: 'none' });
 });

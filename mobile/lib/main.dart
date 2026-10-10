@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/update_screen.dart';
 import 'services/api.dart';
 import 'services/auth_service.dart';
 import 'services/background_service.dart';
 import 'services/error_log.dart';
+import 'services/presence_service.dart';
 import 'services/session.dart';
 import 'services/socket_service.dart';
 import 'widgets/app_theme.dart';
@@ -15,6 +17,7 @@ import 'widgets/tr_localizations.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 bool _loggingOut = false;
+bool _updateShown = false;
 
 // Yüzen balonun giriş noktası: tree-shaking silmesin diye burada da dışa açılır.
 @pragma('vm:entry-point')
@@ -48,6 +51,25 @@ Future<void> _boot() async {
     navigatorKey.currentState?.pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (_) => false);
     _loggingOut = false;
   };
+  // Sunucu bu sürümü artık kabul etmiyorsa (yönetim panelinde "en düşük sürüm") güncelleme ekranı açılır.
+  Api.onUpdateRequired = (message, url) {
+    if (_updateShown) return;
+    _updateShown = true;
+    navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => UpdateRequiredScreen(
+          message: message,
+          url: url,
+          onRetry: () {
+            _updateShown = false;
+            navigatorKey.currentState?.pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const _Boot()), (_) => false);
+          },
+        ),
+      ),
+      (_) => false,
+    );
+  };
+  PresenceService.init();
   runApp(const TRLiveApp());
 }
 
@@ -112,8 +134,16 @@ class _BootState extends State<_Boot> {
     setState(() => _error = null);
     try {
       await Session.refresh();
+      // Eski sürümden güncellendiyse oturum, yeniden giriş istemeden cihaz oturumuna çevrilir.
+      await AuthService.upgradeLegacySession();
       SocketService.instance.start();
+      ErrorLog.flushSaved();
       _go(const HomeScreen());
+      // Zorunlu olmayan "yeni sürüm var" bildirimi (ana sayfa açıldıktan biraz sonra).
+      Future.delayed(const Duration(seconds: 3), () {
+        final c = navigatorKey.currentState?.overlay?.context;
+        if (c != null && c.mounted) checkOptionalUpdate(c);
+      });
     } catch (e) {
       if (!mounted) return;
       // 401 ise onUnauthorized zaten giriş ekranına yönlendirir.

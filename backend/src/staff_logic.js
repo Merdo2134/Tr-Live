@@ -1,11 +1,13 @@
 // Yardımcı admin ("support") yetkileri ve süreli ban hesapları (saf mantık, test edilebilir).
-// Yardımcı admin YALNIZCA: kullanıcı arama, nick değiştirme, profil fotoğrafı değiştirme/kaldırma, süreli/süresiz ban ve ban kaldırma.
+// Yardımcı admin YALNIZCA: kullanıcı arama, nick değiştirme, profil fotoğrafı değiştirme/kaldırma, süreli/süresiz ban ve ban kaldırma,
+// sohbet kısıtı koyma/kaldırma.
 const SUPPORT_ROUTES = [
   ['GET', /^\/users$/],
   ['POST', /^\/users\/[^/]+\/ban$/],
   ['POST', /^\/users\/[^/]+\/unban$/],
   ['POST', /^\/users\/[^/]+\/display-name$/],
   ['POST', /^\/users\/[^/]+\/avatar$/],
+  ['POST', /^\/users\/[^/]+\/chat-restriction$/],
   ['GET', /^\/me\/permissions$/],
   ['GET', /^\/support\/threads$/],
   ['GET', /^\/support\/[^/]+$/],

@@ -19,6 +19,7 @@ class SocketService {
   Timer? _ping;
   bool _wanted = false;
   int _attempt = 0;
+  int _gen = 0; // bağlanma denemesi kuşağı: arka arkaya iki deneme iki bağlantı açmasın
   DateTime _lastData = DateTime.now(); // yarı açık (sessizce ölmüş) bağlantıyı fark etmek için
   String? _roomId;
 
@@ -38,6 +39,7 @@ class SocketService {
 
   void stop() {
     _wanted = false;
+    _gen++;
     _roomId = null;
     _retry?.cancel();
     _teardown();
@@ -53,14 +55,23 @@ class SocketService {
     _roomId = null;
   }
 
+  /// Sunucuya mesaj (ör. çevrimiçi durumu izleme). Bağlantı yoksa sessizce düşer.
+  void send(Map<String, dynamic> message) => _send(message);
+
   void _send(Map<String, dynamic> message) {
     try {
       _channel?.sink.add(jsonEncode(message));
     } catch (_) {/* bağlantı yoksa yeniden bağlanınca abone olunur */}
   }
 
-  void _connect() {
+  Future<void> _connect() async {
     if (!_wanted || Api.token == null) return;
+    final gen = ++_gen;
+    // Süresi dolmak üzere olan erişim token'ı bağlanmadan önce yenilenir (sunucu süresi dolmuş token'ı reddeder).
+    try {
+      await Api.ensureFreshToken();
+    } catch (_) {/* ağ yoksa bağlantı denemesi zaten başarısız olur ve yeniden denenir */}
+    if (gen != _gen || !_wanted || Api.token == null) return;
     _teardown();
     final base = Uri.parse(Api.baseUrl);
     final uri = Uri(

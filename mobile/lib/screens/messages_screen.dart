@@ -2,10 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/inbox_service.dart';
+import '../services/presence_service.dart';
 import '../services/session.dart';
 import '../services/socket_service.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/presence_widgets.dart';
 import '../widgets/safety_actions.dart';
 import 'family_screen.dart';
 import 'social_screens.dart';
@@ -40,12 +42,27 @@ class _MessagesScreenState extends State<MessagesScreen> {
   bool _special = false; // "Özel Takip": yalnızca takip ettiğim kişilerle olan sohbetler
   Set<String> _following = {};
   Timer? _debounce;
+  final Set<String> _typing = {}; // şu an yazan kişiler (listede "yazıyor..." görünür)
+  final Map<String, Timer> _typingTimers = {};
 
   @override
   void initState() {
     super.initState();
     _sub = SocketService.instance.events.listen((e) {
+      if (e['type'] == 'typing' && mounted) {
+        final id = e['userId']?.toString();
+        if (id == null) return;
+        _typingTimers[id]?.cancel();
+        setState(() => _typing.add(id));
+        _typingTimers[id] = Timer(const Duration(seconds: 4), () {
+          _typingTimers.remove(id);
+          if (mounted) setState(() => _typing.remove(id));
+        });
+        return;
+      }
       if (e['type'] != 'dm' || !mounted) return;
+      final from = mapOf(e['message'])?['senderId']?.toString();
+      if (from != null && _typing.remove(from)) _typingTimers.remove(from)?.cancel();
       // Art arda gelen mesajlarda tek yenileme yeterli.
       _debounce?.cancel();
       _debounce = Timer(const Duration(milliseconds: 400), () {
@@ -58,6 +75,9 @@ class _MessagesScreenState extends State<MessagesScreen> {
   void dispose() {
     _sub?.cancel();
     _debounce?.cancel();
+    for (final t in _typingTimers.values) {
+      t.cancel();
+    }
     super.dispose();
   }
 
@@ -70,6 +90,15 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   Future<List<Map<String, dynamic>>> _loadAll() async {
     final conv = listOf((await Api.get('/api/messages/conversations'))['conversations']);
+    // Çevrimiçi noktaları: ilk durum yanıttan, sonraki değişiklikler soketten gelir.
+    final ids = <String>[];
+    for (final c in conv) {
+      final id = mapOf(c['peer'])?['id']?.toString();
+      if (id == null) continue;
+      ids.add(id);
+      PresenceService.seed(id, c['presence']);
+    }
+    PresenceService.watch(ids);
     try {
       final f = listOf((await Api.get('/api/users/${Session.id}/following'))['users']);
       _following = {for (final u in f) u['id'].toString()};
@@ -134,7 +163,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(Gap.m, Gap.m, Gap.m, Gap.m),
             child: Row(children: [
-              UserAvatar(user: peer, radius: 24),
+              PresenceAvatar(userId: peer?['id']?.toString(), child: UserAvatar(user: peer, radius: 24)),
               const SizedBox(width: Gap.m),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -146,8 +175,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
                   const SizedBox(height: 3),
                   Row(children: [
                     Expanded(
-                      child: Text('${c['lastFromMe'] == true ? 'Sen: ' : ''}${c['lastMessage']}',
-                          maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13.5, color: unread > 0 ? Pal.text : Pal.textDim, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.w400)),
+                      child: _typing.contains(peer?['id']?.toString())
+                          ? const Text('yazıyor...', maxLines: 1, style: TextStyle(fontSize: 13.5, color: Pal.green, fontStyle: FontStyle.italic))
+                          : Text('${c['lastFromMe'] == true ? 'Sen: ' : ''}${c['lastMessage']}',
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13.5, color: unread > 0 ? Pal.text : Pal.textDim, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.w400)),
                     ),
                     if (unread > 0) Badge(label: Text(unread > 99 ? '99+' : '$unread')),
                   ]),
@@ -357,21 +388,57 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _sending = false;
   String? _error;
   StreamSubscription? _sub;
+  // "Yazıyor...": karşı taraf yazarken 4 sn gösterilir; ben yazarken en fazla 2,5 sn'de bir bildirilir.
+  bool _peerTyping = false;
+  Timer? _typingTimer;
+  DateTime _lastTypingSent = DateTime.fromMillisecondsSinceEpoch(0);
 
   String get _peerId => widget.peer['id'].toString();
+
+  void _onInput(String text) {
+    if (text.trim().isEmpty) return;
+    final now = DateTime.now();
+    if (now.difference(_lastTypingSent) < const Duration(milliseconds: 2500)) return;
+    _lastTypingSent = now;
+    SocketService.instance.send({'type': 'typing', 'to': _peerId});
+  }
 
   @override
   void initState() {
     super.initState();
     _load();
+    PresenceService.watch([_peerId]);
     _sub = SocketService.instance.events.listen((e) {
       if (e['type'] == 'connected' && mounted) {
         _load(); // bağlantı koptuysa arada gelen mesajları al
         return;
       }
+      // Karşı taraf mesajlarımı okudu: "Görüldü".
+      if (e['type'] == 'dm_read' && e['userId']?.toString() == _peerId) {
+        if (!mounted) return;
+        final at = e['at'] ?? DateTime.now().toUtc().toIso8601String();
+        setState(() {
+          for (final m in _messages) {
+            if (m['senderId'] == Session.id && m['readAt'] == null) m['readAt'] = at;
+          }
+        });
+        return;
+      }
+      if (e['type'] == 'typing' && e['userId']?.toString() == _peerId) {
+        if (!mounted) return;
+        _typingTimer?.cancel();
+        setState(() => _peerTyping = true);
+        _typingTimer = Timer(const Duration(seconds: 4), () {
+          if (mounted) setState(() => _peerTyping = false);
+        });
+        return;
+      }
       if (e['type'] != 'dm') return;
       final m = mapOf(e['message']);
       if (m == null || m['senderId'] != _peerId) return;
+      // Mesaj geldi: "yazıyor" biter.
+      _typingTimer?.cancel();
+      if (_peerTyping && mounted) setState(() => _peerTyping = false);
       if (!mounted || _messages.any((x) => x['id'] == m['id'])) return; // aynı mesaj iki kez eklenmesin
       setState(() => _messages.add(m));
       _toEnd();
@@ -382,6 +449,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _sub?.cancel();
+    _typingTimer?.cancel();
     _ctl.dispose();
     _scroll.dispose();
     super.dispose();
@@ -435,7 +503,19 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: GestureDetector(
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: _peerId))),
-          child: Row(children: [UserAvatar(user: peer, radius: 16), const SizedBox(width: 8), Flexible(child: UserName(user: peer))]),
+          child: Row(children: [
+            PresenceAvatar(userId: _peerId, dotSize: 10, child: UserAvatar(user: peer, radius: 16)),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                UserName(user: peer),
+                if (_peerTyping)
+                  const Text('yazıyor...', style: TextStyle(fontSize: 11, color: Pal.green, fontStyle: FontStyle.italic))
+                else
+                  PresenceLine(userId: _peerId, fontSize: 11),
+              ]),
+            ),
+          ]),
         ),
         actions: [
           PopupMenuButton<String>(
@@ -470,6 +550,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           itemBuilder: (_, i) {
                             final m = _messages[i];
                             final mine = m['senderId'] == Session.id;
+                            // "Görüldü" yalnızca okunan son mesajımın altında gösterilir.
+                            final seen = mine && m['readAt'] != null && !_messages.skip(i + 1).any((x) => x['senderId'] == Session.id && x['readAt'] != null);
                             return Align(
                               alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                               child: Container(
@@ -479,7 +561,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 decoration: BoxDecoration(color: mine ? Colors.pinkAccent.shade400 : Colors.white12, borderRadius: BorderRadius.circular(16)),
                                 child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                                   Text((m['text'] ?? '').toString()),
-                                  Text(_time(m['createdAt']), style: const TextStyle(fontSize: 11, color: Colors.white54)),
+                                  Text(seen ? '${_time(m['createdAt'])} · Görüldü' : _time(m['createdAt']), style: const TextStyle(fontSize: 11, color: Colors.white54)),
                                 ]),
                               ),
                             );
@@ -497,6 +579,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   minLines: 1,
                   maxLines: 4,
                   maxLength: 1000,
+                  onChanged: _onInput,
                   decoration: const InputDecoration(isDense: true, counterText: '', hintText: 'Mesaj yaz...', border: OutlineInputBorder()),
                 ),
               ),

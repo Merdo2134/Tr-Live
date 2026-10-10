@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tr_live/services/api.dart';
+import 'package:tr_live/services/presence_service.dart';
 import 'package:tr_live/screens/agency_screen.dart' show periodTitle;
 import 'package:tr_live/screens/ludo_screen.dart' show tokenCenter;
 import 'package:tr_live/widgets/common.dart';
@@ -65,5 +66,28 @@ void main() {
     expect(Api.absoluteUrl(null), isNull);
     expect(Api.absoluteUrl('https://a.com/x.png'), 'https://a.com/x.png');
     expect(Api.absoluteUrl('/uploads/x.png'), '${Api.baseUrl}/uploads/x.png');
+  });
+
+  test('çevrimiçi etiketi', () {
+    expect(presenceLabel(null), isNull);
+    expect(presenceLabel({'online': true}), 'Çevrimiçi');
+    expect(presenceLabel({'online': false, 'lastSeenAt': null}), isNull);
+    final t = DateTime.now().subtract(const Duration(minutes: 5)).toUtc().toIso8601String();
+    expect(presenceLabel({'online': false, 'lastSeenAt': t}), 'Son görülme 5 dk önce');
+  });
+
+  test('token alanları: yanıtta olmayan yenileme token\'ı korunur', () {
+    Api.clearTokens();
+    Api.setTokens({'token': 'a', 'refreshToken': 'r1', 'expiresIn': 3600});
+    expect(Api.token, 'a');
+    expect(Api.refreshToken, 'r1');
+    expect(Api.tokenExpiresAt!.isAfter(DateTime.now()), isTrue);
+    Api.setTokens({'token': 'b', 'expiresIn': 3600});
+    expect(Api.token, 'b');
+    expect(Api.refreshToken, 'r1');
+    Api.setTokens({'token': 'c'});
+    expect(Api.tokenExpiresAt, isNull, reason: 'eski tip token: süre bilinmiyor');
+    Api.clearTokens();
+    expect(Api.token, isNull);
   });
 }

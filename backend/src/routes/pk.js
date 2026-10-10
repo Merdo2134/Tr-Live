@@ -93,7 +93,7 @@ router.get('/rooms/:roomId/pk', async (req, res) => {
 router.get('/pk/rooms', async (req, res) => {
   const r = await query(
     `SELECT r.id, r.name, r.owner_id, u.username, u.display_name,
-            (SELECT COUNT(*)::int FROM room_members m WHERE m.room_id = r.id) AS members
+            (SELECT COUNT(*)::int FROM room_members m WHERE m.room_id = r.id AND (m.microphone OR m.user_id NOT IN (SELECT id FROM active_ghosts))) AS members
      FROM rooms r JOIN users u ON u.id = r.owner_id
      WHERE r.is_active = TRUE AND r.is_hidden = FALSE AND r.owner_id <> $1
        AND NOT EXISTS (SELECT 1 FROM pk_battles b WHERE (b.room_a = r.id OR b.room_b = r.id) AND b.status IN ('pending','active'))

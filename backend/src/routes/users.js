@@ -6,6 +6,8 @@ import { fail, uuid } from '../http.js';
 import { loadProfile } from '../services/profile.js';
 import { loadPublicRows } from '../services/users.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
+import { featuresFor } from '../services/wip.js';
+import { isGhost } from '../services/presence.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -63,7 +65,8 @@ router.get('/:userId', async (req, res) => {
   const targetId = uuid(req.params.userId, 'Kullanıcı');
   const profile = await loadProfile(req.user.id, targetId);
   if (!profile) throw fail('Kullanıcı bulunamadı.', 404);
-  if (targetId !== req.user.id && !profile.isHidden) {
+  // "Gizli ziyaret" (WIP ayrıcalığı) olan kişi ziyaretçi listesine düşmez.
+  if (targetId !== req.user.id && !profile.isHidden && !(await featuresFor(req.user.id)).invisibleVisit && !(await isGhost(req.user.id))) {
     // Ziyaret kaydı; gizli kullanıcı ziyaretçi listesinde "Gizli Kullanıcı" görünür.
     await query(
       `INSERT INTO profile_visitors(profile_user_id, visitor_id) VALUES($1,$2)

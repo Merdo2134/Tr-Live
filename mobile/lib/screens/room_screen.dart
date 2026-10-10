@@ -510,13 +510,18 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         if (u != null && !_members.any((m) => m['userId'] == u['id'])) {
           setState(() => _members.add({'userId': u['id'], 'role': 'user', 'microphone': false, 'seatIndex': null, 'user': u}));
         }
-        if (u != null && u['id']?.toString() != Session.id && GiftRibbonOverlay.effectsOn) _entrance.add(u);
+        // Hayalet (SWIP) üye mikrofona çıkınca "sessiz" gelir: giriş şeridi gösterilmez.
+        if (u != null && e['silent'] != true && u['id']?.toString() != Session.id && GiftRibbonOverlay.effectsOn) _entrance.add(u);
         break;
       case 'room_member_left':
+        // Hayalet mod: kendi mikrofondan inişimiz başkaları için "ayrıldı" gibi duyurulur; kendi listemizden düşmeyiz.
+        if (e['ghost'] == true && e['userId']?.toString() == Session.id) break;
         setState(() => _members.removeWhere((m) => m['userId'] == e['userId']));
         break;
       case 'room_seat_changed':
         setState(() => _applySeat(e['userId'].toString(), (e['seatIndex'] as num?)?.toInt(), e['microphone'] == true));
+        // Listede olmayan biri koltuğa çıktıysa (ör. hayalet üye) üyeler yeniden alınır.
+        if (e['microphone'] == true && !_members.any((m) => m['userId'] == e['userId'])) _loadMembers().catchError((_) {});
         break;
       case 'room_mic_queue':
         setState(() => _queue = ((e['queue'] as List?) ?? const []).map((x) => x.toString()).toList());
@@ -1212,12 +1217,19 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                     _pill('${u?['coinLevel'] ?? 1}', Pal.pink, icon: Icons.star),
                   ]),
                   const SizedBox(height: 4),
-                  Container(
-                    constraints: BoxConstraints(maxWidth: maxW - 42),
-                    padding: overlay ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                    decoration: overlay ? null : BoxDecoration(color: _bubbleColor(u), borderRadius: BorderRadius.circular(12)),
-                    child: Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 15, height: 1.25)),
-                  ),
+                  if (overlay)
+                    Container(
+                      constraints: BoxConstraints(maxWidth: maxW - 42),
+                      child: Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 15, height: 1.25)),
+                    )
+                  else
+                    // WIP sohbet balonu (kademeye göre renk, ışık ve köşe süsü); WIP yoksa seviye rengi.
+                    WipBubble(
+                      level: wipLevelOf(u?['wipLevel']),
+                      fallback: _bubbleColor(u),
+                      constraints: BoxConstraints(maxWidth: maxW - 42),
+                      child: Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 15, height: 1.25, shadows: [Shadow(color: Colors.black38, blurRadius: 2)])),
+                    ),
                 ]),
               ),
             ]),
@@ -1430,7 +1442,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                           Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
                             _pill('LV${user?['coinLevel'] ?? 1}', Pal.pink, icon: Icons.star),
                             _pill('Hediye ${user?['giftLevel'] ?? 1}', Pal.purple, icon: Icons.diamond),
-                            if (user?['wipLevel'] != null) _pill('WIP ${user?['wipLevel']}', Pal.amber),
+                            if (user?['wipLevel'] != null) _pill(wipLabel(wipLevelOf(user?['wipLevel'])), WipStyle.of(wipLevelOf(user?['wipLevel']))?.color ?? Pal.amber),
                             if (role != 'user') _pill(_roleLabels[role] ?? role, Pal.cyan),
                             if (family != null) _pill('${family['name']}', Pal.red),
                             if (seat != null) _pill('${seat + 1}. koltuk', Colors.white24),
@@ -1751,6 +1763,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             ),
           ),
         ),
+        // Takılı çerçeve yoksa WIP kademesinin çerçevesi (kodla çizilir, düzeni değiştirmez).
+        if (frameUrl == null && video == null) WipFrame.around(wipLevelOf(user?['wipLevel']), seatR),
         // Takılı avatar çerçevesi: avatarın biraz dışına taşar; dokunuşları engellemez.
         if (frameUrl != null && video == null)
           IgnorePointer(

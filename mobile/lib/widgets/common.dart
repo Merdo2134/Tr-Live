@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'app_theme.dart';
+import 'wip_style.dart';
+export 'wip_style.dart';
 
 OverlayEntry? _toastEntry;
 Timer? _toastTimer;
@@ -232,28 +234,40 @@ class WipChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (level == null) return const SizedBox.shrink();
-    final color = parseColor(colorHex) ?? Colors.amber;
+    final lvl = wipLevelOf(level);
+    final s = WipStyle.of(lvl);
+    if (lvl == null || s == null) return const SizedBox.shrink();
+    final grad = LinearGradient(colors: s.gradient);
+    const shadow = [Shadow(color: Colors.black54, blurRadius: 2)];
     if (compact) {
       return Container(
         height: 12,
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 3),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.2), border: Border.all(color: color, width: 0.8), borderRadius: BorderRadius.circular(5)),
-        child: Text('W$level', style: TextStyle(fontSize: 8, height: 1.0, color: color, fontWeight: FontWeight.w900)),
+        decoration: BoxDecoration(gradient: grad, border: Border.all(color: Colors.white54, width: 0.6), borderRadius: BorderRadius.circular(5)),
+        child: Text(wipShort(lvl), style: const TextStyle(fontSize: 8, height: 1.0, color: Colors.white, fontWeight: FontWeight.w900, shadows: shadow)),
       );
     }
     return Container(
       margin: const EdgeInsets.only(left: 6),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.2), border: Border.all(color: color), borderRadius: BorderRadius.circular(8)),
-      child: Text('WIP $level', style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.bold)),
+      decoration: BoxDecoration(
+        gradient: grad,
+        border: Border.all(color: Colors.white38, width: 0.6),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: lvl >= 6 ? [BoxShadow(color: s.color.withValues(alpha: 0.6), blurRadius: 6)] : null,
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (lvl >= 6) Padding(padding: const EdgeInsets.only(right: 2), child: Text(s.isSwip ? '👻' : '👑', style: const TextStyle(fontSize: 9))),
+        Text(wipLabel(lvl), style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w900, shadows: shadow)),
+      ]),
     );
   }
 }
 
 
-/// WIP adı: 5. seviye ateşli git-gel, 4. seviye mavi buzlu parıltı; diğerleri düz renk.
+/// WIP adı (Yoho VIP gibi kademeye göre): 1–3 renkli, 4 parlayan, 5 neon nabız, 6–9 hareketli parıltı
+/// (altın, yeşim, buz, gökkuşağı), 10 ateş, SWIP hayalet.
 class WipNameText extends StatefulWidget {
   final String text;
   final int? level;
@@ -266,25 +280,38 @@ class WipNameText extends StatefulWidget {
   State<WipNameText> createState() => _WipNameTextState();
 }
 
-class _WipNameTextState extends State<WipNameText> with SingleTickerProviderStateMixin {
+class _WipNameTextState extends State<WipNameText> with TickerProviderStateMixin {
   AnimationController? _c;
 
-  bool get _fx => (widget.level ?? 0) >= 4;
+  WipNameFx get _fx => WipStyle.of(widget.level)?.nameFx ?? WipNameFx.plain;
+  bool get _animated => _fx != WipNameFx.plain && _fx != WipNameFx.glow;
+  Duration get _duration => Duration(
+        milliseconds: switch (_fx) {
+          WipNameFx.fire => 1600,
+          WipNameFx.pulse => 1400,
+          WipNameFx.ghost => 2600,
+          _ => 2400,
+        },
+      );
 
   @override
   void initState() {
     super.initState();
-    if (_fx) _c = AnimationController(vsync: this, duration: Duration(milliseconds: widget.level == 5 ? 1600 : 2400))..repeat(reverse: true);
+    if (_animated) _c = AnimationController(vsync: this, duration: _duration)..repeat(reverse: true);
   }
 
   @override
   void didUpdateWidget(WipNameText old) {
     super.didUpdateWidget(old);
-    if (_fx && _c == null) {
-      _c = AnimationController(vsync: this, duration: Duration(milliseconds: widget.level == 5 ? 1600 : 2400))..repeat(reverse: true);
-    } else if (!_fx && _c != null) {
+    if (_animated && _c == null) {
+      _c = AnimationController(vsync: this, duration: _duration)..repeat(reverse: true);
+    } else if (!_animated && _c != null) {
       _c!.dispose();
       _c = null;
+    } else if (_c != null && old.level != widget.level) {
+      _c!
+        ..duration = _duration
+        ..repeat(reverse: true);
     }
   }
 
@@ -296,23 +323,37 @@ class _WipNameTextState extends State<WipNameText> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    final base = (widget.style ?? const TextStyle()).copyWith(color: widget.color ?? widget.style?.color, fontWeight: _fx ? FontWeight.w800 : widget.style?.fontWeight);
-    if (!_fx || _c == null) return Text(widget.text, maxLines: widget.maxLines, overflow: TextOverflow.ellipsis, style: base);
-    final fire = widget.level == 5;
-    final colors = fire
-        ? const [Color(0xFFFFF176), Color(0xFFFF9800), Color(0xFFFF1744), Color(0xFFFF9800), Color(0xFFFFF176)]
-        : const [Color(0xFF80D8FF), Color(0xFFFFFFFF), Color(0xFF2979FF), Color(0xFFFFFFFF), Color(0xFF80D8FF)];
+    final s = WipStyle.of(widget.level);
+    final fx = _fx;
+    final bold = (widget.level ?? 0) >= 3;
+    final base = (widget.style ?? const TextStyle()).copyWith(color: widget.color ?? widget.style?.color, fontWeight: bold ? FontWeight.w800 : widget.style?.fontWeight);
+    Text plain(TextStyle st) => Text(widget.text, maxLines: widget.maxLines, overflow: TextOverflow.ellipsis, style: st);
+    if (s == null || fx == WipNameFx.plain) return plain(base);
+    final glow = widget.color ?? s.color;
+    final c = _c;
+    if (fx == WipNameFx.glow || c == null) return plain(base.copyWith(shadows: [Shadow(color: glow.withValues(alpha: 0.85), blurRadius: 6)]));
+    if (fx == WipNameFx.pulse) {
+      return AnimatedBuilder(
+        animation: c,
+        builder: (context, child) {
+          final t = Curves.easeInOut.transform(c.value);
+          return plain(base.copyWith(shadows: [Shadow(color: glow.withValues(alpha: 0.45 + 0.55 * t), blurRadius: 3 + 9 * t)]));
+        },
+      );
+    }
+    final shadow = fx == WipNameFx.fire ? const Color(0xAAFF5722) : s.color.withValues(alpha: 0.67);
     return AnimatedBuilder(
-      animation: _c!,
-      builder: (_, child) {
-        final t = Curves.easeInOut.transform(_c!.value);
-        return ShaderMask(
+      animation: c,
+      builder: (context, child) {
+        final t = Curves.easeInOut.transform(c.value);
+        final masked = ShaderMask(
           blendMode: BlendMode.srcIn,
-          shaderCallback: (r) => LinearGradient(begin: Alignment(-1.0 - 1.0 + 2.0 * t, 0), end: Alignment(1.0 + 2.0 * t - 2.0, 0), colors: colors, tileMode: TileMode.mirror).createShader(r),
+          shaderCallback: (r) => LinearGradient(begin: Alignment(-2.0 + 2.0 * t, 0), end: Alignment(2.0 * t, 0), colors: s.nameColors, tileMode: TileMode.mirror).createShader(r),
           child: child,
         );
+        return fx == WipNameFx.ghost ? Opacity(opacity: 0.6 + 0.4 * t, child: masked) : masked;
       },
-      child: Text(widget.text, maxLines: widget.maxLines, overflow: TextOverflow.ellipsis, style: base.copyWith(color: Colors.white, shadows: [Shadow(color: fire ? const Color(0xAAFF5722) : const Color(0xAA40C4FF), blurRadius: 6)])),
+      child: plain(base.copyWith(color: Colors.white, shadows: [Shadow(color: shadow, blurRadius: 6)])),
     );
   }
 }

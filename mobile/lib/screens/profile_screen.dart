@@ -104,6 +104,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   setLocal(() {});
                 },
               ),
+              // SWIP ayrıcalığı: hayalet mod (üyelik bitince sunucu kendiliğinden etkisiz sayar).
+              if (mapOf(mapOf(p['wip'])?['features'])?['ghostMode'] == true || p['ghostMode'] == true)
+                SwitchListTile(
+                  secondary: const Text('👻', style: TextStyle(fontSize: 22)),
+                  title: const Text('Hayalet mod (SWIP)'),
+                  subtitle: const Text('Odaya girişiniz duyurulmaz; dinleyici listesinde, kişi sayısında ve çevrimiçi listelerde görünmezsiniz.'),
+                  value: p['ghostMode'] == true,
+                  onChanged: (v) async {
+                    final r = await guard(context, () => Api.patch('/api/me', {'ghostMode': v}));
+                    if (r == null || !context.mounted) return;
+                    p['ghostMode'] = v;
+                    setLocal(() {});
+                  },
+                ),
+              SwitchListTile(
+                secondary: const Icon(Icons.online_prediction),
+                title: const Text('Çevrimiçi durumumu göster'),
+                subtitle: const Text('Kapalıyken kimse çevrimiçi olduğunuzu veya son görülme zamanınızı göremez.'),
+                value: p['showPresence'] != false,
+                onChanged: (v) async {
+                  final r = await guard(context, () => Api.patch('/api/me', {'showPresence': v}));
+                  if (r == null || !context.mounted) return;
+                  p['showPresence'] = v;
+                  setLocal(() {});
+                },
+              ),
               const Divider(),
               ListTile(
                 leading: const Icon(Icons.layers_outlined),
@@ -118,6 +144,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 },
               ),
               ListTile(leading: const Icon(Icons.bug_report_outlined), title: const Text('Hata kaydı'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const ErrorLogScreen())),
+              ListTile(
+                leading: const Icon(Icons.devices),
+                title: const Text('Oturumlarım'),
+                subtitle: const Text('Hesabınızın açık olduğu cihazlar'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _open(const SessionsScreen()),
+              ),
               ListTile(leading: const Icon(Icons.lock_reset), title: const Text('Şifre değiştir'), onTap: _changePassword),
               ListTile(leading: const Icon(Icons.logout), title: const Text('Çıkış yap'), onTap: _goLogin),
               ListTile(leading: const Icon(Icons.delete_forever, color: Colors.redAccent), title: const Text('Hesabı sil', style: TextStyle(color: Colors.redAccent)), onTap: _deleteAccount),
@@ -155,7 +188,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         width: frameSize,
         height: frameSize,
         child: Stack(alignment: Alignment.center, children: [
+          // Profil efekti (WIP 5+): avatarın arkasında ışık halesi.
+          if (features?['profileEffect'] == true && wipLevelOf(wip?['level']) != null)
+            Positioned.fill(child: IgnorePointer(child: WipAura(level: wipLevelOf(wip?['level'])!))),
           UserAvatar(user: p, radius: avatarR),
+          // Takılı çerçeve yoksa WIP kademesinin çerçevesi.
+          if (frame == null && wipLevelOf(wip?['level']) != null)
+            Positioned.fill(child: IgnorePointer(child: WipFrame(level: wipLevelOf(wip?['level'])!, avatarRadius: avatarR))),
           if (frame != null) IgnorePointer(child: SizedBox(width: frameSize, height: frameSize, child: AnimAsset(url: frame, repeat: true, cache: false))),
         ]),
       ),
@@ -280,7 +319,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Row(children: [
         tile(Icons.military_tech, Colors.amber, 'Leveller', () => _open(const LevelsScreen())),
         tile(Icons.groups, Colors.orangeAccent, 'Aile', () => _open(Scaffold(appBar: AppBar(title: const Text('Aile')), body: const FamilyScreen()))),
-        tile(Icons.workspace_premium, Colors.lightBlueAccent, wip == null ? 'WIP' : 'WIP ${wip['level']}', () => _open(const WipScreen())),
+        tile(Icons.workspace_premium, Colors.lightBlueAccent, wip == null ? 'WIP' : wipLabel(wipLevelOf(wip['level'])), () => _open(const WipScreen())),
         tile(Icons.checkroom, Colors.pinkAccent, 'Görünüm', () => _open(const AppearanceScreen())),
       ]),
     );

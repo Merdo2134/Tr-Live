@@ -36,7 +36,7 @@ export async function hostMetrics(userId, start, end, run = query) {
     [userId, from, end],
   )).rows[0].s;
   const dia = (await run(
-    `SELECT COALESCE(SUM(coin_amount), 0) AS d FROM gift_transactions
+    `SELECT COALESCE(SUM(COALESCE(diamond_amount, coin_amount)), 0) AS d FROM gift_transactions
      WHERE receiver_id = $1 AND sender_id <> $1 AND created_at >= $2::timestamptz AND created_at < $3::timestamptz`,
     [userId, from, end],
   )).rows[0].d;
@@ -45,7 +45,7 @@ export async function hostMetrics(userId, start, end, run = query) {
 
 export async function teamDiamonds(agencyId, start, end, run = query) {
   const r = (await run(
-    `SELECT COALESCE(SUM(coin_amount), 0) AS d FROM gift_transactions
+    `SELECT COALESCE(SUM(COALESCE(diamond_amount, coin_amount)), 0) AS d FROM gift_transactions
      WHERE receiver_agency_id = $1 AND sender_id <> receiver_id AND created_at >= $2::timestamptz AND created_at < $3::timestamptz`,
     [agencyId, start, end],
   )).rows[0].d;

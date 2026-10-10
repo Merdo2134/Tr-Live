@@ -32,7 +32,9 @@ export async function closeRoom(roomId) {
 
 // Kullanıcıyı odadan çıkarır. Oda sahibi çıkarsa oda kapanır.
 export async function leaveRoom(userId, roomId) {
-  const r = await query(`DELETE FROM room_members WHERE room_id = $1 AND user_id = $2 RETURNING role`, [roomId, userId]);
+  const r = await query(
+    `DELETE FROM room_members WHERE room_id = $1 AND user_id = $2 RETURNING role, microphone, is_ghost(user_id) AS ghost`, [roomId, userId],
+  );
   if (!r.rowCount) return false;
   await closeMicSessions(userId, roomId);
   await query(`DELETE FROM room_mic_queue WHERE room_id = $1 AND user_id = $2`, [roomId, userId]);
@@ -41,7 +43,8 @@ export async function leaveRoom(userId, roomId) {
     await closeRoom(roomId);
     return true;
   }
-  hub.broadcastRoom(roomId, { type: 'room_member_left', roomId, userId });
+  // Hayalet (SWIP) dinleyicinin çıkışı duyurulmaz (girişi de duyurulmamıştı).
+  if (r.rows[0].microphone || !r.rows[0].ghost) hub.broadcastRoom(roomId, { type: 'room_member_left', roomId, userId });
   hub.detachUserFromRoom(userId, roomId);
   await removeParticipant(roomId, userId);
   return true;

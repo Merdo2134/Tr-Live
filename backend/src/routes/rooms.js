@@ -8,7 +8,7 @@ import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js'
 import { hub } from '../realtime.js';
 import { token as livekitToken, setCanPublish, removeParticipant } from '../livekit.js';
 import { canManage } from '../room_permissions.js';
-import { featuresFor } from '../services/wip.js';
+import { featuresFor, requireFeature } from '../services/wip.js';
 import { loadPublicRow, loadPublicRows, activeEntranceEffect } from '../services/users.js';
 import { leaveRoom, closeRoom, SUPPORTED_SEATS } from '../services/rooms.js';
 import { openMicSession, closeMicSessions } from '../services/mic.js';
@@ -20,6 +20,7 @@ import { noteTask } from '../services/daily.js';
 import express from 'express';
 import { saveUpload, removeUpload, IMAGE_TYPES } from '../services/images.js';
 import { newRoomNumber } from '../services/ids.js';
+import { isGhost } from '../services/presence.js';
 
 export const router = Router();
 
@@ -72,7 +73,8 @@ router.get('/', optionalAuth, async (req, res) => {
     `SELECT r.id AS room_id, r.room_number, r.cover_url, r.announcement, r.theme_image_url,
        (SELECT COUNT(*)::int FROM lucky_bags lb WHERE lb.room_id = r.id AND lb.status = 'open' AND lb.expires_at > NOW()) AS bag_count, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
        (r.password_hash IS NOT NULL) AS locked, r.theme, ${USER_PUBLIC_COLUMNS},
-       (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id) AS member_count,
+       -- Hayalet (SWIP) dinleyiciler sayılmaz; mikrofona çıkınca görünür olurlar.
+       (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND (rm.microphone OR rm.user_id NOT IN (SELECT id FROM active_ghosts))) AS member_count,
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.microphone = TRUE) AS mic_count
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS}
      WHERE r.is_active = TRUE AND ($1::text IS NULL OR r.room_type = $1) AND ($2::text IS NULL OR $2 = ANY(r.tags))
@@ -183,7 +185,7 @@ router.get('/:roomId/managers', requireAuth, async (req, res) => {
 // Oda kapanınca silindiği için favori "oda" değil "yayıncı"dır; yayıncı yeni oda açınca listede açık görünür.
 const ACTIVE_ROOM_BY_HOST = `
   (SELECT json_build_object('id', r.id, 'name', r.name, 'roomType', r.room_type, 'seatCount', r.seat_count, 'locked', (r.password_hash IS NOT NULL),
-      'memberCount', (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id))
+      'memberCount', (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND (rm.microphone OR rm.user_id NOT IN (SELECT id FROM active_ghosts))))
    FROM rooms r WHERE r.owner_id = h.host_id AND r.is_active = TRUE AND r.is_hidden = FALSE ORDER BY r.created_at DESC LIMIT 1)`;
 
 router.get('/favorites', requireAuth, async (req, res) => {
@@ -297,9 +299,9 @@ router.post('/:roomId/join', requireAuth, userLimit('room_join', 40, 60e3), asyn
     `INSERT INTO room_members(room_id, user_id, role) VALUES($1,$2,$3) ON CONFLICT (room_id, user_id) DO NOTHING RETURNING user_id`,
     [roomId, userId, room.owner_id === userId ? 'owner' : (staffRole ?? 'user')],
   );
-  if (ins.rowCount) {
+  if (ins.rowCount && !(await isGhost(userId))) {
     const row = await loadPublicRow(userId);
-    // Gizli kullanıcı odaya giriş efektiyle duyurulmaz.
+    // Gizli kullanıcı odaya giriş efektiyle duyurulmaz. Hayalet (SWIP) kullanıcı hiç duyurulmaz.
     const effect = row.is_hidden ? null : await activeEntranceEffect(userId);
     hub.broadcastRoom(roomId, { type: 'room_member_joined', roomId, user: publicUser(row, null), entranceEffect: effect });
   }
@@ -347,7 +349,7 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   }
   if (b.themeImageUrl !== undefined) {
     if (b.themeImageUrl !== null && b.themeImageUrl !== '') {
-      if (!(await featuresFor(req.user.id)).customRoomTheme) throw fail('Özel tema görseli için WIP 4 veya üzeri gerekir.', 403);
+      await requireFeature(req.user.id, 'customRoomTheme', 'Özel tema görseli');
       const u = String(b.themeImageUrl);
       if (u.length > 500 || !/^https:\/\//.test(u)) throw fail('Tema görseli https adresi olmalı.');
       set('theme_image_url', u);
@@ -391,6 +393,7 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
       await closeMicSessions(g.user_id, roomId);
       await setCanPublish(roomId, g.user_id, false);
       hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId: g.user_id, seatIndex: null, microphone: false });
+      if (await isGhost(g.user_id)) hub.broadcastRoom(roomId, { type: 'room_member_left', roomId, userId: g.user_id, ghost: true });
     }
   }
   hub.broadcastRoom(roomId, {
@@ -412,7 +415,7 @@ router.put('/:roomId/cover', requireAuth, userLimit('room_cover', 10, 10 * 60e3)
   const before = await activeRoom(roomId);
   const me = await memberOf(roomId, req.user.id);
   if (!me || !['owner', 'cohost'].includes(me.role)) throw fail('Kapak fotoğrafını yalnızca oda sahibi ve yardımcı sahip değiştirebilir.', 403);
-  const url = await saveUpload(req);
+  const url = await saveUpload(req, 'room_cover');
   await query(`UPDATE rooms SET cover_url = $2 WHERE id = $1`, [roomId, url]);
   await query(`UPDATE room_profiles SET cover_url = $3, updated_at = NOW() WHERE owner_id = $1 AND room_type = $2`, [before.owner_id, before.room_type, url]);
   await removeUpload(before.cover_url);
@@ -469,8 +472,11 @@ router.get('/:roomId/members', requireAuth, async (req, res) => {
   const r = await query(
     `SELECT rm.role, rm.microphone, rm.seat_index, rm.joined_at, ${USER_PUBLIC_COLUMNS}
      FROM room_members rm JOIN users u ON u.id = rm.user_id ${USER_PUBLIC_JOINS}
-     WHERE rm.room_id = $1 ORDER BY rm.seat_index NULLS LAST, rm.joined_at`,
-    [roomId],
+     WHERE rm.room_id = $1
+       -- Hayalet (SWIP) dinleyiciler listede görünmez (kendisi ve uygulama yöneticisi hariç); mikrofondaysa görünür.
+       AND (rm.microphone OR rm.user_id = $2 OR $3 OR NOT is_ghost(rm.user_id))
+     ORDER BY rm.seat_index NULLS LAST, rm.joined_at`,
+    [roomId, req.user.id, req.user.system_role === 'admin'],
   );
   res.json({
     members: r.rows.map((m) => ({
@@ -529,6 +535,11 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
   await setCanPublish(roomId, userId, true);
   consumeMicInvite(roomId, userId);
   await removeFromQueue(roomId, userId);
+  // Hayalet kullanıcı mikrofona çıkınca görünür olur: önce odaya "girmiş" gibi duyurulur (giriş efekti olmadan).
+  if (await isGhost(userId)) {
+    const row = await loadPublicRow(userId);
+    hub.broadcastRoom(roomId, { type: 'room_member_joined', roomId, user: publicUser(row, null), entranceEffect: null, silent: true });
+  }
   hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId, seatIndex, microphone: true });
   noteTask(userId, 'mic');
   res.json({ ok: true, seatIndex });
@@ -539,6 +550,8 @@ async function releaseSeat(roomId, userId) {
   await closeMicSessions(userId, roomId);
   await setCanPublish(roomId, userId, false);
   hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId, seatIndex: null, microphone: false });
+  // Hayalet (SWIP) kullanıcı mikrofondan inince yeniden görünmez olur: diğerlerinin dinleyici listesinden düşer.
+  if (await isGhost(userId)) hub.broadcastRoom(roomId, { type: 'room_member_left', roomId, userId, ghost: true });
   await notifyNext(roomId).catch((e) => console.error('Mikrofon sırası hatası:', e.message));
 }
 

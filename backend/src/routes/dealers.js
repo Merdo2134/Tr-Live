@@ -4,6 +4,7 @@ import { requireAuth } from '../auth.js';
 import { userLimit } from '../firewall.js';
 import { fail, bigAmount, text, uuid } from '../http.js';
 import { dealerSell } from '../services/dealers.js';
+import { idempotent } from '../idempotency.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -28,7 +29,7 @@ router.get('/me', async (req, res) => {
 });
 
 // Bayi kendi bakiyesinden kullanıcıya Coin satar. Alıcı kullanıcı adı veya kimlik ile bulunur.
-router.post('/sell', userLimit('dealer_sell', 60, 3600e3), async (req, res) => {
+router.post('/sell', userLimit('dealer_sell', 60, 3600e3), idempotent('dealer_sell'), async (req, res) => {
   const d = await myDealer(req.user.id);
   const coins = bigAmount(req.body?.amount, 'Satış Coin miktarı');
   let userId;

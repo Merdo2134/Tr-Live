@@ -77,3 +77,42 @@ export function cleanTags(input) {
   }
   return out;
 }
+
+// ---- Link / reklam / iletişim bilgisi tespiti ----
+// Boşluksuz "kelime.uzantı" kalıbında yalnızca Türkçede kelime olarak geçmeyen uzantılar aranır
+// ("tamam.biz", "evet.de", "hadi.top" gibi noktadan sonra boşluk unutulan cümleler link sayılmasın).
+// "tv", "me", "co", "az", "cam" gibi Türkçe cümlede noktadan sonra gelebilen kısa sözcükler burada YOK
+// ("Geldim.Az sonra", "aksamlar.Tv izliyorum"); bunlar yalnızca http/www veya gizleme kalıplarıyla yakalanır.
+const STRONG_TLDS = 'com|net|org|io|xyz|app|ly|site|online|shop|store|club|info|gg|ru|vip|bet|dev|page|link|click|icu|buzz|cloud|space|website|tk|ml|ga|cf|gq|pw|sh|ws|cc|live|chat|social|asia|eu|uk|nl|tr|bio|lol|wtf|xxx|porn|sex|tips|casino|games|stream';
+const DOMAIN_RE = new RegExp(`(?:^|[^\\p{L}\\p{N}_-])[a-z0-9][a-z0-9-]{1,62}\\s?\\.\\s?(?:${STRONG_TLDS})(?![\\p{L}\\p{N}])`, 'iu');
+// "site nokta com", "site (dot) com", "site[.]com" gibi gizleme denemeleri.
+const OBFUSCATED_RE = new RegExp(`(?:^|[^a-z0-9-])[a-z0-9-]{2,63}\\s*(?:\\(\\s*(?:\\.|dot|nokta)\\s*\\)|\\[\\s*(?:\\.|dot|nokta)\\s*\\]|\\s(?:dot|nokta)\\s)\\s*(?:${STRONG_TLDS}|tv|me|co|az|cam|biz|top|art|fun|pro|win)(?![\\p{L}\\p{N}])`, 'iu');
+const LINK_RES = [
+  /\bh\s*t\s*t\s*p\s*s?\s*:\s*\/\s*\//i,
+  /\bwww\s*\.\s*[a-z0-9-]{2,}/i,
+  /\b(?:t\.me|wa\.me|youtu\.be|discord\.gg|bit\.ly|linktr\.ee|tinyurl\.com|goo\.gl)\b/i,
+  DOMAIN_RE,
+  OBFUSCATED_RE,
+];
+const HANDLE_RE = /\b(?:telegram|tg|insta(?:gram)?|ig|snap(?:chat)?|whats?app|wp|discord|tiktok|onlyfans)\s*(?:[:=]\s*@?|\s@)[a-z0-9_.]{3,}/i;
+
+/** Metinde link, alan adı veya başka uygulamaya yönlendiren kullanıcı adı varsa true. */
+export function findLink(text) {
+  if (typeof text !== 'string' || !text) return false;
+  const t = text.normalize('NFKC');
+  return LINK_RES.some((re) => re.test(t)) || HANDLE_RE.test(t);
+}
+
+// Türkiye cep (5xx operatör önekleri) veya + ile başlayan uluslararası numara. Coin miktarı gibi uzun sayılar
+// (5.000.000.000) operatör önekine uymadığı için numara sayılmaz.
+const TR_MOBILE = /^(?:90|0)?5(?:0[1-7]|[345]\d|6[1-9])\d{7}$/;
+export function findPhone(text) {
+  if (typeof text !== 'string' || !text) return false;
+  const t = text.normalize('NFKC');
+  for (const m of t.matchAll(/(\+?)(\d[\d\s.\-()]{8,22}\d)/g)) {
+    const digits = m[2].replace(/\D/g, '');
+    if (TR_MOBILE.test(digits)) return true;
+    if (m[1] === '+' && digits.length >= 10 && digits.length <= 15) return true;
+  }
+  return false;
+}

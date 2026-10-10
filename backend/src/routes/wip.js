@@ -4,6 +4,8 @@ import { requireAuth } from '../auth.js';
 import { userLimit } from '../firewall.js';
 import { fail, uuid } from '../http.js';
 import { activeWip, BASE_FEATURES } from '../services/wip.js';
+import { idempotent } from '../idempotency.js';
+import { ghostNow, refreshGhost } from '../services/ghost.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -29,8 +31,9 @@ router.get('/', async (req, res) => {
 
 // Satın alma kuralları: aynı seviye = süre uzatır, yüksek seviye = yükseltir (kalan süre yeni paketle değişir),
 // düşük seviye aktifken satın alınamaz.
-router.post('/purchase', userLimit('wip_buy', 10, 3600e3), async (req, res) => {
+router.post('/purchase', userLimit('wip_buy', 10, 3600e3), idempotent('wip_purchase'), async (req, res) => {
   const planId = uuid(req.body?.planId, 'Paket');
+  const wasGhost = await ghostNow(req.user.id);
   const result = await tx(async (c) => {
     const user = (await c.query(`SELECT coins FROM users WHERE id = $1 FOR UPDATE`, [req.user.id])).rows[0];
     const plan = (await c.query(`SELECT * FROM wip_plans WHERE id = $1 AND is_active = TRUE`, [planId])).rows[0];
@@ -68,5 +71,6 @@ router.post('/purchase', userLimit('wip_buy', 10, 3600e3), async (req, res) => {
     );
     return { wip, balance: after.toString() };
   });
+  await refreshGhost(req.user.id, wasGhost); // SWIP'e geçişte önceki hayalet tercihi yeniden etkinleşebilir
   res.json({ wip: await activeWip(req.user.id), balance: result.balance });
 });

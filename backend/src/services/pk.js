@@ -75,7 +75,8 @@ export async function endPkForRoom(roomId) {
 }
 
 // Hediye işlemi içinde çağrılır (aynı transaction). Kendine hediye puan getirmez; yalnızca oda sahibine (ev sahibi) gelen hediyeler sayılır.
-export async function scorePk(c, roomId, receiverId, senderId, coinAmount) {
+// coinAmount: PK puanı (alıcıya geçen Elmas) · supportCoins: gönderenin harcadığı Coin (destekçi sıralaması).
+export async function scorePk(c, roomId, receiverId, senderId, coinAmount, supportCoins = coinAmount) {
   if (receiverId === senderId) return null;
   const b = (await c.query(
     `SELECT id, room_a, room_b, host_a, host_b FROM pk_battles
@@ -89,7 +90,7 @@ export async function scorePk(c, roomId, receiverId, senderId, coinAmount) {
   await c.query(
     `INSERT INTO pk_supporters(battle_id, room_id, user_id, coins) VALUES($1,$2,$3,$4)
      ON CONFLICT (battle_id, user_id) DO UPDATE SET coins = pk_supporters.coins + EXCLUDED.coins`,
-    [b.id, roomId, senderId, coinAmount.toString()],
+    [b.id, roomId, senderId, supportCoins.toString()],
   );
   return b.id;
 }

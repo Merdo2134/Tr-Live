@@ -1,23 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
-
-/// WIP seviyesine göre oda giriş şeridi görünümü.
-class _Style {
-  final List<Color> colors;
-  final Color text;
-  final Color glow;
-  final String icon;
-  final int holdMs;
-  const _Style(this.colors, this.text, this.glow, this.icon, this.holdMs);
-}
-
-const _styles = <int, _Style>{
-  1: _Style([Color(0xFF1F6F6B), Color(0xFF2FB5A8)], Colors.white, Color(0xFF2FB5A8), '✦', 1500),
-  2: _Style([Color(0xFF1E4FA3), Color(0xFF3D8BFD)], Colors.white, Color(0xFF3D8BFD), '❖', 1700),
-  3: _Style([Color(0xFF5B2A9E), Color(0xFFB36BFF)], Colors.white, Color(0xFFB36BFF), '✧', 1900),
-  4: _Style([Color(0xFF9C6A00), Color(0xFFFFD54A)], Color(0xFF3A2500), Color(0xFFFFD54A), '★', 2200),
-  5: _Style([Color(0xFF8A0F1B), Color(0xFFFF2B2B), Color(0xFFFFB13B)], Colors.white, Color(0xFFFF2B2B), '👑', 2800),
-};
+import 'wip_style.dart';
 
 /// Gelen girişleri sıraya alır; aynı anda yalnızca bir şerit gösterilir.
 class EntranceQueue extends ChangeNotifier {
@@ -33,9 +17,7 @@ class EntranceQueue extends ChangeNotifier {
   }
 
   void add(Map<String, dynamic> user) {
-    final lvl = (user['wipLevel'] as num?)?.toInt();
-    if (lvl == null || lvl < 1 || _q.length >= 6) return;
-    if (_dead) return;
+    if (_dead || WipStyle.of(wipLevelOf(user['wipLevel'])) == null || _q.length >= 6) return;
     _q.add(user);
     _next();
   }
@@ -45,8 +27,8 @@ class EntranceQueue extends ChangeNotifier {
     _busy = true;
     current = _q.removeAt(0);
     notifyListeners();
-    final lvl = ((current!['wipLevel'] as num).toInt()).clamp(1, 5);
-    Timer(Duration(milliseconds: 700 + _styles[lvl]!.holdMs + 700), () {
+    final s = WipStyle.of(wipLevelOf(current!['wipLevel']))!;
+    Timer(Duration(milliseconds: 700 + s.entranceMs + 700), () {
       if (_dead) return;
       current = null;
       _busy = false;
@@ -56,7 +38,7 @@ class EntranceQueue extends ChangeNotifier {
   }
 }
 
-/// Odanın ortasından soldan sağa geçen giriş şeridi.
+/// Odanın ortasından geçen WIP giriş şeridi: kademenin aracı (scooter → ejderha, SWIP'te UFO) şeridi çeker.
 class EntranceStrip extends StatelessWidget {
   final EntranceQueue queue;
   const EntranceStrip({super.key, required this.queue});
@@ -69,31 +51,49 @@ class EntranceStrip extends StatelessWidget {
         builder: (context, _) {
           final u = queue.current;
           if (u == null) return const SizedBox.shrink();
-          return _Strip(key: ValueKey(u.hashCode), user: u);
+          return EntranceBanner(key: ValueKey(u.hashCode), user: u);
         },
       ),
     );
   }
 }
 
-class _Strip extends StatefulWidget {
+/// Tek giriş şeridi. [loop] verilirse (WIP ekranındaki önizleme) sürekli tekrar eder.
+class EntranceBanner extends StatefulWidget {
   final Map<String, dynamic> user;
-  const _Strip({super.key, required this.user});
+  final bool loop;
+  const EntranceBanner({super.key, required this.user, this.loop = false});
   @override
-  State<_Strip> createState() => _StripState();
+  State<EntranceBanner> createState() => _EntranceBannerState();
 }
 
-class _StripState extends State<_Strip> with SingleTickerProviderStateMixin {
+class _EntranceBannerState extends State<EntranceBanner> with SingleTickerProviderStateMixin {
   late final AnimationController _c;
-  late final _Style _s;
+  late WipStyle _s;
+
+  int get _total => 700 + _s.entranceMs + 700;
 
   @override
   void initState() {
     super.initState();
-    final lvl = ((widget.user['wipLevel'] as num).toInt()).clamp(1, 5);
-    _s = _styles[lvl]!;
-    final total = 700 + _s.holdMs + 700;
-    _c = AnimationController(vsync: this, duration: Duration(milliseconds: total))..forward();
+    _s = WipStyle.of(wipLevelOf(widget.user['wipLevel'])) ?? WipStyle.of(1)!;
+    _c = AnimationController(vsync: this, duration: Duration(milliseconds: _total));
+    if (widget.loop) {
+      _c.repeat();
+    } else {
+      _c.forward();
+    }
+  }
+
+  @override
+  void didUpdateWidget(EntranceBanner old) {
+    super.didUpdateWidget(old);
+    final s = WipStyle.of(wipLevelOf(widget.user['wipLevel'])) ?? WipStyle.of(1)!;
+    if (s.level != _s.level) {
+      _s = s;
+      _c.duration = Duration(milliseconds: _total);
+      if (widget.loop) _c.repeat();
+    }
   }
 
   @override
@@ -104,53 +104,97 @@ class _StripState extends State<_Strip> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.sizeOf(context).width;
-    final total = 700 + _s.holdMs + 700;
-    final inEnd = 700 / total, outStart = (700 + _s.holdMs) / total;
-    final name = (widget.user['displayName'] ?? '').toString();
-    final lvl = (widget.user['wipLevel'] as num).toInt();
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (context, _) {
-        final t = _c.value;
-        double dx;
-        if (t < inEnd) {
-          dx = (1 - Curves.easeOutCubic.transform(t / inEnd)) * w; // sağdan gelir
-        } else if (t > outStart) {
-          dx = -Curves.easeInCubic.transform((t - outStart) / (1 - outStart)) * w; // soldan çıkar
-        } else {
-          dx = 0;
-        }
-        return Transform.translate(
-          offset: Offset(dx, 0),
-          child: Container(
-            width: w,
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [_s.colors.first.withValues(alpha: 0), ..._s.colors, _s.colors.last.withValues(alpha: 0)]),
-              boxShadow: [BoxShadow(color: _s.glow.withValues(alpha: lvl >= 4 ? 0.7 : 0.4), blurRadius: lvl * 6.0)],
-            ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(_s.icon, style: const TextStyle(fontSize: 18)),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  '$name odaya girdi',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: _s.text, fontWeight: FontWeight.w800, fontSize: 14 + lvl * 0.6, shadows: const [Shadow(blurRadius: 4, color: Colors.black54)]),
+    return LayoutBuilder(builder: (context, box) {
+      final w = box.maxWidth.isFinite ? box.maxWidth : MediaQuery.sizeOf(context).width;
+      final s = _s;
+      final total = _total;
+      final inEnd = 700 / total, outStart = (700 + s.entranceMs) / total;
+      final name = (widget.user['displayName'] ?? '').toString();
+      final lvl = s.level;
+      final light = lvl == 2 || lvl == 3; // gümüş/altın şeritte koyu yazı daha okunur
+      final textColor = light ? const Color(0xFF2B1D00) : Colors.white;
+      return AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) {
+          final t = _c.value;
+          double dx;
+          if (t < inEnd) {
+            dx = (1 - Curves.easeOutCubic.transform(t / inEnd)) * w; // sağdan gelir
+          } else if (t > outStart) {
+            dx = -Curves.easeInCubic.transform((t - outStart) / (1 - outStart)) * w; // soldan çıkar
+          } else {
+            dx = 0;
+          }
+          final ms = t * total;
+          final bob = math.sin(ms / 90) * (lvl >= 7 ? 2.2 : 1.4); // araç hafifçe sallanır / süzülür
+          return Transform.translate(
+            offset: Offset(dx, 0),
+            child: Container(
+              width: w,
+              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [s.gradient.first.withValues(alpha: 0), ...s.gradient, s.gradient.last.withValues(alpha: 0)]),
+                boxShadow: [BoxShadow(color: s.color.withValues(alpha: lvl >= 6 ? 0.7 : 0.4), blurRadius: 6.0 + lvl * 2.5)],
+              ),
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                // Araç önde (sola doğru gidiyor); arkasında hız çizgileri.
+                Transform.translate(
+                  offset: Offset(0, bob),
+                  child: Text(
+                    s.vehicle,
+                    style: TextStyle(fontSize: 22 + lvl * 1.3, shadows: [Shadow(color: s.color, blurRadius: lvl >= 6 ? 12 : 4)]),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8)),
-                child: Text('WIP $lvl', style: TextStyle(color: _s.text, fontSize: 11, fontWeight: FontWeight.w900)),
-              ),
-            ]),
+                _SpeedLines(color: textColor.withValues(alpha: 0.7), phase: ms / 120),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    '$name ${s.vehicleName} ile geldi',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: textColor,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13.5 + math.min(lvl, 10) * 0.25,
+                      shadows: light ? null : const [Shadow(blurRadius: 4, color: Colors.black54)],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8)),
+                  child: Text(s.label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900)),
+                ),
+              ]),
+            ),
+          );
+        },
+      );
+    });
+  }
+}
+
+/// Aracın arkasında akan üç kısa çizgi.
+class _SpeedLines extends StatelessWidget {
+  final Color color;
+  final double phase;
+  const _SpeedLines({required this.color, required this.phase});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 16,
+      height: 18,
+      child: Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        for (var i = 0; i < 3; i++)
+          Container(
+            margin: EdgeInsets.only(left: ((phase + i * 0.7) % 3) * 2),
+            width: 8 - i * 1.5,
+            height: 1.6,
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(1)),
           ),
-        );
-      },
+      ]),
     );
   }
 }

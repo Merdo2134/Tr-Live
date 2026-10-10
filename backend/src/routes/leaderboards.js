@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
     const start = periodStartIso(period);
     if (type === 'agencies') {
       rows = (await query(
-        `SELECT a.id, a.name, a.logo_url, SUM(gt.coin_amount) AS total
+        `SELECT a.id, a.name, a.logo_url, SUM(COALESCE(gt.diamond_amount, gt.coin_amount)) AS total
          FROM gift_transactions gt
          JOIN broadcasters b ON b.user_id = gt.receiver_id AND b.status = 'approved'
          JOIN agencies a ON a.id = b.agency_id AND a.status = 'active'
@@ -36,7 +36,7 @@ router.get('/', async (req, res) => {
       // Oda kapanınca silindiği için yalnızca şu an açık (gizli olmayan) odalar sıralanır.
       rows = (await query(
         `SELECT r.id, r.name, r.room_type, SUM(gt.coin_amount) AS total,
-                (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id) AS member_count
+                (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND (rm.microphone OR rm.user_id NOT IN (SELECT id FROM active_ghosts))) AS member_count
          FROM gift_transactions gt JOIN rooms r ON r.id = gt.room_id AND r.is_active = TRUE AND r.is_hidden = FALSE
          WHERE gt.sender_id <> gt.receiver_id AND ($1::timestamptz IS NULL OR gt.created_at >= $1::timestamptz)
          GROUP BY r.id ORDER BY total DESC LIMIT 50`,
@@ -53,7 +53,7 @@ router.get('/', async (req, res) => {
       )).rows;
     } else if (type === 'families') {
       rows = (await query(
-        `SELECT f.id, f.name, f.logo_url, f.level, SUM(gt.coin_amount) AS total
+        `SELECT f.id, f.name, f.logo_url, f.level, SUM(COALESCE(gt.diamond_amount, gt.coin_amount)) AS total
          FROM gift_transactions gt JOIN family_members fm ON fm.user_id = gt.receiver_id JOIN families f ON f.id = fm.family_id AND f.is_active = TRUE
          WHERE gt.sender_id <> gt.receiver_id AND ($1::timestamptz IS NULL OR gt.created_at >= $1::timestamptz)
          GROUP BY f.id ORDER BY total DESC LIMIT 50`,
@@ -61,8 +61,10 @@ router.get('/', async (req, res) => {
       )).rows;
     } else {
       const col = type === 'senders' ? 'sender_id' : 'receiver_id';
+      // Gönderen sıralaması harcanan Coin'e, alan sıralaması alınan Elmasa göre (şanslı hediyede alıcıya pay geçer).
+      const amount = type === 'senders' ? 'gt.coin_amount' : 'COALESCE(gt.diamond_amount, gt.coin_amount)';
       rows = (await query(
-        `SELECT gt.${col} AS user_id, SUM(gt.coin_amount) AS total FROM gift_transactions gt
+        `SELECT gt.${col} AS user_id, SUM(${amount}) AS total FROM gift_transactions gt
          WHERE gt.sender_id <> gt.receiver_id AND ($1::timestamptz IS NULL OR gt.created_at >= $1::timestamptz)
          GROUP BY gt.${col} ORDER BY total DESC LIMIT 50`,
         [start],
