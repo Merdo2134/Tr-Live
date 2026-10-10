@@ -1,0 +1,47 @@
+name: Veritabanını taşı
+
+# Eski veritabanındaki (ör. Neon) tüm verileri yeni, BOŞ bir veritabanına (ör. Aiven) kopyalar. Eski veritabanı değişmez.
+# 1) Depo > Settings > Secrets and variables > Actions > New repository secret:
+#      ESKI_DATABASE_URL = eski bağlantı adresi
+#      YENI_DATABASE_URL = yeni bağlantı adresi (Aiven > Service URI)
+# 2) Actions > "Veritabanını taşı" > Run workflow. Önce "Yalnızca kontrol" işaretli deneyin; sonra kutuya EVET yazıp çalıştırın.
+# 3) "BİTTİ" yazınca Render'da DATABASE_URL değerini yeni adresle değiştirin.
+on:
+  workflow_dispatch:
+    inputs:
+      onay:
+        description: "Kopyalamak için EVET yazın (yeni veritabanı boş olmalı)"
+        required: true
+        default: "hayir"
+      sadece_kontrol:
+        description: "Yalnızca bağlantıları ve boyutları göster, kopyalama"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-tasi
+  cancel-in-progress: false
+
+jobs:
+  tasi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Depoyu indir
+        uses: actions/checkout@v4
+
+      - name: Onay
+        if: ${{ !inputs.sadece_kontrol && inputs.onay != 'EVET' }}
+        run: |
+          echo "::error::Kopyalamak için onay kutusuna büyük harflerle EVET yazın (ya da 'Yalnızca kontrol'ü işaretleyin)."
+          exit 1
+
+      - name: Taşı
+        env:
+          ESKI: ${{ secrets.ESKI_DATABASE_URL }}
+          YENI: ${{ secrets.YENI_DATABASE_URL }}
+          KONTROL: ${{ inputs.sadece_kontrol }}
+        run: docker run --rm -e ESKI -e YENI -e KONTROL -v "$GITHUB_WORKSPACE/deploy:/work:ro" postgres:18 bash /work/db_tasi.sh
