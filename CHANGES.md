@@ -1,3 +1,13 @@
+## v2.35.0
+- Üst çubuk inceltildi; TRLive yazısı ve taç küçüldü; oda açma düğmesi yalnızca simge (yazı yok). Düğme yalnızca Sesli sekmesinde (mikrofon) ve Görüntülü sekmesinde (kamera) görünür; Akış, Mesajlar ve Profil'de yok.
+- Mesajlar Yoho düzeninde: "Sohbet (okunmamış)" başlığı, Aile / Duyurular / Arkadaşlar düğmeleri, Arkadaşlık İsteği · Çevrimiçi Sohbet · Ajans Mesajı kartları, Tüm / Özel Takip (takip ettiklerin) sekmeleri, kart görünümlü sohbet listesi ve "1 Eki" tarih biçimi.
+- Profil: üstteki fazla boşluk kaldırıldı (ikinci durum çubuğu boşluğu), simgeler çerçevenin sağ üstüne alındı; çerçeve fotoğrafın çapına göre (×1,6) — profil, kullanıcı profili ve seviye ekranında aynı oran; ad, ID, sayaçlar, kartlar ve menü yazıları küçültüldü.
+- Mikrofon modu seçilince pencere kendiliğinden kapanır.
+- Müzik yalnızca oda içinde: oda küçültülünce dışarıda ayrı müzik balonu çıkmaz; müzik çalıyorsa oda balonunda küçük nota görünür.
+
+## v2.34.1
+- Koltuk daireleri her mikrofon modunda ekran genişliğinin %1'i kadar büyütüldü (merkezler aynı, daire etrafına büyür); içindeki "+" simgesi eski boyutunda.
+
 ## v2.34.0 — Derin denetim: güvenlik, kararlılık, tasarım
 Sunucu
 - Başkasının yüklediği dosyayı silme açığı kapatıldı: gönderide yalnızca kendi yüklediğin görsel kullanılabilir; gönderi silinince yalnızca sahibinin dosyası silinir (upload_owners).

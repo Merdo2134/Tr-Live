@@ -101,6 +101,10 @@ class EmptyState extends StatelessWidget {
       );
 }
 
+/// Avatar çerçevesi ölçüsü = avatar çapı × bu oran (çerçeve görsellerinde iç boşluk çapın ~%62'si).
+/// Profil, kullanıcı profili ve seviye ekranı aynı oranı kullanır.
+const double kFrameScale = 1.6;
+
 /// Türkçe büyük/küçük harf (Dart'ın toUpperCase'i 'i'yi 'I' yapar).
 String trUpper(String s) => s.replaceAll('i', 'İ').replaceAll('ı', 'I').toUpperCase();
 String trLower(String s) => s.replaceAll('İ', 'i').replaceAll('I', 'ı').toLowerCase();

@@ -148,30 +148,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final frame = _frameOf(p);
     final wip = mapOf(p['wip']);
     final features = mapOf(wip?['features']);
+    const avatarR = 44.0;
+    const frameSize = avatarR * 2 * kFrameScale; // çerçeve, fotoğrafın çapına göre
     return Column(children: [
       SizedBox(
-        height: 190,
+        width: frameSize,
+        height: frameSize,
         child: Stack(alignment: Alignment.center, children: [
-          Positioned(
-            top: 18,
-            child: Stack(alignment: Alignment.center, children: [
-              UserAvatar(user: p, radius: 54),
-              if (frame != null) IgnorePointer(child: SizedBox(width: 190, height: 190, child: AnimAsset(url: frame, repeat: true, cache: false))),
-            ]),
-          ),
+          UserAvatar(user: p, radius: avatarR),
+          if (frame != null) IgnorePointer(child: SizedBox(width: frameSize, height: frameSize, child: AnimAsset(url: frame, repeat: true, cache: false))),
         ]),
       ),
       UserName(
         user: {'displayName': p['displayName'], 'wipLevel': wip?['level'], 'nameColor': features?['nameColor']},
-        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
       ),
-      const SizedBox(height: 4),
+      const SizedBox(height: 2),
       InkWell(
         onTap: () => _copyId(p),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('ID: ${p['publicId'] ?? '-'}', style: const TextStyle(color: Pal.textDim, fontSize: 15)),
+            Text('ID: ${p['publicId'] ?? '-'}', style: const TextStyle(color: Pal.textDim, fontSize: 12.5)),
             const SizedBox(width: 6),
             const Icon(Icons.copy, size: 14, color: Pal.textDim),
           ]),
@@ -190,14 +188,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Column(children: [
-                    FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.3))),
+                    FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.3, color: Pal.textDim))),
                     const SizedBox(height: 4),
                     Badge(
                       label: Text('$badge'),
                       isLabelVisible: badge > 0,
                       alignment: Alignment.topRight,
                       offset: const Offset(10, -8),
-                      child: Text(fmtNumber(value), style: const TextStyle(color: Pal.cyan, fontSize: 16, fontWeight: FontWeight.w700)),
+                      child: Text(fmtNumber(value), style: const TextStyle(color: Pal.cyan, fontSize: 15, fontWeight: FontWeight.w700)),
                     ),
                   ]),
                 ),
@@ -229,7 +227,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             borderRadius: BorderRadius.circular(14),
             onTap: onTap,
             child: Container(
-              height: 62,
+              height: 56,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), gradient: LinearGradient(colors: colors)),
               child: Row(children: [
@@ -237,8 +235,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    FittedBox(fit: BoxFit.scaleDown, child: Text(fmtNumber(value), style: TextStyle(color: textColor, fontSize: 17, fontWeight: FontWeight.w900))),
-                    FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: TextStyle(color: textColor, fontSize: 12.5, fontWeight: FontWeight.w600))),
+                    FittedBox(fit: BoxFit.scaleDown, child: Text(fmtNumber(value), style: TextStyle(color: textColor, fontSize: 15, fontWeight: FontWeight.w800))),
+                    FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: TextStyle(color: textColor, fontSize: 11.5, fontWeight: FontWeight.w600))),
                   ]),
                 ),
                 Icon(Icons.chevron_right, color: textColor),
@@ -266,13 +264,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Container(
-                  width: 58,
-                  height: 58,
+                  width: 50,
+                  height: 50,
                   decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [color.withValues(alpha: 0.35), color.withValues(alpha: 0.08)])),
-                  child: Icon(icon, size: 32, color: color),
+                  child: Icon(icon, size: 26, color: color),
                 ),
-                const SizedBox(height: 6),
-                Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5)),
+                const SizedBox(height: 5),
+                Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11.5, color: Pal.text)),
               ]),
             ),
           ),
@@ -293,9 +291,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final broadcasterStatus = p['broadcasterStatus']?.toString();
     final isBroadcaster = broadcasterStatus == 'approved' || broadcasterStatus == 'pending';
     Widget row(IconData icon, Color color, String title, VoidCallback onTap, {String? sub}) => ListTile(
-          leading: Container(width: 40, height: 40, decoration: BoxDecoration(color: color.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color)),
-          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: sub == null ? null : Text(sub, style: const TextStyle(fontSize: 12)),
+          leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: color.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: color, size: 20)),
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+          subtitle: sub == null ? null : Text(sub, style: const TextStyle(fontSize: 11.5, color: Pal.textDim)),
+          dense: true,
           trailing: const Icon(Icons.chevron_right),
           onTap: onTap,
         );
@@ -328,17 +327,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return RefreshIndicator(
           onRefresh: reload,
           child: ListView(padding: const EdgeInsets.only(bottom: 24), children: [
-            SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
-                child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                  IconButton(tooltip: 'Müşteri hizmetleri', icon: const Icon(Icons.headset_mic_outlined), onPressed: () => _open(const CustomerServiceScreen())),
-                  IconButton(tooltip: 'Profili düzenle', icon: const Icon(Icons.edit_outlined), onPressed: () => _open(const EditProfileScreen())),
+            // Üst çubuk zaten durum çubuğunu karşılıyor: burada ikinci bir SafeArea boşluğu yok.
+            // Müşteri hizmetleri ve düzenle simgeleri çerçevenin sağ üstüne biner (yer kaplamaz).
+            Stack(children: [
+              Padding(padding: const EdgeInsets.only(top: 6), child: Center(child: _header(p))),
+              Positioned(
+                top: 0,
+                right: 4,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  IconButton(tooltip: 'Müşteri hizmetleri', icon: const Icon(Icons.headset_mic_outlined, size: 22), onPressed: () => _open(const CustomerServiceScreen())),
+                  IconButton(tooltip: 'Profili düzenle', icon: const Icon(Icons.edit_outlined, size: 22), onPressed: () => _open(const EditProfileScreen())),
                 ]),
               ),
-            ),
-            _header(p),
+            ]),
             _statsRow(p),
             _moneyCards(p),
             _quickTiles(p),
@@ -347,8 +348,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
               decoration: BoxDecoration(color: Pal.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: Pal.outline)),
               child: ListTile(
-                leading: Container(width: 40, height: 40, decoration: BoxDecoration(color: Pal.cyan.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.settings, color: Pal.cyan)),
-                title: const Text('Ayarlar', style: TextStyle(fontWeight: FontWeight.w600)),
+                dense: true,
+                leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: Pal.cyan.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.settings, color: Pal.cyan, size: 20)),
+                title: const Text('Ayarlar', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _openSettings(p, isDealer),
               ),

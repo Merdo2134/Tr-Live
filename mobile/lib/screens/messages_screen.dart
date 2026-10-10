@@ -7,15 +7,22 @@ import '../services/socket_service.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/safety_actions.dart';
+import 'family_screen.dart';
+import 'social_screens.dart';
+import 'support_screens.dart';
 import 'user_screens.dart';
 
+const _shortMonths = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+
+/// Bugün: 14:30 · bu yıl: 1 Eki · önceki yıllar: 1 Eki 2025
 String _time(dynamic iso) {
   final d = DateTime.tryParse((iso ?? '').toString())?.toLocal();
   if (d == null) return '';
   String two(int n) => n.toString().padLeft(2, '0');
   final now = DateTime.now();
   final today = d.year == now.year && d.month == now.month && d.day == now.day;
-  return today ? '${two(d.hour)}:${two(d.minute)}' : '${two(d.day)}.${two(d.month)}';
+  if (today) return '${two(d.hour)}:${two(d.minute)}';
+  return d.year == now.year ? '${d.day} ${_shortMonths[d.month - 1]}' : '${d.day} ${_shortMonths[d.month - 1]} ${d.year}';
 }
 
 /// Sohbetler sekmesi.
@@ -30,6 +37,8 @@ class _MessagesScreenState extends State<MessagesScreen> {
   int _version = 0;
   StreamSubscription? _sub;
   Future<void> Function()? _reload; // listeyi yerinde yeniler (kaydırma konumu korunur, yükleniyor halkası çıkmaz)
+  bool _special = false; // "Özel Takip": yalnızca takip ettiğim kişilerle olan sohbetler
+  Set<String> _following = {};
   Timer? _debounce;
 
   @override
@@ -59,45 +68,155 @@ class _MessagesScreenState extends State<MessagesScreen> {
     if (mounted) setState(() => _version++);
   }
 
+  Future<List<Map<String, dynamic>>> _loadAll() async {
+    final conv = listOf((await Api.get('/api/messages/conversations'))['conversations']);
+    try {
+      final f = listOf((await Api.get('/api/users/${Session.id}/following'))['users']);
+      _following = {for (final u in f) u['id'].toString()};
+    } catch (_) {/* filtre olmadan da liste görünür */}
+    return conv;
+  }
+
+  void _openNotices() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final k in const [['team', 'Ekip duyuruları', Icons.workspace_premium], ['event', 'Etkinlik duyuruları', Icons.campaign], ['reward', 'Ödül bildirimleri', Icons.card_giftcard]])
+            ListTile(
+              leading: Icon(k[2] as IconData),
+              title: Text(k[1] as String),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.pop(c);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => AnnouncementsScreen(kind: k[0] as String, title: k[1] as String)));
+              },
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _segment(String label, bool on, VoidCallback onTap) => Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          onTap: onTap,
+          child: Container(
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: on ? Pal.cyan : Pal.outline, width: on ? 1.6 : 1),
+              color: on ? Pal.cyan.withValues(alpha: 0.08) : Colors.transparent,
+            ),
+            child: Text(label, style: TextStyle(color: on ? Pal.cyan : Pal.textDim, fontWeight: FontWeight.w600, fontSize: 14)),
+          ),
+        ),
+      );
+
+  Widget _conversation(Map<String, dynamic> c) {
+    final peer = mapOf(c['peer']);
+    final unread = (c['unread'] as num? ?? 0).toInt();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Gap.l, 0, Gap.l, Gap.s),
+      child: Material(
+        color: Pal.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Rad.lg), side: const BorderSide(color: Pal.outline, width: 0.8)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(Rad.lg),
+          onTap: () async {
+            if (peer == null) return;
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(peer: peer)));
+            Inbox.refresh();
+            if (mounted) _reload?.call();
+          },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Gap.m, Gap.m, Gap.m, Gap.m),
+            child: Row(children: [
+              UserAvatar(user: peer, radius: 24),
+              const SizedBox(width: Gap.m),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: UserName(user: peer, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+                    const SizedBox(width: Gap.s),
+                    Text(_time(c['lastMessageAt']), style: const TextStyle(fontSize: 12, color: Pal.textDim)),
+                  ]),
+                  const SizedBox(height: 3),
+                  Row(children: [
+                    Expanded(
+                      child: Text('${c['lastFromMe'] == true ? 'Sen: ' : ''}${c['lastMessage']}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13.5, color: unread > 0 ? Pal.text : Pal.textDim, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.w400)),
+                    ),
+                    if (unread > 0) Badge(label: Text(unread > 99 ? '99+' : '$unread')),
+                  ]),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       floatingActionButton: FloatingActionButton(onPressed: _newChat, tooltip: 'Yeni mesaj', child: const Icon(Icons.edit)),
       body: AsyncBody<List<Map<String, dynamic>>>(
         key: ValueKey(_version),
-        load: () async => listOf((await Api.get('/api/messages/conversations'))['conversations']),
-        builder: (context, list, reload) {
+        load: _loadAll,
+        builder: (context, all, reload) {
           _reload = reload;
+          final list = _special ? all.where((c) => _following.contains(mapOf(c['peer'])?['id']?.toString())).toList() : all;
           return RefreshIndicator(
-          onRefresh: reload,
-          child: ListView(children: [
-            const _InboxCards(),
-            if (list.isEmpty)
-              const Padding(padding: EdgeInsets.all(24), child: Text('Henüz mesajınız yok. Sağ alttaki düğmeyle yeni bir sohbet başlatın.', textAlign: TextAlign.center, style: TextStyle(color: Pal.textDim))),
-            for (final c in list)
-                    ListTile(
-                      leading: UserAvatar(user: mapOf(c['peer'])),
-                      title: UserName(user: mapOf(c['peer']), style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text('${c['lastFromMe'] == true ? 'Sen: ' : ''}${c['lastMessage']}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                      trailing: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Text(_time(c['lastMessageAt']), style: const TextStyle(fontSize: 12, color: Colors.white54)),
-                        if ((c['unread'] as num? ?? 0) > 0) Badge(label: Text('${c['unread']}')),
-                      ]),
-                      onTap: () async {
-                        await Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(peer: mapOf(c['peer'])!)));
-                        Inbox.refresh();
-                        if (mounted) setState(() => _version++);
-                      },
+            onRefresh: reload,
+            child: ListView(padding: const EdgeInsets.only(bottom: 96), children: [
+              // Başlık: Sohbet (okunmamış) · Aile · Arkadaşlar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Gap.l, Gap.m, Gap.s, Gap.s),
+                child: Row(children: [
+                  Expanded(
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: Inbox.unread,
+                      builder: (_, n, __) => Text('Sohbet ($n)', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
                     ),
-          ]),
-        );
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12), shape: const StadiumBorder(), side: BorderSide(color: Pal.cyan.withValues(alpha: 0.5))),
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('Aile')), body: const FamilyScreen()))),
+                    icon: const Icon(Icons.groups, size: 18),
+                    label: const Text('Aile'),
+                  ),
+                  IconButton(tooltip: 'Duyurular', onPressed: _openNotices, icon: const Icon(Icons.notifications_none, color: Pal.textDim)),
+                  IconButton(tooltip: 'Arkadaşlar', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FriendsScreen())), icon: const Icon(Icons.people_outline, color: Pal.textDim)),
+                ]),
+              ),
+              const _InboxCards(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Gap.l, 0, Gap.l, Gap.m),
+                child: Row(children: [
+                  _segment('Tüm', !_special, () => setState(() => _special = false)),
+                  const SizedBox(width: Gap.m),
+                  _segment('Özel Takip', _special, () => setState(() => _special = true)),
+                ]),
+              ),
+              if (list.isEmpty)
+                EmptyState(
+                  icon: Icons.forum_outlined,
+                  text: _special ? 'Takip ettiğin kişilerle henüz sohbetin yok.' : 'Henüz mesajın yok. Arkadaşlarınla sohbet başlatmak için sağ alttaki düğmeye dokun.',
+                ),
+              for (final c in list) _conversation(c),
+            ]),
+          );
         },
       ),
     );
   }
 }
 
-/// Mesajlar ekranının üstündeki dört kategori kartı.
+/// Mesajlar ekranının üstündeki üç kategori kartı (Yoho düzeni).
 class _InboxCards extends StatefulWidget {
   const _InboxCards();
 
@@ -131,38 +250,37 @@ class _InboxCardsState extends State<_InboxCards> {
     _load();
   }
 
-  Widget _card(String label, IconData icon, List<Color> colors, int badge, VoidCallback onTap) {
+  Widget _card(String label, IconData icon, Color iconColor, int badge, VoidCallback onTap) {
     return Expanded(
       child: Semantics(
         button: true,
         label: badge > 0 ? '$label, $badge yeni' : label,
-        child: GestureDetector(
-        onTap: onTap,
-        child: Stack(clipBehavior: Clip.none, children: [
-          Container(
-            height: 92,
-            decoration: BoxDecoration(gradient: LinearGradient(colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(16)),
-            padding: const EdgeInsets.all(6),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(icon, size: 30, color: Colors.white),
-              const SizedBox(height: 6),
-              FittedBox(fit: BoxFit.scaleDown, child: Text(label, textAlign: TextAlign.center, maxLines: 1, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5))),
-            ]),
-          ),
-          if (badge > 0)
-            Positioned(
-              right: -4,
-              top: -5,
-              child: Container(
-                constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(color: Pal.red, borderRadius: BorderRadius.circular(10)),
-                child: Text('${badge > 99 ? '99+' : badge}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+        child: Material(
+          color: Pal.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Rad.lg), side: const BorderSide(color: Pal.outline, width: 0.8)),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(Rad.lg),
+            onTap: onTap,
+            child: SizedBox(
+              height: 104,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(Gap.m, Gap.m, Gap.s, Gap.m),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Center(
+                    child: Badge(
+                      isLabelVisible: badge > 0,
+                      label: Text(badge > 99 ? '99+' : '$badge'),
+                      offset: const Offset(6, -4),
+                      child: Icon(icon, size: 34, color: iconColor),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, height: 1.2, color: Pal.text)),
+                ]),
               ),
             ),
-        ]),
-      ),
+          ),
+        ),
       ),
     );
   }
@@ -171,18 +289,18 @@ class _InboxCardsState extends State<_InboxCards> {
 
   @override
   Widget build(BuildContext context) {
-    final me = Session.id;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-      child: Row(children: [
-        _card('Takipçiler', Icons.group_add, const [Color(0xFF7A5CFF), Color(0xFFB45CFF)], _n('followers'), () => _open(UserListScreen(title: 'Yeni takipçiler', path: '/api/users/$me/followers'))),
-        const SizedBox(width: 8),
-        _card('Ekip', Icons.workspace_premium, const [Color(0xFFFFB347), Color(0xFFFF7A18)], _n('team'), () => _open(const AnnouncementsScreen(kind: 'team', title: 'Ekip'))),
-        const SizedBox(width: 8),
-        _card('Etkinlik', Icons.campaign, const [Color(0xFF1FD6F5), Color(0xFF2FE6A8)], _n('event'), () => _open(const AnnouncementsScreen(kind: 'event', title: 'Etkinlik duyurusu'))),
-        const SizedBox(width: 8),
-        _card('Ödüller', Icons.card_giftcard, const [Color(0xFFFF4F9A), Color(0xFF8E5CFF)], _n('reward'), () => _open(const AnnouncementsScreen(kind: 'reward', title: 'Ödül bildirimleri'))),
-      ]),
+      padding: const EdgeInsets.fromLTRB(Gap.l, Gap.xs, Gap.l, Gap.m),
+      child: ValueListenableBuilder<Map<String, int>>(
+        valueListenable: Inbox.badges,
+        builder: (context, b, _) => Row(children: [
+          _card('Arkadaşlık İsteği', Icons.waving_hand, const Color(0xFFFFC43D), b['friends'] ?? 0, () => _open(const FriendsScreen())),
+          const SizedBox(width: Gap.s),
+          _card('Çevrimiçi Sohbet', Icons.forum, const Color(0xFF4FC3F7), 0, () => _open(const SupportChatScreen())),
+          const SizedBox(width: Gap.s),
+          _card('Ajans Mesajı', Icons.apartment, Pal.cyan, _n('team'), () => _open(const AnnouncementsScreen(kind: 'team', title: 'Ajans Mesajı'))),
+        ]),
+      ),
     );
   }
 }

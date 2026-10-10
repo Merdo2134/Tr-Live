@@ -172,7 +172,7 @@ class _LevelsScreenState extends State<LevelsScreen> {
                   height: 190,
                   child: Stack(alignment: Alignment.center, children: [
                     UserAvatar(user: me, radius: 56),
-                    if (frame != null) IgnorePointer(child: SizedBox(width: 200, height: 200, child: AnimAsset(url: frame, repeat: true, cache: false))),
+                    if (frame != null) IgnorePointer(child: SizedBox(width: 56 * 2 * kFrameScale, height: 56 * 2 * kFrameScale, child: AnimAsset(url: frame, repeat: true, cache: false))),
                   ]),
                 ),
                 const SizedBox(height: 8),

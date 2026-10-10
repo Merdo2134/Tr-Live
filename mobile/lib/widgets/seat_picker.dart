@@ -92,6 +92,10 @@ const Map<int, SeatLayoutSpec> seatLayouts = {
   30: SeatLayoutSpec(0.100, [SeatRowSpec(_x6, 0.093), SeatRowSpec(_x6, 0.093), SeatRowSpec(_x6, 0.093), SeatRowSpec(_x6, 0.093), SeatRowSpec(_x6, 0.093)], [0.181, 0.181, 0.181, 0.181]),
 };
 
+/// Koltuk dairesine her modda eklenen pay (sahne genişliğinin oranı). Merkezler aynı kalır, daire etrafına büyür;
+/// içindeki "+" simgesi bu paydan etkilenmez.
+const double seatCircleBoost = 0.01;
+
 /// Bilinmeyen sayı gelirse en yakın büyük mod kullanılır.
 SeatLayoutSpec seatLayoutFor(int n) {
   final exact = seatLayouts[n];
@@ -178,7 +182,7 @@ Future<void> showMicModeSheet(
   required Future<bool> Function(bool on) onRequestMode,
 }) {
   const modes = [2, 5, 8, 9, 12, 15, 20, 30];
-  var cur = current;
+  final cur = current;
   var req = requestMode;
   var busy = false;
   return showModalBottomSheet<void>(
@@ -208,10 +212,11 @@ Future<void> showMicModeSheet(
           setS(() => busy = true);
           final done = await onSelect(n);
           if (!c.mounted) return;
-          setS(() {
-            busy = false;
-            if (done) cur = n;
-          });
+          if (done) {
+            Navigator.of(c).pop(); // mod değişti: pencere kendiliğinden kapanır
+            return;
+          }
+          setS(() => busy = false);
         }
 
         Future<void> toggleReq() async {

@@ -1702,7 +1702,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     }
   }
 
-  Widget _seatTile(int index, Map<String, dynamic>? m, double slotSize) {
+  Widget _seatTile(int index, Map<String, dynamic>? m, double slotSize, {double? plusSize}) {
     final seatR = (slotSize - 8) / 2;
     if (m == null) {
       final reserved = index == 0 && _myRole != 'owner';
@@ -1715,7 +1715,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             width: seatR * 2,
             height: seatR * 2,
             decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.16), border: Border.all(color: Colors.white.withValues(alpha: 0.28), width: 1)),
-            child: Icon(reserved ? Icons.star_border : (locked ? Icons.lock : Icons.add), size: seatR * 0.95, color: locked ? Colors.orangeAccent : Colors.white),
+            child: Icon(reserved ? Icons.star_border : (locked ? Icons.lock : Icons.add), size: plusSize ?? seatR * 0.95, color: locked ? Colors.orangeAccent : Colors.white),
           ),
         ),
         name: Text('${index + 1}', style: TextStyle(color: Colors.white, fontSize: _seatCompact ? 11 : 12.5, fontWeight: FontWeight.w600)),
@@ -1849,7 +1849,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     for (final p in spec.pitch) {
       cy += p * w * sc;
     }
-    return cy + (spec.rows.last.dia * w * sc + 8) / 2 + _labelsH + 8;
+    return cy + ((spec.rows.last.dia + seatCircleBoost) * w * sc + 8) / 2 + _labelsH + 8;
   }
 
   /// Puan (elmas) satırı yalnızca satırlar arasında yer varsa gösterilir (çok koltuklu modlarda gizli, Yoho gibi).
@@ -1857,7 +1857,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (spec.pitch.isEmpty) return true;
     var minGap = double.infinity;
     for (var r = 0; r < spec.pitch.length; r++) {
-      final gap = spec.pitch[r] * w - (spec.rows[r].dia * w + 8) / 2 - (spec.rows[r + 1].dia * w + 8) / 2;
+      final gap = spec.pitch[r] * w - ((spec.rows[r].dia + seatCircleBoost) * w + 8) / 2 - ((spec.rows[r + 1].dia + seatCircleBoost) * w + 8) / 2;
       if (gap < minGap) minGap = gap;
     }
     return minGap >= 2 + _seatNameH + 2 + _seatScoreH + 6;
@@ -1874,7 +1874,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     var cy = spec.topGap * w * sc + (spec.rows.first.dia * w * sc + 8) / 2;
     for (var r = 0; r < spec.rows.length; r++) {
       final row = spec.rows[r];
-      final slot = row.dia * w * sc + 8;
+      // Daire %1 büyür (seatCircleBoost); artı simgesi eski daire ölçüsüne göre kalır.
+      final slot = (row.dia + seatCircleBoost) * w * sc + 8;
+      final plus = (row.dia * w * sc) / 2 * 0.95;
       // Hücre genişliği: komşu koltuklar arası mesafe (ad yazısı için), en az koltuk kadar.
       var minDx = 1.0;
       for (var k = 1; k < row.xs.length; k++) {
@@ -1889,7 +1891,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           left: x * w - tileW / 2,
           top: cy - slot / 2,
           width: tileW,
-          child: Center(child: _seatTile(idx, bySeat[idx], slot)),
+          child: Center(child: _seatTile(idx, bySeat[idx], slot, plusSize: plus)),
         ));
       }
       if (r < spec.pitch.length) cy += spec.pitch[r] * w * sc;

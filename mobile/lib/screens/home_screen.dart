@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../widgets/music_bubble.dart';
+import '../services/music_service.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/banner_carousel.dart';
 import '../widgets/crown_icon.dart';
@@ -76,7 +76,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               if (min) _miniBar(req),
-              if (min) MusicBubble(onOpen: RoomDock.expand),
             ]),
           );
         },
@@ -109,6 +108,17 @@ class _HomeScreenState extends State<HomeScreen> {
             const Icon(Icons.graphic_eq, color: Colors.white, size: 22),
             Text(initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15)),
           ]),
+        ),
+        // Müzik yalnızca odanın içinde: dışarıda ayrı müzik balonu yok, çalıyorsa oda balonunda küçük nota görünür.
+        Positioned(
+          left: -2,
+          bottom: -2,
+          child: ValueListenableBuilder<Map<String, dynamic>?>(
+            valueListenable: MusicService.instance.state,
+            builder: (_, st, __) => st?['status'] == 'playing'
+                ? const CircleAvatar(radius: 10, backgroundColor: Colors.black87, child: Icon(Icons.music_note, size: 13, color: Colors.pinkAccent))
+                : const SizedBox.shrink(),
+          ),
         ),
         Positioned(
           right: 0,
@@ -194,51 +204,53 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Üst satır: TRLive tacı (sıralamalar) ve oda açma düğmesi.
+  /// Üst satır: TRLive tacı (sıralamalar) ve yalnızca simgeli oda açma düğmesi.
+  /// Düğme yalnızca Sesli (mikrofon) ve Görüntülü (kamera) sekmelerinde görünür.
   Widget _crownRow() {
-    final video = _side == 'video';
+    final video = _index == 2;
+    final showCreate = _index == 0 || _index == 2;
     return SafeArea(
       bottom: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        height: 50,
+        padding: const EdgeInsets.symmetric(horizontal: Gap.m),
         decoration: const BoxDecoration(color: Pal.surface, border: Border(bottom: BorderSide(color: Pal.outline, width: 0.8))),
         child: Row(children: [
           Semantics(
             button: true,
             label: 'TRLive sıralamaları',
             child: InkWell(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const CrownIcon(size: 34),
-                  const SizedBox(width: 6),
-                  Text('TRLive', style: TextStyle(fontFamily: 'serif', fontWeight: FontWeight.w800, fontSize: MediaQuery.sizeOf(context).width < 360 ? 17 : 20, letterSpacing: 1, color: Pal.text)),
+                  CrownIcon(size: 24),
+                  SizedBox(width: 5),
+                  Text('TRLive', style: TextStyle(fontFamily: 'serif', fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: 0.8, color: Pal.text)),
                 ]),
               ),
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(26),
-              onTap: _createRoom,
-              child: Ink(
-                height: 46,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: video ? const [Pal.purple, Pal.cyan] : const [Color(0xFFFF7A18), Pal.pink]),
-                  borderRadius: BorderRadius.circular(26),
-                  boxShadow: [BoxShadow(color: (video ? Pal.purple : Pal.pink).withValues(alpha: 0.35), blurRadius: 12)],
+          const Spacer(),
+          if (showCreate)
+            Tooltip(
+              message: video ? 'Görüntülü yayın aç' : 'Sesli oda aç',
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: _createRoom,
+                child: Ink(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(colors: video ? const [Pal.purple, Pal.cyan] : const [Pal.orange, Pal.pink]),
+                    boxShadow: [BoxShadow(color: (video ? Pal.purple : Pal.pink).withValues(alpha: 0.35), blurRadius: 10)],
+                  ),
+                  child: Icon(video ? Icons.videocam : Icons.mic, color: Colors.white, size: 21),
                 ),
-                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(video ? Icons.videocam : Icons.mic, color: Colors.white),
-                  const SizedBox(width: 8),
-                  Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text(video ? 'Görüntülü yayın aç' : 'Sesli oda aç', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)))),
-                ]),
               ),
             ),
-          ),
         ]),
       ),
     );

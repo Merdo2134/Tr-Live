@@ -117,7 +117,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             child: Center(
               child: Stack(alignment: Alignment.center, children: [
                 UserAvatar(user: p, radius: 46),
-                if (frame != null) IgnorePointer(child: SizedBox(width: 200, height: 200, child: AnimAsset(url: frame, repeat: true, cache: false))),
+                if (frame != null) IgnorePointer(child: SizedBox(width: 46 * 2 * kFrameScale, height: 46 * 2 * kFrameScale, child: AnimAsset(url: frame, repeat: true, cache: false))),
               ]),
             ),
           ),
