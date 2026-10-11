@@ -1,3 +1,23 @@
+## v2.39.1
+- Sunucu veritabanına ulaşamadığında (şifre değişmiş, servis kapalı, adres yanlış, sertifika reddi) uygulama artık "Sunucu hatası" yerine "Sunucu şu an veritabanına bağlanamıyor" der; Render günlüğüne de sebep açıkça yazılır (`[veritabanı] ... veritabanı şifresi yanlış (DATABASE_URL içindeki şifre güncel mi?)`). `/health` bu durumda 503 döner.
+
+## v2.39.0 — Yoho ile birebir düzen: oda ekranı ve ana sayfa
+Ölçüler bu kez Yoho ile yan yana ekran görüntüsünden piksel piksel ölçüldü ve hesaplanan yerleşim Yoho görüntüsünün üstüne bindirilerek doğrulandı.
+
+Oda ekranı
+- **Üst satırlar Yoho gibi iki satır:** 1. satır oda kutusu (kapak + ad + ID) · ilk 3 izleyici · kişi sayısı · ••• · ⏻; 2. satır toplam elmas · favori ··· aile · taç. Eskiden 3 satırdı ve koltukları ~%10 aşağı itiyordu.
+- **Koltuklar Yoho'nun yerinde:** 30 mikrofonda daire çapı, satır aralığı ve ilk satırın yeri Yoho ile aynı (önceki %1 daire büyütmesi Yoho'dan %9 büyük gösteriyordu, kaldırıldı).
+- **Boyut artık hiç değişmez:** koltuk ölçüsü yalnızca ekran genişliğine bağlı. Mikrofona oturmak, izleyici gelmesi, aile/favori rozeti, klavye, ses hatası şeridi koltukları küçültmez/kaydırmaz. Başlık, koltuk adları ve alt bar telefonun yazı boyutu ayarından etkilenmez.
+- **Çerçeve avatarın etrafına oturur:** takılı çerçeve koltuk kutusuna sıkıştırılmıyor; avatar çapının 1,6 katı, aynı merkezde (profil ile aynı oran). Oturan kişinin fotoğrafı artık küçük görünmez.
+- Alt bar Yoho ölçüsünde (düğme ve hediye çapı, yükseklik). Şanslı çanta sağ altta (koltukların üstüne binmiyor). "•••" menüsü: paylaş, oda bilgisi, şikâyet, küçült.
+
+Ana sayfa
+- Ayrı üst çubuk kaldırıldı; Yoho gibi **İlgili · Sıcak · Yakında** yazı sekmeleri (seçili büyük ve kalın, altında çizgi), sağda sıralama tacı, arama, oda aç ve diğer.
+- Banner 3:1, kenar boşlukları Yoho ölçüsünde. Sıcak sekmesinde **Tavsiyeler · Yeni yayıncı** süzgeçleri (son 30 günde açılan hesapların odaları).
+- Oda kartları Yoho gibi: kare kapak, sol altta tür etiketi, sağ altta dinleyici sayısı ve üstünde üst üste binen üye fotoğrafları, oda adı kartın altında.
+- Alt menü yalnızca simge (Yoho).
+- Sunucu: oda listesinde `avatars` (en fazla 8; gizli kullanıcı ve hayalet dinleyici hariç) ve `fresh=1` süzgeci.
+
 ## v2.38.1 — Veritabanı taşıma
 - Neon'un ücretsiz planı ayda 100 işlem saatiyle sınırlı; sürekli açık sunucumuzda ay ortasında bitiyor. Önerilen ücretsiz sağlayıcı: **Aiven Free PostgreSQL** (saat kotası yok). Adımlar: `docs/VERITABANI.md`.
 - Sunucu artık bağlantı adresindeki `sslmode` parametresini yok sayıyor: Aiven/Supabase adresleri olduğu gibi yapıştırılabilir ("self-signed certificate" hatası olmaz). İsteğe bağlı `DATABASE_CA` ile tam sertifika doğrulaması.

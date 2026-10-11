@@ -32,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
   final _audioKey = GlobalKey<RoomsTabState>();
   final _videoKey = GlobalKey<RoomsTabState>();
-  String _side = 'audio'; // son açık oda tarafı: sesli | görüntülü
 
   @override
   void initState() {
@@ -134,21 +133,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _select(int i) {
-    setState(() {
-      _index = i;
-      if (i == 0) _side = 'audio';
-      if (i == 2) _side = 'video';
-    });
+    setState(() => _index = i);
     if (i == 0) _audioKey.currentState?.refresh();
     if (i == 2) _videoKey.currentState?.refresh();
   }
 
-  Future<void> _createRoom() async {
-    final tab = _side == 'video' ? _videoKey.currentState : _audioKey.currentState;
-    await tab?.createRoom(type: _side);
-  }
-
-  /// Alt satır: Sesli | Akış | Görüntülü | Mesajlar | Profil
+  /// Alt satır (Yoho: yalnızca simge): Sesli | Akış | Görüntülü | Mesajlar | Profil. Seçili simge dolu ve renkli.
   Widget _tabRow() {
     Widget item(int i, IconData icon, IconData activeIcon, String label, {Widget? badge}) {
       final sel = _index == i;
@@ -158,16 +148,11 @@ class _HomeScreenState extends State<HomeScreen> {
           button: true,
           selected: sel,
           label: label,
-          child: InkWell(
-            onTap: () => _select(i),
-            child: Container(
-              padding: const EdgeInsets.only(top: 8, bottom: 6),
-              decoration: BoxDecoration(border: Border(top: BorderSide(color: sel ? Pal.cyan : Colors.transparent, width: 3))),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                badge ?? Icon(sel ? activeIcon : icon, color: color, size: 26),
-                const SizedBox(height: 2),
-                FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: TextStyle(color: color, fontSize: 11.5, fontWeight: sel ? FontWeight.w800 : FontWeight.w500))),
-              ]),
+          child: Tooltip(
+            message: label,
+            child: InkWell(
+              onTap: () => _select(i),
+              child: SizedBox(height: 56, child: Center(child: badge ?? Icon(sel ? activeIcon : icon, color: color, size: 28))),
             ),
           ),
         ),
@@ -187,7 +172,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'Mesajlar',
           badge: ValueListenableBuilder<int>(
             valueListenable: Inbox.unread,
-            builder: (_, n, __) => Badge(label: Text('$n'), isLabelVisible: n > 0, child: Icon(_index == 3 ? Icons.chat_bubble : Icons.chat_bubble_outline, color: _index == 3 ? Pal.cyan : Pal.textDim, size: 26)),
+            builder: (_, n, __) => Badge(label: Text('$n'), isLabelVisible: n > 0, child: Icon(_index == 3 ? Icons.chat_bubble : Icons.chat_bubble_outline, color: _index == 3 ? Pal.cyan : Pal.textDim, size: 28)),
           ),
         ),
         item(
@@ -197,71 +182,21 @@ class _HomeScreenState extends State<HomeScreen> {
           'Profil',
           badge: ValueListenableBuilder<Map<String, int>>(
             valueListenable: Inbox.badges,
-            builder: (_, b, __) => Badge(smallSize: 9, isLabelVisible: (b['total'] ?? 0) > 0, child: Icon(_index == 4 ? Icons.person : Icons.person_outline, color: _index == 4 ? Pal.cyan : Pal.textDim, size: 26)),
+            builder: (_, b, __) => Badge(smallSize: 9, isLabelVisible: (b['total'] ?? 0) > 0, child: Icon(_index == 4 ? Icons.person : Icons.person_outline, color: _index == 4 ? Pal.cyan : Pal.textDim, size: 28)),
           ),
         ),
       ])),
     );
   }
 
-  /// Üst satır: TRLive tacı (sıralamalar) ve yalnızca simgeli oda açma düğmesi.
-  /// Düğme yalnızca Sesli (mikrofon) ve Görüntülü (kamera) sekmelerinde görünür.
-  Widget _crownRow() {
-    final video = _index == 2;
-    final showCreate = _index == 0 || _index == 2;
-    return SafeArea(
-      bottom: false,
-      child: Container(
-        height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: Gap.m),
-        decoration: const BoxDecoration(color: Pal.surface, border: Border(bottom: BorderSide(color: Pal.outline, width: 0.8))),
-        child: Row(children: [
-          Semantics(
-            button: true,
-            label: 'TRLive sıralamaları',
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  CrownIcon(size: 24),
-                  SizedBox(width: 5),
-                  Text('TRLive', style: TextStyle(fontFamily: 'serif', fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: 0.8, color: Pal.text)),
-                ]),
-              ),
-            ),
-          ),
-          const Spacer(),
-          if (showCreate)
-            Tooltip(
-              message: video ? 'Görüntülü yayın aç' : 'Sesli oda aç',
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: _createRoom,
-                child: Ink(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(colors: video ? const [Pal.purple, Pal.cyan] : const [Pal.orange, Pal.pink]),
-                    boxShadow: [BoxShadow(color: (video ? Pal.purple : Pal.pink).withValues(alpha: 0.35), blurRadius: 10)],
-                  ),
-                  child: Icon(video ? Icons.videocam : Icons.mic, color: Colors.white, size: 21),
-                ),
-              ),
-            ),
-        ]),
-      ),
-    );
-  }
-
   Widget _scaffold(BuildContext context) {
     return Scaffold(
       body: Column(children: [
-          _crownRow(),
+          // Yoho'da ayrı üst çubuk yok: her sekme kendi başlığını çizer (Sesli/Görüntülü: sekmeler + taç + oda aç).
           Expanded(
-            child: GiftRibbonOverlay(
+            child: SafeArea(
+              bottom: false,
+              child: GiftRibbonOverlay(
               child: IndexedStack(index: _index, children: [
                 RoomsTab(key: _audioKey, type: 'audio', onJoinCode: _joinByCode),
                 const FeedScreen(),
@@ -269,6 +204,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const MessagesScreen(),
                 const ProfileScreen(),
               ]),
+            ),
             ),
           ),
         ]),
@@ -301,7 +237,8 @@ class RoomsTabState extends State<RoomsTab> {
   String? _error;
   String _q = '';
   Timer? _debounce;
-  String _mode = 'popular'; // friends (Takip) | popular (Popüler) | near (Yakında)
+  String _mode = 'popular'; // friends (İlgili: takip ettiklerin) | popular (Sıcak) | near (Yakında)
+  bool _fresh = false; // Sıcak > "Yeni yayıncı" süzgeci (son 30 günde açılmış hesaplar)
   bool _searching = false;
 
   void toggleSearch() => setState(() {
@@ -335,7 +272,12 @@ class RoomsTabState extends State<RoomsTab> {
   Future<void> refresh() async {
     try {
       final region = _mode == 'popular' ? null : _mode;
-      final r = await Api.get('/api/rooms', query: {'type': widget.type, if (_q.isNotEmpty) 'q': _q, if (region != null) 'region': region});
+      final r = await Api.get('/api/rooms', query: {
+        'type': widget.type,
+        if (_q.isNotEmpty) 'q': _q,
+        if (region != null) 'region': region,
+        if (_mode == 'popular' && _fresh) 'fresh': '1',
+      });
       if (!mounted) return;
       setState(() {
         _rooms = listOf(r['rooms']);
@@ -416,66 +358,189 @@ class RoomsTabState extends State<RoomsTab> {
     return {'name': name, 'seatCount': seats, 'theme': theme, if (tags.isNotEmpty) 'tags': tags};
   }
 
+  /// Yoho sekmesi: seçili olan büyük ve kalın, altında kısa çizgi; diğerleri küçük ve soluk.
   Widget _topTab(String id, String label) {
     final sel = _mode == id;
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () {
+        if (_mode == id) return;
         setState(() => _mode = id);
         refresh();
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(color: sel ? Pal.cyan : Colors.transparent, borderRadius: BorderRadius.circular(20)),
-        child: Text(label, style: TextStyle(fontSize: 16, fontWeight: sel ? FontWeight.w800 : FontWeight.w600, color: sel ? const Color(0xFF00212A) : Pal.text)),
+      // Yoho ölçüsü: yazı merkezi durum çubuğunun 21 dp altında, çizgi 39 dp'de; seçili 23 sp kalın, diğerleri 18 sp.
+      child: Padding(
+        padding: const EdgeInsets.only(right: 16),
+        child: SizedBox(
+          height: 44,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 26,
+              // Görünmez kalın kopya genişliği sabitler: sekme değişince şerit boyu/ölçeği oynamaz.
+              child: Stack(alignment: Alignment.center, children: [
+                Opacity(opacity: 0, child: Text(label, style: const TextStyle(fontSize: 23, height: 1.0, fontWeight: FontWeight.w900))),
+                Text(label, style: TextStyle(fontSize: sel ? 23 : 18, height: 1.0, fontWeight: sel ? FontWeight.w900 : FontWeight.w600, color: sel ? Pal.text : Pal.textDim)),
+              ]),
+            ),
+            const SizedBox(height: 4),
+            Container(width: 10, height: 3.5, decoration: BoxDecoration(color: sel ? Pal.text : Colors.transparent, borderRadius: BorderRadius.circular(2))),
+          ]),
+        ),
       ),
     );
   }
 
+  /// Üst satır (Yoho): İlgili · Sıcak · Yakında sekmeleri; sağda sıralama (taç), arama, oda aç ve diğer.
   Widget _topBar(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
-    final small = w < 360;
+    final m = homeMargin(w);
+    final video = widget.type == 'video';
+    Widget icon(IconData i, String tip, VoidCallback onTap, {Color? color}) => IconButton(
+          tooltip: tip,
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+          icon: Icon(i, color: color ?? Pal.text, size: 25),
+          onPressed: onTap,
+        );
+    // Sekme bloğu 44 dp + 11 dp: banner durum çubuğunun 55 dp altında başlar (Yoho).
     return Padding(
-      padding: EdgeInsets.fromLTRB(small ? 8 : 12, 6, small ? 0 : 4, 4),
-      child: Row(children: [
+      padding: EdgeInsets.fromLTRB(m, 0, m - 6, 11),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
           child: FittedBox(
             fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [_topTab('friends', 'Takip'), _topTab('popular', 'Popüler'), _topTab('near', 'Yakında')]),
+            alignment: Alignment.topLeft,
+            child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _topTab('friends', 'İlgili'),
+              _topTab('popular', 'Sıcak'),
+              _topTab('near', 'Yakında'),
+            ]),
           ),
         ),
-        IconButton(tooltip: 'Oda ara', icon: Icon(_searching ? Icons.close : Icons.search, color: Pal.cyan), onPressed: toggleSearch),
-        PopupMenuButton<String>(
-          tooltip: 'Diğer',
-          icon: const Icon(Icons.more_vert, color: Pal.text),
-          onSelected: (v) {
-            switch (v) {
-              case 'fav':
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()));
-              case 'code':
-                widget.onJoinCode?.call();
-              case 'user':
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchScreen()));
-            }
-          },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'fav', child: ListTile(leading: Icon(Icons.star), title: Text('Favoriler ve son girilenler'), dense: true)),
-            PopupMenuItem(value: 'code', child: ListTile(leading: Icon(Icons.vpn_key), title: Text('Gizli odaya kodla gir'), dense: true)),
-            PopupMenuItem(value: 'user', child: ListTile(leading: Icon(Icons.person_search), title: Text('Kullanıcı ara'), dense: true)),
-          ],
+        // Sağdaki simgeler sekme yazısıyla aynı hizada (merkez 21 dp).
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Semantics(
+              button: true,
+              label: 'Sıralamalar',
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+                child: const Padding(padding: EdgeInsets.all(6), child: CrownIcon(size: 24)),
+              ),
+            ),
+            icon(_searching ? Icons.close : Icons.search, 'Oda ara', toggleSearch),
+            Tooltip(
+              message: video ? 'Görüntülü yayın aç' : 'Sesli oda aç',
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: createRoom,
+                child: Ink(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(colors: video ? const [Pal.purple, Pal.cyan] : const [Pal.orange, Pal.pink]),
+                  ),
+                  child: Icon(video ? Icons.videocam : Icons.mic, color: Colors.white, size: 18),
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 38,
+              height: 38,
+              child: PopupMenuButton<String>(
+              tooltip: 'Diğer',
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.more_vert, color: Pal.text),
+              onSelected: (v) {
+                switch (v) {
+                  case 'fav':
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()));
+                  case 'code':
+                    widget.onJoinCode?.call();
+                  case 'user':
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchScreen()));
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'fav', child: ListTile(leading: Icon(Icons.star), title: Text('Favoriler ve son girilenler'), dense: true)),
+                PopupMenuItem(value: 'code', child: ListTile(leading: Icon(Icons.vpn_key), title: Text('Gizli odaya kodla gir'), dense: true)),
+                PopupMenuItem(value: 'user', child: ListTile(leading: Icon(Icons.person_search), title: Text('Kullanıcı ara'), dense: true)),
+              ],
+            ),
+            ),
+          ]),
         ),
+      ]),
+    );
+  }
+
+  /// Süzgeç çipleri (Yoho "Tavsiyeler · Yeni yayıncı"): yalnızca Sıcak sekmesinde.
+  Widget _filterChips(double w) {
+    final m = homeMargin(w);
+    final h = (w * 0.074).clamp(28.0, 36.0).toDouble();
+    Widget chip(String label, Widget lead, bool sel, VoidCallback onTap) => Padding(
+          padding: EdgeInsets.only(right: homeGap(w)),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(h / 2),
+            onTap: onTap,
+            child: Container(
+              height: h,
+              padding: EdgeInsets.symmetric(horizontal: h * 0.5),
+              decoration: BoxDecoration(
+                color: sel ? Pal.green.withValues(alpha: 0.16) : Pal.surface,
+                borderRadius: BorderRadius.circular(h / 2),
+                border: Border.all(color: sel ? Pal.green.withValues(alpha: 0.5) : Pal.outline),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                lead,
+                SizedBox(width: h * 0.22),
+                Text(label, style: TextStyle(fontSize: h * 0.46, fontWeight: FontWeight.w700, color: sel ? Pal.green : Pal.textDim)),
+              ]),
+            ),
+          ),
+        );
+    return Padding(
+      padding: EdgeInsets.fromLTRB(m, homeGap(w), m, homeGap(w)),
+      child: Row(children: [
+        chip('Tavsiyeler', Icon(Icons.star_rounded, size: h * 0.62, color: _fresh ? Pal.textDim : Pal.green), !_fresh, () {
+          if (!_fresh) return;
+          setState(() => _fresh = false);
+          refresh();
+        }),
+        chip('Yeni yayıncı', Icon(Icons.mic_rounded, size: h * 0.58, color: _fresh ? Pal.green : Pal.textDim), _fresh, () {
+          if (_fresh) return;
+          setState(() => _fresh = true);
+          refresh();
+        }),
       ]),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final cols = Resp.roomColumns(MediaQuery.sizeOf(context).width);
+    final w = MediaQuery.sizeOf(context).width;
+    final cols = Resp.roomColumns(w);
+    final m = homeMargin(w);
+    final gap = homeGap(w);
+    // Yoho ızgarası: kare görsel + altında ad alanı; satırlar arası ek boşluk yok (ad alanı boşluğu da sağlar).
+    final cw = (w - 2 * m - gap * (cols - 1)) / cols;
+    final ratio = cw / (cw + RoomCard.titleAreaFor(w));
     final empty = _mode == 'friends'
         ? 'Takip ettiğin kişilerin açık odası yok.'
         : _mode == 'near'
             ? 'Şehrinde açık oda yok. Profilinden şehrini girdiysen burada aynı şehirdekiler görünür.'
-            : (_q.isEmpty ? 'Şu an açık oda yok. İlk odayı sen aç!' : 'Aramanıza uyan oda yok.');
+            : _fresh
+                ? 'Şu an yeni yayıncıların açık odası yok.'
+                : (_q.isEmpty ? 'Şu an açık oda yok. İlk odayı sen aç!' : 'Aramanıza uyan oda yok.');
+    final head = <Widget>[
+      const BannerCarousel(),
+      if (_mode == 'popular') _filterChips(w) else SizedBox(height: gap),
+    ];
     final Widget body;
     if (_loading) {
       body = const Center(child: CircularProgressIndicator());
@@ -485,15 +550,15 @@ class RoomsTabState extends State<RoomsTab> {
       body = RefreshIndicator(
         onRefresh: refresh,
         child: _rooms.isEmpty
-            ? ListView(children: [const BannerCarousel(), const SizedBox(height: 60), Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(empty, textAlign: TextAlign.center, style: const TextStyle(color: Pal.textDim))))])
+            ? ListView(children: [...head, const SizedBox(height: 48), Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(empty, textAlign: TextAlign.center, style: const TextStyle(color: Pal.textDim))))])
             : CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
-                  const SliverToBoxAdapter(child: BannerCarousel()),
+                  SliverToBoxAdapter(child: Column(mainAxisSize: MainAxisSize.min, children: head)),
                   SliverPadding(
-                    padding: EdgeInsets.fromLTRB(Resp.margin(MediaQuery.sizeOf(context).width) - 6, 0, Resp.margin(MediaQuery.sizeOf(context).width) - 6, 96),
+                    padding: EdgeInsets.fromLTRB(m, 0, m, 96),
                     sliver: SliverGrid(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 0.78),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 0, crossAxisSpacing: gap, childAspectRatio: ratio),
                       delegate: SliverChildBuilderDelegate(
                         (_, i) {
                           final r = _rooms[i];
@@ -508,7 +573,8 @@ class RoomsTabState extends State<RoomsTab> {
       );
     }
     return Column(children: [
-      _topBar(context),
+      // Sekmelerin ölçüsü telefonun yazı boyutundan etkilenmez (Yoho gibi sabit).
+      MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling), child: _topBar(context)),
       if (_searching)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),

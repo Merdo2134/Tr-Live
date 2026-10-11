@@ -1660,10 +1660,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   void _membersSheet() => showViewers(context, _members, _memberSheet);
 
+  /// Başlık, koltuk adları ve alt bar telefonun yazı boyutu ayarından etkilenmez (Yoho gibi): ölçüler hiç kaymaz.
+  Widget _fixedText(Widget child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling), child: child);
+
   // ---------- Arayüz ----------
   // Koltuk ölçüleri sahne alanına göre _seatGrid içinde hesaplanır (kaydırma yok; her koltuk modu ekrana sığar).
   bool _showScoreRow = true;
-  double? _seatScale; // klavye açılınca koltuklar küçülmesin diye son ölçek saklanır
+  double _bodyH = 0; // oda gövdesinin yüksekliği (Scaffold klavyeyle küçülmez); koltuk ölçeği yalnızca buna bağlı
   bool _kbSeen = false; // klavye geri tuşuyla kapanınca yazı alanı da kapansın
   bool get _seatCompact => _seatCount >= 12; // 12+ modda koltuklar küçük (Yoho: genişliğin ~%10'u)
   double get _seatNameH => _seatCompact ? 14 : 16;
@@ -1765,14 +1768,15 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         ),
         // Takılı çerçeve yoksa WIP kademesinin çerçevesi (kodla çizilir, düzeni değiştirmez).
         if (frameUrl == null && video == null) WipFrame.around(wipLevelOf(user?['wipLevel']), seatR),
-        // Takılı avatar çerçevesi: avatarın biraz dışına taşar; dokunuşları engellemez.
+        // Takılı avatar çerçevesi: avatar çapının ×kFrameScale'i (profil ile aynı oran), avatarla aynı merkezde ve koltuk
+        // kutusunun DIŞINA taşar. Kutuya sığdırılmaz: sığdırılınca çerçevenin içi avatarı örtüp oturan kişi küçük görünüyordu.
         if (frameUrl != null && video == null)
-          IgnorePointer(
-            child: SizedBox(
-              width: seatR * 2 * 1.4,
-              height: seatR * 2 * 1.4,
-              child: AnimAsset(key: ValueKey(frameUrl), url: frameUrl, repeat: true, cache: false),
-            ),
+          Positioned(
+            left: (slotSize - seatR * 2 * kFrameScale) / 2,
+            top: (slotSize - seatR * 2 * kFrameScale) / 2,
+            width: seatR * 2 * kFrameScale,
+            height: seatR * 2 * kFrameScale,
+            child: IgnorePointer(child: AnimAsset(key: ValueKey(frameUrl), url: frameUrl, repeat: true, cache: false)),
           ),
         ]),
       ),
@@ -1807,12 +1811,11 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     }
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth;
-      if (!_inputOpen || _seatScale == null) {
-        final need = _seatAreaHeight(w, 1);
-        _seatScale = ((box.maxHeight - 120) / need).clamp(0.6, 1.0).toDouble();
-      }
-      final sc = _seatScale!;
-      final seatH = _seatAreaHeight(w, sc);
+      // Ölçek yalnızca cihaz ölçüsüne bağlı (oturmak, izleyici, klavye, PK şeridi değiştirmez).
+      final sc = _seatScaleFor(w);
+      final scoreRow = _scoreFits(seatLayoutFor(_seatCount), w * sc);
+      _showScoreRow = scoreRow;
+      final seatH = _seatAreaHeight(w, sc, score: scoreRow);
       return Stack(clipBehavior: Clip.hardEdge, children: [
         Positioned(
           left: 0,
@@ -1827,7 +1830,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               if (v < -1400) _switchRoom(1);
               if (v > 1400) _switchRoom(-1);
             },
-            child: _seatGrid(w, sc),
+            child: _fixedText(_seatGrid(w, sc)),
           ),
         ),
         if (!_inputOpen) Positioned(left: 0, right: 0, top: seatH, bottom: 0, child: _chatPanel(w)),
@@ -1853,17 +1856,32 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     });
   }
 
-  double get _labelsH => 2 + _seatNameH + (_scoreOn ? _seatScoreH + 2 : 0);
-
-  /// Koltuk alanının yüksekliği: son satırın merkezi + yarıçap + ad/puan satırları.
-  double _seatAreaHeight(double w, double sc) {
+  /// Koltuk alanının yüksekliği: son satırın merkezi + yarıçap + ad (ve sığıyorsa puan) satırları.
+  /// Puan satırının yeri, oda sahibi puanı kapatsa da ayrılır: sohbetin başladığı yer hiç oynamaz.
+  double _seatAreaHeight(double w, double sc, {required bool score}) {
     final spec = seatLayoutFor(_seatCount);
-    _showScoreRow = _scoreFits(spec, w * sc);
-    var cy = spec.topGap * w * sc + (spec.rows.first.dia * w * sc + 8) / 2;
+    // topGap: başlığın altından ilk satırdaki DAİRENİN üst kenarına (Yoho ölçümü); +8 dp dokunma payı merkeze katılmaz.
+    var cy = spec.topGap * w * sc + (spec.rows.first.dia * w * sc) / 2;
     for (final p in spec.pitch) {
       cy += p * w * sc;
     }
-    return cy + ((spec.rows.last.dia + seatCircleBoost) * w * sc + 8) / 2 + _labelsH + 8;
+    final labels = 2 + _seatNameH + (score ? _seatScoreH + 2 : 0);
+    return cy + ((spec.rows.last.dia + seatCircleBoost) * w * sc + 8) / 2 + labels + 8;
+  }
+
+  /// Koltuk ölçeği: koltuklar normalde tam Yoho ölçüsündedir (1). Yalnızca çok kısa ekranlarda, sohbete en az ~110 dp
+  /// kalacak kadar küçültülür. Hesap yalnızca oda gövdesinin (klavyeden etkilenmeyen) yüksekliğine ve ekran
+  /// genişliğine dayanır; bu yüzden koltuğa oturmak, izleyici gelmesi, klavye ya da başlıktaki rozetler boyutu değiştirmez.
+  double _seatScaleFor(double w) {
+    final bodyH = _bodyH;
+    if (bodyH <= 0) return 1.0;
+    final g = RoomGeom(w);
+    final avail = bodyH - MediaQuery.paddingOf(context).top - g.headerH - g.barH - 110;
+    final spec = seatLayoutFor(_seatCount);
+    final need = _seatAreaHeight(w, 1, score: _scoreFits(spec, w));
+    if (need <= avail) return 1.0;
+    if (avail <= 0) return 0.72;
+    return (avail / need).clamp(0.72, 1.0).toDouble();
   }
 
   /// Puan (elmas) satırı yalnızca satırlar arasında yer varsa gösterilir (çok koltuklu modlarda gizli, Yoho gibi).
@@ -1885,7 +1903,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final spec = seatLayoutFor(_seatCount);
     final tiles = <Widget>[];
     var i = 0;
-    var cy = spec.topGap * w * sc + (spec.rows.first.dia * w * sc + 8) / 2;
+    // topGap: başlığın altından ilk satırdaki DAİRENİN üst kenarına (Yoho ölçümü); +8 dp dokunma payı merkeze katılmaz.
+    var cy = spec.topGap * w * sc + (spec.rows.first.dia * w * sc) / 2;
     for (var r = 0; r < spec.rows.length; r++) {
       final row = spec.rows[r];
       // Daire %1 büyür (seatCircleBoost); artı simgesi eski daire ölçüsüne göre kalır.
@@ -1913,7 +1932,11 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     return Stack(clipBehavior: Clip.none, children: tiles);
   }
 
-  // ---------- Üst başlık (Figma) ----------
+  // ---------- Üst başlık (Yoho ölçüleri) ----------
+  // İki satır, sabit yükseklik (yalnızca ekran genişliğine bağlı): izleyici gelmesi, aile rozeti, favori düğmesi vb.
+  // başlığın boyunu değiştirmez; bu yüzden koltuklar da hiç kaymaz.
+  //  1. satır: oda kutusu (kapak + ad + ID) · ilk 3 izleyici · kişi sayısı · ••• · ⏻
+  //  2. satır: toplam elmas · favori                                   aile · taç (katkı listesi)
   Widget _glass({Key? key, required Widget child, VoidCallback? onTap, EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 10, vertical: 6), double radius = 22}) {
     return Material(
       key: key,
@@ -1923,138 +1946,232 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _roomHeader() {
+  Widget _roomHeader(double w) {
+    final g = RoomGeom(w);
+    final top = MediaQuery.paddingOf(context).top;
+    return SizedBox(
+      height: top + g.headerH,
+      child: Stack(clipBehavior: Clip.none, children: [
+        Positioned(left: 10, right: 8, top: top, height: g.row1H, child: _headerRow1(g)),
+        Positioned(left: 10, right: 8, top: top + g.row2Top, height: g.row2H, child: _headerRow2(g)),
+      ]),
+    );
+  }
+
+  Widget _headerRow1(RoomGeom g) {
+    final h = g.row1H;
     final owner = _members.where((m) => m['role'] == 'owner');
     final ownerUser = owner.isEmpty ? null : mapOf(owner.first['user']);
     final name = (_room?['name'] ?? widget.initialName).toString();
+    final cover = Api.absoluteUrl(_room?['coverUrl'] as String?);
+    final pic = h - 6;
+    final pillH = (g.w * 0.0553).clamp(20.0, 26.0).toDouble();
+    return Row(children: [
+      Expanded(
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Material(
+            color: Colors.black38,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: _roomInfo,
+              child: SizedBox(
+                height: h,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(3, 3, 10, 3),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SizedBox(
+                        width: pic,
+                        height: pic,
+                        child: cover != null
+                            ? Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => UserAvatar(user: ownerUser, radius: pic / 2))
+                            : FittedBox(child: UserAvatar(user: ownerUser, radius: pic / 2)),
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    Flexible(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          if (_room?['hidden'] == true) Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.visibility_off, size: h * 0.3)),
+                          if (_room?['locked'] == true) Padding(padding: const EdgeInsets.only(right: 3), child: Icon(Icons.lock, size: h * 0.3, color: Colors.orangeAccent)),
+                          Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: h * 0.36, height: 1.15))),
+                        ]),
+                        Text(
+                          'ID:${(_room?['roomNumber'] ?? ownerUser?['publicId'] ?? '').toString()}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: h * 0.27, height: 1.15, color: Colors.white70),
+                        ),
+                      ]),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 6),
+      _viewerClub(h * 0.62),
+      // İzleyici sayısı; dokununca "İzleyiciler" listesi.
+      _glass(
+        key: _viewersKey,
+        onTap: _membersSheet,
+        radius: pillH / 2,
+        padding: EdgeInsets.symmetric(horizontal: pillH * 0.4),
+        child: SizedBox(
+          height: pillH,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.person, size: pillH * 0.62),
+            const SizedBox(width: 2),
+            Text('${_members.length}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: pillH * 0.52)),
+          ]),
+        ),
+      ),
+      InkWell(
+        customBorder: const CircleBorder(),
+        onTap: _moreMenu,
+        child: SizedBox(width: h * 0.95, height: h, child: Icon(Icons.more_horiz, size: h * 0.62)),
+      ),
+      InkWell(
+        customBorder: const CircleBorder(),
+        onTap: _exitMenu,
+        child: SizedBox(width: h * 0.95, height: h, child: Icon(Icons.power_settings_new, size: h * 0.62)),
+      ),
+    ]);
+  }
+
+  Widget _headerRow2(RoomGeom g) {
+    final h = g.row2H;
     var total = BigInt.zero;
     for (final v in _scores.values) {
       total += BigInt.tryParse(v) ?? BigInt.zero;
     }
     final isOwnerHere = _room?['ownerId']?.toString() == Session.id;
-    final cover = Api.absoluteUrl(_room?['coverUrl'] as String?);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(10, MediaQuery.paddingOf(context).top + 4, 10, 0),
-      child: Column(children: [
-        Row(children: [
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: _glass(
-              onTap: _roomInfo,
-              padding: const EdgeInsets.fromLTRB(4, 4, 14, 4),
-              radius: 28,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                cover != null
-                    ? Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.amber, width: 2)),
-                        clipBehavior: Clip.antiAlias,
-                        child: Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
-                      )
-                    : UserAvatar(user: ownerUser, radius: 20),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      if (_room?['hidden'] == true) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.visibility_off, size: 14)),
-                      if (_room?['locked'] == true) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.lock, size: 14, color: Colors.orangeAccent)),
-                      Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-                    ]),
-                    Text('ID:${(_room?['roomNumber'] ?? ownerUser?['publicId'] ?? '').toString()}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white70)),
-                  ]),
+    final fs = h * 0.6;
+    final logo = Api.absoluteUrl(_myFamily?['logoUrl'] as String?);
+    // shrink: yalnızca Flexible içindeki çipte (aile adı daralabilsin); sınırsız genişlikte Flexible kullanılamaz.
+    Widget chip(Widget child, {VoidCallback? onTap, Color? color, BoxBorder? border, bool shrink = false}) => InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(h / 2),
+          child: Container(
+            height: h,
+            padding: EdgeInsets.symmetric(horizontal: h * 0.45),
+            decoration: BoxDecoration(color: color ?? Colors.black38, borderRadius: BorderRadius.circular(h / 2), border: border),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [if (shrink) Flexible(child: child) else child]),
+          ),
+        );
+    return Row(children: [
+      chip(Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.diamond, size: h * 0.7, color: Colors.lightBlueAccent),
+        const SizedBox(width: 3),
+        Text(fmtNumber(total.toString()), style: TextStyle(fontSize: fs, fontWeight: FontWeight.w700, height: 1.0)),
+      ])),
+      if (!isOwnerHere) ...[
+        const SizedBox(width: 6),
+        chip(
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(_fav ? Icons.star : Icons.star_border, size: h * 0.7, color: Colors.white),
+            const SizedBox(width: 3),
+            Text(_fav ? 'Favoride' : 'Favori', style: TextStyle(fontSize: fs, fontWeight: FontWeight.w800, color: Colors.white, height: 1.0)),
+          ]),
+          onTap: _toggleFavorite,
+          color: _fav ? Colors.orange.shade800 : Colors.orange,
+        ),
+      ],
+      // Aile kısayolu (yalnızca ailesi olanlarda); taç her durumda sağ kenarda kalır.
+      if (_myFamily != null)
+        Expanded(
+          child: Align(
+          alignment: Alignment.centerRight,
+          child: chip(
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              CircleAvatar(
+                radius: h * 0.36,
+                backgroundColor: Colors.amber,
+                backgroundImage: logo != null ? NetworkImage(logo) : null,
+                child: logo == null ? Icon(Icons.favorite, size: h * 0.45, color: Colors.black87) : null,
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: g.w * 0.2),
+                  child: Text((_myFamily?['name'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: fs, fontWeight: FontWeight.w800, fontStyle: FontStyle.italic, height: 1.0)),
                 ),
-              ]),
-            ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // İzleyici sayısı üstte; dokununca "İzleyiciler" listesi.
-          _glass(key: _viewersKey, onTap: _membersSheet, radius: 18, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.person, size: 18), const SizedBox(width: 4), Text('${_members.length}', style: const TextStyle(fontWeight: FontWeight.w800))])),
-          const SizedBox(width: 6),
-          InkWell(
-            customBorder: const CircleBorder(),
-            onTap: _exitMenu,
-            child: const CircleAvatar(radius: 18, backgroundColor: Colors.black38, child: Icon(Icons.close, size: 20)),
-          ),
-        ]),
-        const SizedBox(height: 4),
-        Row(children: [
-          _glass(radius: 14, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.diamond, size: 14, color: Colors.lightBlueAccent), const SizedBox(width: 4), Text(fmtNumber(total.toString()), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700))])),
-          const SizedBox(width: 6),
-          if (!isOwnerHere)
-            InkWell(
-              onTap: _toggleFavorite,
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: _fav ? Colors.orange.shade800 : Colors.orange, borderRadius: BorderRadius.circular(14)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(_fav ? Icons.star : Icons.star_border, size: 14, color: Colors.white), const SizedBox(width: 4), Text(_fav ? 'Favoride' : 'Favori', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white))]),
               ),
-            ),
-          const Spacer(),
-          // Aile kısayolu (yalnızca ailesi olanlarda); dokununca aile ekranı.
-          if (_myFamily != null)
-            InkWell(
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FamilyScreen())),
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(4, 3, 10, 3),
-                decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.amber.withValues(alpha: 0.6))),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  CircleAvatar(
-                    radius: 9,
-                    backgroundColor: Colors.amber,
-                    backgroundImage: Api.absoluteUrl(_myFamily?['logoUrl'] as String?) != null ? NetworkImage(Api.absoluteUrl(_myFamily?['logoUrl'] as String?)!) : null,
-                    child: Api.absoluteUrl(_myFamily?['logoUrl'] as String?) == null ? const Icon(Icons.favorite, size: 11, color: Colors.black87) : null,
-                  ),
-                  const SizedBox(width: 5),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 90),
-                    child: Text((_myFamily?['name'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, fontStyle: FontStyle.italic)),
-                  ),
-                ]),
-              ),
-            ),
-        ]),
-        // Taç = Katkı Listesi, aile kısayolunun hemen altında sağda.
-        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-          _viewerClub(),
-          InkWell(
-            onTap: () => showContributions(context, widget.roomId),
-            child: const Padding(padding: EdgeInsets.all(2), child: CrownIcon(size: 26)),
+            ]),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('Aile')), body: const FamilyScreen()))),
+            border: Border.all(color: Colors.amber.withValues(alpha: 0.6)),
+            shrink: true,
           ),
+          ),
+        )
+      else
+        const Spacer(),
+      const SizedBox(width: 4),
+      // Taç = Katkı Listesi (Yoho'daki "Haftalık" rozetinin yeri).
+      InkWell(
+        onTap: () => showContributions(context, widget.roomId),
+        child: CrownIcon(size: h * 1.25),
+      ),
+    ]);
+  }
+
+  /// ••• : paylaş, oda bilgisi, şikâyet, küçült.
+  void _moreMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.share), title: const Text('Odayı paylaş'), onTap: () { Navigator.pop(c); _shareRoom(); }),
+          ListTile(leading: const Icon(Icons.info_outline), title: const Text('Oda bilgisi'), onTap: () { Navigator.pop(c); _roomInfo(); }),
+          if (_room?['ownerId']?.toString() != Session.id)
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('Odayı şikâyet et'),
+              onTap: () { Navigator.pop(c); reportDialog(context, kind: 'room', roomId: widget.roomId); },
+            ),
+          ListTile(leading: const Icon(Icons.close_fullscreen), title: const Text('Küçült'), onTap: () { Navigator.pop(c); RoomDock.minimize(); }),
         ]),
-      ]),
+      ),
     );
   }
 
-  /// İzleyici kulübesi: odadaki en yüksek seviyeli ilk 3 kullanıcı, üst üste binen yuvarlak ikonlar.
-  Widget _viewerClub() {
+  /// İzleyici kulübesi: odadaki en yüksek seviyeli ilk 3 kullanıcı, üst üste binen yuvarlak ikonlar (1. satırda, sabit boy).
+  Widget _viewerClub(double size) {
     final ownerId = _room?['ownerId']?.toString();
     final list = _members.where((m) => m['userId']?.toString() != ownerId).toList()
       ..sort((a, b) => (((mapOf(b['user'])?['coinLevel']) as num?) ?? 0).compareTo(((mapOf(a['user'])?['coinLevel']) as num?) ?? 0));
     final top = list.take(3).toList();
     if (top.isEmpty) return const SizedBox.shrink();
-    return InkWell(
-      onTap: _membersSheet,
-      borderRadius: BorderRadius.circular(20),
-      child: SizedBox(
-        width: 24.0 * top.length + 12,
-        height: 36,
-        child: Stack(children: [
-          for (var i = top.length - 1; i >= 0; i--)
-            Positioned(
-              left: 24.0 * i,
-              top: 2,
-              child: Container(
-                padding: const EdgeInsets.all(1.5),
-                decoration: const BoxDecoration(color: Colors.amber, shape: BoxShape.circle),
-                child: UserAvatar(user: mapOf(top[i]['user']), radius: 14),
+    final step = size * 0.62;
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: InkWell(
+        onTap: _membersSheet,
+        borderRadius: BorderRadius.circular(size),
+        child: SizedBox(
+          width: step * (top.length - 1) + size,
+          height: size,
+          child: Stack(children: [
+            for (var i = top.length - 1; i >= 0; i--)
+              Positioned(
+                left: step * i,
+                top: 0,
+                width: size,
+                height: size,
+                child: Container(
+                  padding: const EdgeInsets.all(1.2),
+                  decoration: const BoxDecoration(color: Colors.amber, shape: BoxShape.circle),
+                  child: FittedBox(child: UserAvatar(user: mapOf(top[i]['user']), radius: size / 2)),
+                ),
               ),
-            ),
-        ]),
+          ]),
+        ),
       ),
     );
   }
@@ -2154,11 +2271,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   Widget _bottomBar() {
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth;
-      final d = (w * 0.100).clamp(38.0, 50.0).toDouble();
-      final barH = d + 18;
+      // Yoho ölçüleri: düğme çapı genişliğin %8,4'ü (hediye %9,4), merkezler barın ortasında.
+      final g = RoomGeom(w);
+      final d = g.btn;
+      final barH = g.barH;
       Widget at(double cx, Widget child, {double? size}) {
         final sz = size ?? d;
-        return Positioned(left: cx * w - sz / 2, top: (barH - sz) / 2 - 2, width: sz, height: sz, child: child);
+        return Positioned(left: cx * w - sz / 2, top: (barH - sz) / 2, width: sz, height: sz, child: child);
       }
 
       Widget circle(IconData icon, String tip, VoidCallback? onTap, {Color? color}) => Tooltip(
@@ -2181,7 +2300,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF8B5CF6), Color(0xFF6366F1), Color(0xFF38BDF8)]),
               boxShadow: [BoxShadow(color: Color(0x667C3AED), blurRadius: 10)],
             ),
-            child: Icon(Icons.redeem, color: Colors.white, size: d * 0.56),
+            child: Icon(Icons.redeem, color: Colors.white, size: g.giftBtn * 0.54),
           ),
         ),
       );
@@ -2209,7 +2328,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
       const step = 0.1435;
       final right = <Widget>[
-        at(0.5, gift, size: d * 1.08),
+        at(0.5, gift, size: g.giftBtn),
         at(0.5 + step, mail),
         at(0.5 + step * 2, games),
         at(0.5 + step * 3, menu),
@@ -2228,12 +2347,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           at(0.5 - step, circle(Icons.sentiment_satisfied_alt, 'Emoji', _chatOpen ? _emojiSheet : null)),
         ];
       } else {
-        final pillH = (w * 0.087).clamp(34.0, 44.0).toDouble();
+        final pillH = (w * 0.087).clamp(32.0, 42.0).toDouble();
         left = [
           Positioned(
             left: w * 0.025,
             width: w * 0.394,
-            top: (barH - pillH) / 2 - 2,
+            top: (barH - pillH) / 2,
             height: pillH,
             child: Material(
               color: Colors.black.withValues(alpha: 0.32),
@@ -2252,7 +2371,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           ),
         ];
       }
-      return SizedBox(height: barH + 6, child: Stack(clipBehavior: Clip.none, children: [...left, ...right]));
+      return SizedBox(height: barH, child: Stack(clipBehavior: Clip.none, children: [...left, ...right]));
     });
   }
 
@@ -2276,24 +2395,20 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 imageUrl: _room?['themeImageUrl']?.toString(),
                 child: GiftRibbonOverlay(
                 roomId: widget.roomId,
-                child: Stack(key: _stageKey, fit: StackFit.expand, children: [
+                // Oda gövdesinin ölçüsü klavyeden etkilenmez (resizeToAvoidBottomInset: false); koltuk ölçeği buna bağlı.
+                child: LayoutBuilder(builder: (context, box) {
+                // Klavye açılınca alt sistem çubuğu payı (appFrame SafeArea) düşer; çıkarılınca değer sabit kalır.
+                _bodyH = box.maxHeight - MediaQuery.viewPaddingOf(context).bottom;
+                final w = box.maxWidth;
+                final g = RoomGeom(w);
+                return Stack(key: _stageKey, fit: StackFit.expand, children: [
                 Padding(
                 padding: EdgeInsets.only(bottom: _inputOpen ? MediaQuery.viewInsetsOf(context).bottom : 0),
                 child: Column(children: [
                   Stack(children: [
-                    _roomHeader(),
+                    _fixedText(_roomHeader(w)),
                     if (_inputOpen) Positioned.fill(child: GestureDetector(onTap: _closeInput, child: const ColoredBox(color: Color(0xB8000000)))),
                   ]),
-                  if (_lkError != null)
-                    Material(
-                      color: Colors.red.shade900,
-                      child: ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.error_outline),
-                        title: Text('Ses/görüntü bağlanamadı: $_lkError', style: const TextStyle(fontSize: 12)),
-                        trailing: TextButton(onPressed: _connectLivekit, child: const Text('Tekrar')),
-                      ),
-                    ),
                   if (_pk != null)
                     PkBanner(
                       pk: _pk!,
@@ -2301,26 +2416,45 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                       onCancel: _myRole == 'owner' ? () => guard(context, () => Api.post('/api/pk/${_pk!['id']}/cancel')) : null,
                     ),
                   Expanded(child: _stageBody()),
-                  if (_inputOpen) _inputBar() else _bottomBar(),
+                  if (_inputOpen) _inputBar() else _fixedText(_bottomBar()),
                 ]),
               ),
+                // Ses bağlantısı hatası düzeni itmesin: başlığın altında yüzen şerit.
+                if (_lkError != null)
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    top: MediaQuery.paddingOf(context).top + g.headerH + 2,
+                    child: Material(
+                      color: Colors.red.shade900,
+                      borderRadius: BorderRadius.circular(12),
+                      child: ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.error_outline),
+                        title: Text('Ses/görüntü bağlanamadı: $_lkError', style: const TextStyle(fontSize: 12)),
+                        trailing: TextButton(onPressed: _connectLivekit, child: const Text('Tekrar')),
+                      ),
+                    ),
+                  ),
                 Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.36, child: EntranceStrip(queue: _entrance)),
                 MusicBubble(onOpen: _openMusic),
                 for (final f in _flights)
                   _GiftFlight(key: ValueKey(f.id), data: f, onDone: () {
                     if (mounted) setState(() => _flights.removeWhere((x) => x.id == f.id));
                   }),
-                if (_bags.isNotEmpty)
+                // Şanslı çanta: Yoho'daki gibi sağda, alt barın hemen üstünde (koltukların üstüne binmez).
+                if (_bags.isNotEmpty && !_inputOpen)
                   Positioned(
-                    left: 12,
-                    top: MediaQuery.paddingOf(context).top + 100,
+                    right: 8,
+                    bottom: g.barH + 10,
                     child: BagEnvelope(
                       count: _bags.length,
                       isSuper: _bags.any((b) => b['kind'] == 'super'),
                       onTap: () => showBagClaim(context, widget.roomId, _bags.first),
                     ),
                   ),
-                ]))),
+                ]);
+                }))),
       ),
       ),
     );

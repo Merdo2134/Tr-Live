@@ -57,12 +57,14 @@ class _BannerCarouselState extends State<BannerCarousel> {
   @override
   Widget build(BuildContext context) {
     if (_items.isEmpty) return const SizedBox.shrink();
+    // Yoho: kenarlardan genişliğin %3,7'si içeride, en/boy ≈ 3:1, köşeler hafif yuvarlak.
+    final m = homeMargin(MediaQuery.sizeOf(context).width);
     return Padding(
-      padding: EdgeInsets.fromLTRB(Resp.margin(MediaQuery.sizeOf(context).width) - 6, 0, Resp.margin(MediaQuery.sizeOf(context).width) - 6, 10),
+      padding: EdgeInsets.fromLTRB(m, 0, m, 0),
       child: AspectRatio(
-        aspectRatio: 2.4,
+        aspectRatio: 3.0,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(10),
           child: Stack(children: [
             PageView.builder(
               controller: _ctl,
@@ -78,16 +80,16 @@ class _BannerCarouselState extends State<BannerCarousel> {
             ),
             if (_items.length > 1)
               Positioned(
-                bottom: 8,
+                bottom: 5,
                 left: 0,
                 right: 0,
                 child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   for (var i = 0; i < _items.length; i++)
                     Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                      width: i == _page % _items.length ? 14 : 6,
-                      height: 6,
-                      decoration: BoxDecoration(color: i == _page % _items.length ? Pal.cyan : Colors.white54, borderRadius: BorderRadius.circular(3)),
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(color: i == _page % _items.length ? Colors.white : Colors.white38, shape: BoxShape.circle),
                     ),
                 ]),
               ),

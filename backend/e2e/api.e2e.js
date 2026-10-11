@@ -1274,3 +1274,25 @@ test('ADMIN_USERNAMES: listedeki kullanıcı kayıtta yönetici olur, diğerleri
   const other = await register('notboss');
   status(await api('GET', '/api/admin/app-config', { token: other.token }), 403);
 });
+
+test('oda listesi: kart avatarları (gizli/hayalet hariç) ve "Yeni yayıncı" süzgeci', { skip, timeout: 30000 }, async () => {
+  const o = await register('cardO');
+  const v = await register('cardV');
+  const created = await api('POST', '/api/rooms', { token: o.token, body: { name: 'Kart Odası' } });
+  status(created, 201);
+  const room = created.body.room.id;
+  await sql(`UPDATE users SET avatar_url = '/media/00000000-0000-4000-8000-000000000001.png' WHERE id = ANY($1::uuid[])`, [[o.id, v.id]]);
+  ok(await api('POST', `/api/rooms/${room}/join`, { token: v.token, body: {} }));
+  const find = async (q = '') => (await api('GET', `/api/rooms?type=audio${q}`, { token: o.token })).body.rooms.find((r) => r.id === room);
+  let r = await find();
+  assert.ok(r, 'oda listede');
+  assert.equal(r.avatars.length, 2, 'sahip + dinleyici');
+  await sql('UPDATE users SET is_hidden = TRUE WHERE id = $1', [v.id]);
+  r = await find();
+  assert.equal(r.avatars.length, 1, 'gizli kullanıcının avatarı kartta yok');
+  await sql('UPDATE users SET is_hidden = FALSE WHERE id = $1', [v.id]);
+  assert.ok(await find('&fresh=1'), 'yeni hesabın odası "Yeni yayıncı"da');
+  await sql(`UPDATE users SET created_at = NOW() - INTERVAL '90 days' WHERE id = $1`, [o.id]);
+  assert.equal(await find('&fresh=1'), undefined, 'eski hesap "Yeni yayıncı"da değil');
+  assert.ok(await find(), 'normal listede duruyor');
+});

@@ -66,8 +66,10 @@ app.get(['/health', '/api/health'], async (req, res) => {
   try {
     await query('SELECT 1');
     res.json({ ok: true, service: 'tr-live-backend', time: new Date().toISOString() });
-  } catch {
-    res.status(503).json({ ok: false });
+  } catch (e) {
+    // Sebep yalnızca günlüğe yazılır (adres/şifre ayrıntısı dışarı verilmez).
+    console.error('[sağlık] veritabanı yanıt vermiyor:', dbDownReason(e) ?? e.message);
+    res.status(503).json({ ok: false, db: false });
   }
 });
 
@@ -146,8 +148,37 @@ const PG_ERRORS = {
   '40001': [409, 'İşlem çakıştı, lütfen tekrar deneyin.'],
 };
 
+// Veritabanına ulaşılamıyor / şifre yanlış / sertifika reddedildi: kullanıcıya "sunucu hatası" yerine ne olduğunu söyle,
+// günlüğe de sebebi açıkça yaz (Render Logs'ta görülsün).
+const DB_DOWN = {
+  '28P01': 'veritabanı şifresi yanlış (DATABASE_URL içindeki şifre güncel mi?)',
+  '28000': 'veritabanı kullanıcısına izin verilmedi',
+  '3D000': 'veritabanı adı bulunamadı (DATABASE_URL sonundaki ad)',
+  '53300': 'veritabanı bağlantı sınırı doldu',
+  '57P01': 'veritabanı kapatıldı/yeniden başlatılıyor',
+  '57P03': 'veritabanı henüz açılmadı',
+  ECONNREFUSED: 'veritabanı bağlantıyı reddetti (servis kapalı olabilir)',
+  ENOTFOUND: 'veritabanı adresi bulunamadı (DATABASE_URL)',
+  EAI_AGAIN: 'veritabanı adresi çözümlenemedi',
+  ETIMEDOUT: 'veritabanına bağlanırken zaman aşımı',
+  ECONNRESET: 'veritabanı bağlantısı koptu',
+  SELF_SIGNED_CERT_IN_CHAIN: 'veritabanı sertifikası reddedildi (DATABASE_SSL=no-verify yapın)',
+  DEPTH_ZERO_SELF_SIGNED_CERT: 'veritabanı sertifikası reddedildi (DATABASE_SSL=no-verify yapın)',
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'veritabanı sertifikası doğrulanamadı (DATABASE_SSL=no-verify yapın)',
+};
+function dbDownReason(error) {
+  if (DB_DOWN[error?.code]) return DB_DOWN[error.code];
+  if (/Connection terminated|timeout exceeded when trying to connect|connect ETIMEDOUT/i.test(error?.message ?? '')) return 'veritabanına bağlanılamadı';
+  return null;
+}
+
 // eslint-disable-next-line no-unused-vars
 app.use((error, req, res, next) => {
+  const down = dbDownReason(error);
+  if (down) {
+    console.error(`[veritabanı] ${req.method} ${req.originalUrl}: ${down} — ${error.message}`);
+    return res.status(503).json({ message: 'Sunucu şu an veritabanına bağlanamıyor. Lütfen biraz sonra tekrar deneyin.', code: 'db_unavailable' });
+  }
   if (error.type === 'entity.parse.failed') return res.status(400).json({ message: 'Geçersiz JSON.' });
   if (error.type === 'entity.too.large') return res.status(413).json({ message: 'İstek çok büyük.' });
   if (error.status && error.status >= 400 && error.status < 500) return res.status(error.status).json({ message: error.message });

@@ -129,6 +129,10 @@ ThemeData buildAppTheme() {
 }
 
 /// Ekran genişliğine göre ölçüler: telefon, katlanabilir/küçük tablet ve tablet için tek kural.
+/// Ana sayfa kenar boşluğu (Yoho: genişliğin %3,7'si) ve kartlar arası boşluk (%2).
+double homeMargin(double w) => (w * 0.037).clamp(10.0, 24.0).toDouble();
+double homeGap(double w) => (w * 0.0202).clamp(6.0, 12.0).toDouble();
+
 class Resp {
   static double width(BuildContext c) => MediaQuery.sizeOf(c).width;
 

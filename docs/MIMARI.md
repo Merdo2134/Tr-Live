@@ -86,6 +86,20 @@ mobile/lib/
 
 Tasarım ölçüleri: `widgets/app_theme.dart` (renk `Pal`, boşluk `Gap`, köşe `Rad`), koltuk yerleşimi `widgets/seat_picker.dart` (`seatLayouts`, ekran genişliğine oranlı).
 
+Yoho ölçüleri (ekran genişliği w'ye oranla; Yoho ile yan yana ekran görüntüsünden, v2.39):
+
+| Öğe | Değer |
+|---|---|
+| Oda başlığı 1. satır | durum çubuğunun hemen altı, yükseklik 0,093w |
+| Oda başlığı 2. satır | üst kenarı 0,113w, yükseklik 0,046w; başlık toplamı ≈ 0,161w (`RoomGeom`) |
+| 30 mikrofon | daire 0,0937w · sütun merkezleri 0,075 + k×0,170 · satır aralığı 0,165w · ilk daire üst kenarı başlığın 0,100w altı · numara merkezi daire merkezinin 0,080w altı |
+| Alt bar | yükseklik 0,122w, düğme 0,084w, hediye 0,094w, merkezler 0,5 + k×0,1435 |
+| Çerçeve | avatar çapının ×1,6'sı (`kFrameScale`), koltuk kutusunun dışına taşar |
+| Ana sayfa | kenar 0,037w · kart arası 0,020w · sekme yazısı merkezi durum çubuğunun 21 dp altı · banner 55 dp'de, 3:1 · kart kare 0,453w + ad alanı 0,104w |
+
+Koltuk ölçeği yalnızca ekran genişliğine (çok kısa ekranlarda gövde yüksekliğine) bağlıdır; oturmak, izleyici, klavye,
+başlıktaki rozetler hiçbir ölçüyü değiştirmez. Başlık, koltuk adları, alt bar ve oda kartları telefonun yazı boyutundan etkilenmez.
+
 ## Backend dosya yapısı
 
 ```

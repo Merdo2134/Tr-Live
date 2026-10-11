@@ -89,12 +89,36 @@ const Map<int, SeatLayoutSpec> seatLayouts = {
   12: SeatLayoutSpec(0.104, [SeatRowSpec(_x2Top, 0.1025), SeatRowSpec(_x5, 0.1025), SeatRowSpec(_x5, 0.1025)], [0.181, 0.182]),
   15: SeatLayoutSpec(0.103, [SeatRowSpec(_x5, 0.1025), SeatRowSpec(_x5, 0.1025), SeatRowSpec(_x5, 0.1025)], [0.213, 0.212]),
   20: SeatLayoutSpec(0.103, [SeatRowSpec(_x5, 0.1025), SeatRowSpec(_x5, 0.1025), SeatRowSpec(_x5, 0.1025), SeatRowSpec(_x5, 0.1025)], [0.205, 0.205, 0.205]),
-  30: SeatLayoutSpec(0.100, [SeatRowSpec(_x6, 0.093), SeatRowSpec(_x6, 0.093), SeatRowSpec(_x6, 0.093), SeatRowSpec(_x6, 0.093), SeatRowSpec(_x6, 0.093)], [0.181, 0.181, 0.181, 0.181]),
+  // 30: Yoho ekran görüntüsünden (Ekim 2026) yeniden ölçüldü — daire 0,0937 · satır arası 0,165 · ilk satır üst kenarı başlığın 0,100 altı.
+  30: SeatLayoutSpec(0.100, [SeatRowSpec(_x6, 0.0937), SeatRowSpec(_x6, 0.0937), SeatRowSpec(_x6, 0.0937), SeatRowSpec(_x6, 0.0937), SeatRowSpec(_x6, 0.0937)], [0.165, 0.165, 0.165, 0.165]),
 };
+
+/// Oda ekranının sabit ölçüleri (Yoho ekran görüntülerinden, ekran genişliğine oranla; dp sınırlarıyla).
+/// Yalnızca ekran genişliğine bağlıdır: koltuğa oturmak, izleyici gelmesi, klavye, aile/favori rozetleri,
+/// PK şeridi hiçbir ölçüyü değiştirmez.
+class RoomGeom {
+  final double w;
+  const RoomGeom(this.w);
+
+  /// Başlık 1. satır (oda kutusu, izleyiciler, •••, ⏻): durum çubuğunun hemen altında.
+  double get row1H => (w * 0.093).clamp(34.0, 46.0).toDouble();
+  /// Başlık 2. satırın üst kenarı (durum çubuğunun altından).
+  double get row2Top => row1H + (w * 0.020).clamp(6.0, 10.0).toDouble();
+  /// Başlık 2. satır (elmas, favori, aile, taç).
+  double get row2H => (w * 0.046).clamp(17.0, 22.0).toDouble();
+  /// Başlığın toplam yüksekliği (durum çubuğu hariç). Koltuk alanı tam bunun altından başlar.
+  double get headerH => row2Top + row2H + 1;
+  /// Alt bar yüksekliği; düğme merkezleri barın ortasında (Yoho: ekran altından genişliğin %6,1'i yukarıda).
+  double get barH => (w * 0.122).clamp(46.0, 58.0).toDouble();
+  /// Alt bar yuvarlak düğme çapı ve ortadaki hediye düğmesi.
+  double get btn => (w * 0.084).clamp(32.0, 44.0).toDouble();
+  double get giftBtn => (w * 0.094).clamp(36.0, 48.0).toDouble();
+}
 
 /// Koltuk dairesine her modda eklenen pay (sahne genişliğinin oranı). Merkezler aynı kalır, daire etrafına büyür;
 /// içindeki "+" simgesi bu paydan etkilenmez.
-const double seatCircleBoost = 0.01;
+// v2.38.2: Yoho ile yan yana ölçümde %1'lik pay daireleri Yoho'dan ~%9 büyük gösteriyordu; kaldırıldı (birebir ölçü).
+const double seatCircleBoost = 0.0;
 
 /// Bilinmeyen sayı gelirse en yakın büyük mod kullanılır.
 SeatLayoutSpec seatLayoutFor(int n) {

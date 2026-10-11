@@ -69,13 +69,21 @@ router.get('/', optionalAuth, async (req, res) => {
   const like = q ? `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
   const region = ['tr', 'other', 'friends', 'near'].includes(req.query.region) ? req.query.region : null;
   if ((region === 'friends' || region === 'near') && !req.user) throw fail('Arkadaşları görmek için giriş yapın.', 401);
+  // "Yeni yayıncı" süzgeci (Yoho): hesabı son 30 günde açılmış kişilerin odaları.
+  const fresh = req.query.fresh === '1' || req.query.fresh === 'true';
   const r = await query(
     `SELECT r.id AS room_id, r.room_number, r.cover_url, r.announcement, r.theme_image_url,
        (SELECT COUNT(*)::int FROM lucky_bags lb WHERE lb.room_id = r.id AND lb.status = 'open' AND lb.expires_at > NOW()) AS bag_count, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
        (r.password_hash IS NOT NULL) AS locked, r.theme, ${USER_PUBLIC_COLUMNS},
        -- Hayalet (SWIP) dinleyiciler sayılmaz; mikrofona çıkınca görünür olurlar.
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND (rm.microphone OR rm.user_id NOT IN (SELECT id FROM active_ghosts))) AS member_count,
-       (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.microphone = TRUE) AS mic_count
+       (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.microphone = TRUE) AS mic_count,
+       -- Kartta üst üste binen üye avatarları (Yoho): önce mikrofondakiler; gizli kullanıcı ve hayalet dinleyici hariç.
+       (SELECT COALESCE(json_agg(a.avatar_url), '[]'::json) FROM (
+          SELECT mu.avatar_url FROM room_members rm2 JOIN users mu ON mu.id = rm2.user_id
+          WHERE rm2.room_id = r.id AND mu.account_status = 'active' AND mu.is_hidden = FALSE AND mu.avatar_url IS NOT NULL
+            AND (rm2.microphone OR rm2.user_id NOT IN (SELECT id FROM active_ghosts))
+          ORDER BY rm2.microphone DESC, rm2.joined_at LIMIT 8) a) AS avatars
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS}
      WHERE r.is_active = TRUE AND ($1::text IS NULL OR r.room_type = $1) AND ($2::text IS NULL OR $2 = ANY(r.tags))
        AND (r.is_hidden = FALSE OR r.owner_id = $3::uuid OR EXISTS (SELECT 1 FROM room_members hm WHERE hm.room_id = r.id AND hm.user_id = $3::uuid))
@@ -86,14 +94,16 @@ router.get('/', optionalAuth, async (req, res) => {
             OR ($5 = 'other' AND lower(COALESCE(u.country, '')) NOT IN ('türkiye', 'turkiye', 'turkey', 'tr', 'türkiye cumhuriyeti'))
             OR ($5 = 'friends' AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $3::uuid AND f.followed_id = r.owner_id))
             OR ($5 = 'near' AND EXISTS (SELECT 1 FROM users me WHERE me.id = $3::uuid AND me.city IS NOT NULL AND lower(me.city) = lower(COALESCE(u.city, '')))))
+       AND ($6::boolean IS FALSE OR u.created_at > NOW() - INTERVAL '30 days')
      ORDER BY member_count DESC, r.created_at DESC LIMIT 100`,
-    [type, tag, req.user?.id ?? null, like, region],
+    [type, tag, req.user?.id ?? null, like, region, fresh],
   );
   // Kullanıcı sütunlarındaki "id" (= sahip kimliği) oda kimliğiyle karışmasın diye oda alanları takma adla alınır.
   res.json({
     rooms: r.rows.map((x) => ({
       id: x.room_id, roomNumber: x.room_number ?? null, coverUrl: x.cover_url ?? null, bagCount: x.bag_count, name: x.room_name, roomType: x.room_type, seatCount: x.seat_count, ownerId: x.owner_id, createdAt: x.room_created_at,
       memberCount: x.member_count, micCount: x.mic_count, tags: x.tags ?? [], locked: x.locked, theme: x.theme ?? 'default', themeImageUrl: x.theme_image_url ?? null,
+      avatars: Array.isArray(x.avatars) ? x.avatars : [],
       owner: publicUser(x, req.user?.id ?? null),
     })),
   });
