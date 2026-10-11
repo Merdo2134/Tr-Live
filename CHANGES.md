@@ -1,3 +1,7 @@
+## v2.39.2
+- Veritabanı bağlantı havuzu 10'dan 5'e indi (Aiven Free toplam 20 bağlantı veriyor; Render güncelleme sırasında eski ve yeni sunucu birlikte açık kalınca sınır aşılıp "veritabanına bağlanamıyor" hatası çıkabiliyordu). `DATABASE_POOL_MAX` ile ayarlanır. Bağlantı 15 sn'de alınamazsa istek askıda kalmaz.
+- Bağlantı hatası mesajında kısa hata kodu görünür (ör. "kod: 53300" = bağlantı sınırı, "28P01" = şifre yanlış).
+
 ## v2.39.1
 - Sunucu veritabanına ulaşamadığında (şifre değişmiş, servis kapalı, adres yanlış, sertifika reddi) uygulama artık "Sunucu hatası" yerine "Sunucu şu an veritabanına bağlanamıyor" der; Render günlüğüne de sebep açıkça yazılır (`[veritabanı] ... veritabanı şifresi yanlış (DATABASE_URL içindeki şifre güncel mi?)`). `/health` bu durumda 503 döner.
 

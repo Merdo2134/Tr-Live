@@ -37,6 +37,7 @@ ay ortasında biter ve veritabanı ay sonuna kadar kapanır. Uygun olan: kotası
 | `DATABASE_SSL` | `no-verify` (varsayılan: şifreli, sertifika doğrulanmaz) · `true` (tam doğrulama) · `false` (şifresiz, yalnızca yerel) |
 | `DATABASE_CA` | İsteğe bağlı: sağlayıcının CA sertifikası (Aiven → "CA certificate"); verilirse sertifika tam doğrulanır. |
 | `ADMIN_USERNAMES` | İsteğe bağlı: bu kullanıcı adları yönetici yapılır (listeden çıkarmak yetkiyi geri almaz). |
+| `DATABASE_POOL_MAX` | Sunucunun aynı anda açtığı en fazla bağlantı (varsayılan 5). Aiven Free toplam 20 bağlantı verir ve bir kısmını kendisi kullanır; Render yeni sürümü açarken eski sürüm de kısa süre açık kalır. 10'dan büyük yapmayın. |
 
 ## Disk kullanımı
 

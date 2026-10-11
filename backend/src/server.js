@@ -177,7 +177,9 @@ app.use((error, req, res, next) => {
   const down = dbDownReason(error);
   if (down) {
     console.error(`[veritabanı] ${req.method} ${req.originalUrl}: ${down} — ${error.message}`);
-    return res.status(503).json({ message: 'Sunucu şu an veritabanına bağlanamıyor. Lütfen biraz sonra tekrar deneyin.', code: 'db_unavailable' });
+    // Kısa hata kodu mesajda görünür: günlüğe bakılamasa da ekran görüntüsünden sebep anlaşılır (adres/şifre içermez).
+    const tag = String(error.code || 'baglanti').slice(0, 32);
+    return res.status(503).json({ message: `Sunucu şu an veritabanına bağlanamıyor (kod: ${tag}). Lütfen biraz sonra tekrar deneyin.`, code: 'db_unavailable' });
   }
   if (error.type === 'entity.parse.failed') return res.status(400).json({ message: 'Geçersiz JSON.' });
   if (error.type === 'entity.too.large') return res.status(413).json({ message: 'İstek çok büyük.' });
