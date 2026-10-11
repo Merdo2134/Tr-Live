@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../widgets/anim_asset.dart';
 import 'family_screen.dart';
@@ -24,11 +25,12 @@ import '../widgets/safety_actions.dart';
 import '../widgets/pk_banner.dart';
 import '../widgets/room_theme.dart';
 import '../widgets/seat_picker.dart';
+import '../widgets/video_grid.dart';
 import 'gift_sheet.dart';
 import 'ludo_screen.dart';
 import 'pk_sheet.dart';
 import 'music_sheet.dart';
-import 'messages_screen.dart';
+import 'inbox_screens.dart';
 import 'user_screens.dart';
 
 const _roleLabels = {'owner': 'Oda sahibi', 'cohost': 'Yardımcı sahip', 'moderator': 'Moderatör', 'user': 'Üye'};
@@ -89,6 +91,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   bool get _chatOpen => _room?['chatEnabled'] != false || _isManager;
 
   bool get _isVideo => _room?['roomType'] == 'video';
+  /// Canlı yayın: yayıncı tam ekran, konuklar sağda küçük pencerelerde. Değilse görüntülü oda çoklu (ızgara) yayındır.
+  bool get _isLive => _isVideo && _room?['layout'] == 'live';
+  bool get _isGrid => _isVideo && !_isLive;
+  lk.CameraPosition _camPos = lk.CameraPosition.front;
   final EntranceQueue _entrance = EntranceQueue();
   final List<Map<String, dynamic>> _bags = []; // bu odadaki açık şanslı çantalar
   int get _seatCount => (_room?['seatCount'] as num?)?.toInt() ?? 8;
@@ -681,7 +687,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     return false;
   }
 
-  Widget? _videoFor(String userId) {
+  Widget? _videoFor(String userId, {bool cover = false}) {
     final room = _lk;
     if (room == null) return null;
     lk.Participant? participant;
@@ -693,9 +699,27 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (participant == null) return null;
     for (final pub in participant.videoTrackPublications) {
       final track = pub.track;
-      if (track != null && !pub.muted) return lk.VideoTrackRenderer(track as lk.VideoTrack);
+      if (track != null && !pub.muted) return lk.VideoTrackRenderer(track as lk.VideoTrack, fit: cover ? lk.VideoViewFit.cover : lk.VideoViewFit.contain);
     }
     return null;
+  }
+
+  /// Görüntülü odada ön/arka kamera geçişi.
+  Future<void> _flipCamera() async {
+    final local = _lk?.localParticipant;
+    if (local == null) return;
+    for (final pub in local.videoTrackPublications) {
+      final t = pub.track;
+      if (t == null) continue;
+      final next = _camPos == lk.CameraPosition.front ? lk.CameraPosition.back : lk.CameraPosition.front;
+      try {
+        await t.setCameraPosition(next);
+        _camPos = next;
+      } catch (e) {
+        if (mounted) toast(context, 'Kamera çevrilemedi: ${errorText(e)}', error: true);
+      }
+      return;
+    }
   }
 
   // ---------- Eylemler ----------
@@ -851,10 +875,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   /// Mikrofon modu (Yoho): pencere açık kalır; seçim anında uygulanır, istek modu alttaki seçenekle açılıp kapanır.
   Future<void> _micMode() async {
     try {
+      final theme = (_room?['theme'] ?? 'default').toString();
       await showMicModeSheet(
         context,
         current: _seatCount,
         requestMode: _micRequest,
+        video: _isVideo,
+        colors: theme == 'default' ? null : themeOf(theme).colors,
         onSelect: (n) async {
           final old = _seatCount;
           try {
@@ -1006,6 +1033,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                   setState(() => _camOn = !_camOn);
                   _syncPublish();
                 })),
+          if (_onSeat && _isVideo && _camOn) feature(Icons.cameraswitch, 'Kamerayı\nÇevir', () => run(_flipCamera)),
           if (queueMode)
             feature(_inQueue ? Icons.hourglass_bottom : Icons.front_hand, _inQueue ? (_micRequest ? 'İsteği\nGeri Al' : 'Sıradan\nÇık') : (_micRequest ? 'Mikrofon\nİste' : 'Sıraya\nGir'), () => run(_toggleQueue), color: _inQueue ? Colors.orangeAccent : Colors.greenAccent),
           if (_onSeat) feature(Icons.mic_off, 'Mikrofondan\nİn', () => run(_leaveMic)),
@@ -1018,7 +1046,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           if (_myRole == 'owner') feature(locked ? Icons.lock : Icons.lock_open, 'Oda\nKilidi', () => need(_myRole == 'owner', _roomPassword), color: locked ? Colors.orangeAccent : null),
           if (_isOwnerOrCohost) feature(Icons.palette, 'Özel\nTemalar', () => need(_isOwnerOrCohost, _roomThemes)),
           if (_myRole == 'owner') feature(hidden ? Icons.visibility_off : Icons.visibility, 'Oda\nGizleme', () => need(_myRole == 'owner', _toggleHidden), color: hidden ? Colors.orangeAccent : null),
-          if (_isOwnerOrCohost) feature(Icons.mic_external_on, 'Mikrofon\nModu', () {
+          if (_isOwnerOrCohost && !_isLive) feature(Icons.mic_external_on, _isVideo ? 'Yayın\nModu' : 'Mikrofon\nModu', () {
             if (!_isOwnerOrCohost) {
               Navigator.pop(sheet);
               toast(context, 'Mikrofon modunu yalnızca oda sahibi ve yardımcı sahip değiştirebilir.', error: true);
@@ -1173,12 +1201,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   /// Sohbet akışı (Yoho): koltukların altından alt bara kadar, saydam renkli balonlar.
   /// [overlay]: klavye açıkken karartının üstünde balonsuz düz yazı.
-  Widget _chatPanel(double w, {bool overlay = false}) {
+  Widget _chatPanel(double w, {bool overlay = false, double? rightPad}) {
     if (_messages.isEmpty) return const SizedBox.shrink();
     final maxW = w * 0.78;
     return ListView.builder(
       controller: _chatScroll,
-      padding: EdgeInsets.fromLTRB(8, overlay ? 10 : 2, w * 0.2, 8),
+      padding: EdgeInsets.fromLTRB(8, overlay ? 10 : 2, rightPad ?? w * 0.2, 8),
       itemCount: _messages.length,
       itemBuilder: (_, i) {
         final m = _messages[i];
@@ -1357,6 +1385,25 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               _syncPublish();
             },
           ),
+          if (_isVideo)
+            ListTile(
+              leading: Icon(_camOn ? Icons.videocam_off : Icons.videocam),
+              title: Text(_camOn ? 'Kamerayı kapat' : 'Kamerayı aç'),
+              onTap: () {
+                Navigator.pop(c);
+                setState(() => _camOn = !_camOn);
+                _syncPublish();
+              },
+            ),
+          if (_isVideo && _camOn)
+            ListTile(
+              leading: const Icon(Icons.cameraswitch),
+              title: const Text('Kamerayı çevir'),
+              onTap: () {
+                Navigator.pop(c);
+                _flipCamera();
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.redAccent),
             title: const Text('Koltuktan Kalk', style: TextStyle(color: Colors.redAccent)),
@@ -1811,11 +1858,26 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     }
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth;
-      // Ölçek yalnızca cihaz ölçüsüne bağlı (oturmak, izleyici, klavye, PK şeridi değiştirmez).
-      final sc = _seatScaleFor(w);
-      final scoreRow = _scoreFits(seatLayoutFor(_seatCount), w * sc);
-      _showScoreRow = scoreRow;
-      final seatH = _seatAreaHeight(w, sc, score: scoreRow);
+      if (_isLive) return _liveStage(w, box.maxHeight);
+      final double seatH;
+      final Widget seats;
+      if (_isGrid) {
+        // Çoklu yayın: görüntü ızgarası tam genişlikte. Yüksekliği yalnızca cihaz ölçüsüne bağlı (klavye, PK şeridi
+        // değiştirmez); çok kısa ekranlarda sohbete en az ~110 dp kalacak kadar küçülür ve ortalanır.
+        final spec = videoGridFor(_seatCount);
+        final g = RoomGeom(w);
+        final avail = _bodyH > 0 ? _bodyH - MediaQuery.paddingOf(context).top - g.headerH - g.barH - 110 : w * spec.aspect;
+        seatH = math.max(0.0, math.min(w * spec.aspect, avail));
+        final gw = seatH / spec.aspect;
+        seats = Align(alignment: Alignment.topCenter, child: SizedBox(width: gw, height: seatH, child: _videoGrid(gw, spec)));
+      } else {
+        // Ölçek yalnızca cihaz ölçüsüne bağlı (oturmak, izleyici, klavye, PK şeridi değiştirmez).
+        final sc = _seatScaleFor(w);
+        final scoreRow = _scoreFits(seatLayoutFor(_seatCount), w * sc);
+        _showScoreRow = scoreRow;
+        seatH = _seatAreaHeight(w, sc, score: scoreRow);
+        seats = _seatGrid(w, sc);
+      }
       return Stack(clipBehavior: Clip.hardEdge, children: [
         Positioned(
           left: 0,
@@ -1830,7 +1892,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               if (v < -1400) _switchRoom(1);
               if (v > 1400) _switchRoom(-1);
             },
-            child: _fixedText(_seatGrid(w, sc)),
+            child: _fixedText(seats),
           ),
         ),
         if (!_inputOpen) Positioned(left: 0, right: 0, top: seatH, bottom: 0, child: _chatPanel(w)),
@@ -1854,6 +1916,232 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           ),
       ]);
     });
+  }
+
+  // ---------- Görüntülü odalar: Çoklu (ızgara) ve Canlı (tam ekran) ----------
+  Map<int, Map<String, dynamic>> get _bySeat => {
+        for (final m in _members)
+          if (m['seatIndex'] != null) (m['seatIndex'] as num).toInt(): m,
+      };
+
+  /// Çoklu yayın ızgarası (Figma): hücreler kenar boşluksuz, ince açık çizgilerle ayrılır.
+  Widget _videoGrid(double gw, VideoGridSpec spec) {
+    final by = _bySeat;
+    final n = math.min(spec.cells.length, _seatCount);
+    return Stack(children: [
+      for (var i = 0; i < n; i++)
+        Positioned(
+          left: spec.cells[i].left * gw,
+          top: spec.cells[i].top * gw,
+          width: spec.cells[i].width * gw,
+          height: spec.cells[i].height * gw,
+          child: _videoCell(i, by[i], Size(spec.cells[i].width * gw, spec.cells[i].height * gw)),
+        ),
+    ]);
+  }
+
+  /// Bir görüntü hücresi: kamera (kapalıysa avatar), altta ad ve elmas. Boş hücrede koltuk simgesi; dokununca oturulur.
+  /// [pip]: canlı yayında sağdaki küçük konuk penceresi (yuvarlak köşeli, çizgisiz).
+  Widget _videoCell(int index, Map<String, dynamic>? m, Size size, {bool pip = false}) {
+    final side = math.min(size.width, size.height);
+    final radius = pip ? BorderRadius.circular(8) : null;
+    final border = pip ? Border.all(color: Colors.white24, width: 0.8) : Border.all(color: kGridLine, width: 0.5);
+    if (m == null) {
+      final reserved = index == 0 && _myRole != 'owner';
+      final locked = _lockedSeats.contains(index);
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _emptySeatTap(index, reserved, locked),
+        child: Container(
+          decoration: BoxDecoration(color: index == 0 ? kGridHostFill : kGridEmptyFill, border: border, borderRadius: radius),
+          child: Icon(
+            reserved ? Icons.videocam_off_outlined : (locked ? Icons.lock : kEmptySeatIcon),
+            size: side * 0.32,
+            color: locked ? Colors.orangeAccent : Colors.white.withValues(alpha: 0.8),
+          ),
+        ),
+      );
+    }
+    final userId = m['userId'].toString();
+    final user = mapOf(m['user']);
+    final video = _videoFor(userId, cover: true);
+    final speaking = _isSpeaking(userId);
+    final isMe = userId == Session.id;
+    final nameColor = parseColor(user?['nameColor'] as String?);
+    final fs = (side * 0.11).clamp(9.0, 12.0).toDouble();
+    const shadow = [Shadow(color: Colors.black87, blurRadius: 3)];
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => isMe ? _selfSeatSheet(m, index) : _memberSheet(m),
+      child: Container(
+        clipBehavior: Clip.hardEdge,
+        decoration: BoxDecoration(color: kGridHostFill, border: border, borderRadius: radius),
+        child: Stack(fit: StackFit.expand, children: [
+          KeyedSubtree(
+            key: _seatKeys.putIfAbsent(userId, () => GlobalKey()),
+            child: video ?? Center(child: UserAvatar(user: user, radius: side * 0.26)),
+          ),
+          // Konuşma göstergesi: hücrenin kenarında yeşil çerçeve (düzeni değiştirmez).
+          IgnorePointer(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              decoration: BoxDecoration(borderRadius: radius, border: Border.all(color: speaking ? Colors.greenAccent : Colors.transparent, width: 2)),
+            ),
+          ),
+          Positioned(
+            left: 4,
+            right: 4,
+            bottom: 3,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                if (m['role'] == 'owner') Icon(Icons.star, size: fs + 1, color: Colors.amber),
+                Flexible(
+                  child: WipNameText(
+                    (user?['displayName'] ?? '').toString(),
+                    level: (user?['wipLevel'] as num?)?.toInt(),
+                    color: nameColor ?? Colors.white,
+                    style: TextStyle(fontSize: fs, height: 1.15, fontWeight: FontWeight.w700, shadows: shadow),
+                  ),
+                ),
+              ]),
+              if (_room?['scoreboardEnabled'] != false)
+                Text('💎 ${fmtNumber(_scores[userId] ?? 0)}', maxLines: 1, style: TextStyle(fontSize: fs * 0.95, height: 1.15, color: Colors.amberAccent, shadows: shadow)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// Canlı yayın zemini: yayıncının (0. koltuk) kamerası tam ekran. Kamera kapalıysa büyük avatar, yayıncı koltukta
+  /// değilse tema zemini üstünde bilgi yazısı. Dokunma alanı değildir (dokunmalar sahne katmanında).
+  Widget _liveBackdrop() {
+    final host = _bySeat[0];
+    final t = themeOf(_room?['theme']?.toString());
+    final Widget content;
+    if (host == null) {
+      content = const Center(child: Text('Yayıncı şu an kamerada değil', style: TextStyle(color: Colors.white70, fontSize: 15)));
+    } else {
+      final uid = host['userId'].toString();
+      content = KeyedSubtree(
+        key: _seatKeys.putIfAbsent(uid, () => GlobalKey()),
+        child: _videoFor(uid, cover: true) ??
+            Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                UserAvatar(user: mapOf(host['user']), radius: 56),
+                const SizedBox(height: 10),
+                const Text('Kamera kapalı', style: TextStyle(color: Colors.white60)),
+              ]),
+            ),
+      );
+    }
+    return IgnorePointer(
+      child: Stack(fit: StackFit.expand, children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: t.colors.length < 2 ? [t.colors.first, t.colors.first] : t.colors),
+          ),
+        ),
+        content,
+        // Başlık ve sohbet okunaklı kalsın diye üstte ve altta hafif karartı.
+        const Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(height: 180, width: double.infinity, child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x73000000), Color(0x00000000)])))),
+        ),
+        const Align(
+          alignment: Alignment.bottomCenter,
+          child: SizedBox(height: 300, width: double.infinity, child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00000000), Color(0x8C000000)])))),
+        ),
+      ]),
+    );
+  }
+
+  void _hostTap() {
+    final host = _bySeat[0];
+    if (host == null) return;
+    if (host['userId']?.toString() == Session.id) {
+      _selfSeatSheet(host, 0);
+    } else {
+      _memberSheet(host);
+    }
+  }
+
+  /// Canlı yayın sahnesi (başlık ile alt bar arası): sağda konuk pencereleri, solda alttan akan sohbet.
+  Widget _liveStage(double w, double h) {
+    final by = _bySeat;
+    final guests = [for (var i = 1; i < _seatCount; i++) if (by[i] != null) i];
+    int? free;
+    for (var i = 1; i < _seatCount; i++) {
+      if (by[i] == null && !_lockedSeats.contains(i)) {
+        free = i;
+        break;
+      }
+    }
+    final pw = (w * 0.27).clamp(88.0, 132.0).toDouble();
+    final ph = pw * 4 / 3;
+    final joinSeat = free;
+    return Stack(clipBehavior: Clip.hardEdge, children: [
+      // Yayıncıya dokununca kartı açılır; hızlı dikey kaydırma odayı değiştirir.
+      Positioned.fill(
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: _hostTap,
+          onVerticalDragEnd: (d) {
+            final v = d.primaryVelocity ?? 0;
+            if (v < -1400) _switchRoom(1);
+            if (v > 1400) _switchRoom(-1);
+          },
+        ),
+      ),
+      Positioned(
+        right: 8,
+        top: w * 0.06,
+        width: pw,
+        child: _fixedText(Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final i in guests)
+            Padding(padding: const EdgeInsets.only(bottom: 6), child: SizedBox(width: pw, height: ph, child: _videoCell(i, by[i], Size(pw, ph), pip: true))),
+          if (!_onSeat && joinSeat != null && !_inputOpen)
+            Material(
+              color: Colors.black45,
+              shape: const StadiumBorder(),
+              child: InkWell(
+                customBorder: const StadiumBorder(),
+                onTap: () => _emptySeatTap(joinSeat, false, false),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.add_circle_outline, size: 16, color: Colors.white),
+                      const SizedBox(width: 4),
+                      Text(_micRequest ? 'Konuk olmak iste' : 'Konuk ol', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+        ])),
+      ),
+      if (!_inputOpen) Positioned(left: 0, right: pw + 12, bottom: 0, height: h * 0.46, child: _chatPanel(w, rightPad: 8)),
+      if (_inputOpen) ...[
+        Positioned.fill(child: GestureDetector(onTap: _closeInput, child: const ColoredBox(color: Color(0xB8000000)))),
+        Positioned.fill(child: _chatPanel(w, overlay: true)),
+      ],
+      if (_canSeatManage && _micRequest && _queue.isNotEmpty && !_inputOpen)
+        Positioned(
+          left: 8,
+          top: 4,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: _micRequestsSheet,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: const Color(0xFF22C55E), borderRadius: BorderRadius.circular(16), boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 6)]),
+              child: Text('Konuk istekleri (${_queue.length})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+            ),
+          ),
+        ),
+    ]);
   }
 
   /// Koltuk alanının yüksekliği: son satırın merkezi + yarıçap + ad (ve sığıyorsa puan) satırları.
@@ -2310,7 +2598,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           isLabelVisible: n > 0,
           label: Text('$n'),
           offset: const Offset(-2, 2),
-          child: circle(Icons.mail_outline, 'Mesajlar', () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('Mesajlar')), body: const MessagesScreen())))),
+          // Yoho: alttan açılan "Sohbet" penceresi; oda arkada çalışmaya devam eder.
+          child: circle(Icons.mail_outline, 'Mesajlar', () => showInboxSheet(context)),
         ),
       );
       final games = Tooltip(
@@ -2402,6 +2691,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 final w = box.maxWidth;
                 final g = RoomGeom(w);
                 return Stack(key: _stageKey, fit: StackFit.expand, children: [
+                if (_isLive) Positioned.fill(child: _liveBackdrop()),
                 Padding(
                 padding: EdgeInsets.only(bottom: _inputOpen ? MediaQuery.viewInsetsOf(context).bottom : 0),
                 child: Column(children: [

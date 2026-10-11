@@ -43,7 +43,7 @@ class _ContentTabState extends State<ContentTab> {
   }
 
   Future<void> _addBanner() async {
-    final img = await pickImage(context, maxWidth: 1600);
+    final img = await pickImage(context, crop: CropSpec.banner);
     if (img == null || !mounted) return;
     final f = await formDialog(context, 'Banner', ['Başlık (isteğe bağlı)', 'Bağlantı (https://…, isteğe bağlı)']);
     if (f == null || !mounted) return;
@@ -71,6 +71,8 @@ class _ContentTabState extends State<ContentTab> {
     var kind = 'event';
     final title = TextEditingController();
     final body = TextEditingController();
+    final link = TextEditingController();
+    PickedImage? image; // isteğe bağlı kart görseli
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -87,6 +89,25 @@ class _ContentTabState extends State<ContentTab> {
               const SizedBox(height: 8),
               TextField(controller: title, maxLength: 80, decoration: const InputDecoration(labelText: 'Başlık')),
               TextField(controller: body, maxLines: 5, maxLength: 2000, decoration: const InputDecoration(labelText: 'Metin')),
+              TextField(controller: link, decoration: const InputDecoration(labelText: 'Bağlantı (https://…, isteğe bağlı)')),
+              const SizedBox(height: 8),
+              Row(children: [
+                if (image != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.memory(image!.bytes, width: 72, height: 40, fit: BoxFit.cover)),
+                  ),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final img = await pickImage(c, crop: CropSpec.announcement);
+                      if (img != null && c.mounted) setS(() => image = img);
+                    },
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: Text(image == null ? 'Görsel ekle (isteğe bağlı)' : 'Görseli değiştir'),
+                  ),
+                ),
+              ]),
             ]),
           ),
           actions: [
@@ -98,10 +119,17 @@ class _ContentTabState extends State<ContentTab> {
     );
     final t = title.text.trim();
     final b = body.text.trim();
+    final l = link.text.trim();
     title.dispose();
     body.dispose();
+    link.dispose();
     if (ok != true || !mounted) return;
-    final r = await guard(context, () => Api.post('/api/admin/announcements', {'kind': kind, 'title': t, 'text': b}));
+    final img = image;
+    final r = await guard(context, () async {
+      String? url;
+      if (img != null) url = (await Api.putBytes('/api/admin/announcements/image', img.bytes, img.mime))['url'] as String?;
+      return Api.post('/api/admin/announcements', {'kind': kind, 'title': t, 'text': b, if (url != null) 'imageUrl': url, if (l.isNotEmpty) 'linkUrl': l});
+    });
     if (r != null) _load();
   }
 

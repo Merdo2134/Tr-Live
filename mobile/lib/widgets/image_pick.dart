@@ -2,6 +2,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'common.dart';
+import 'image_crop.dart';
+
+export 'image_crop.dart' show CropSpec;
 
 class PickedImage {
   final Uint8List bytes;
@@ -17,15 +20,23 @@ String? sniffImageMime(Uint8List b) {
 }
 
 /// Galeriden görsel seçer; biçim ve boyut denetimini yapar. İptal veya hata durumunda null döner.
-Future<PickedImage?> pickImage(BuildContext context, {double maxWidth = 1600}) async {
-  final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: maxWidth, imageQuality: 85);
+/// [crop] verilirse seçimden sonra kırpma ekranı açılır (kullanıcı kaydırıp büyüterek kadrajı ayarlar);
+/// sonuç o oranda, en fazla [CropSpec.outWidth] genişliğinde JPEG olur.
+Future<PickedImage?> pickImage(BuildContext context, {double maxWidth = 1600, CropSpec? crop}) async {
+  final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: crop == null ? maxWidth : 2048, imageQuality: crop == null ? 85 : 95);
   if (picked == null) return null;
-  final bytes = await picked.readAsBytes();
-  final mime = sniffImageMime(bytes);
+  var bytes = await picked.readAsBytes();
+  var mime = sniffImageMime(bytes);
   if (!context.mounted) return null;
   if (mime == null) {
     toast(context, 'Yalnızca png, jpeg veya webp yüklenebilir.', error: true);
     return null;
+  }
+  if (crop != null) {
+    final cut = await cropImage(context, bytes, crop);
+    if (cut == null || !context.mounted) return null;
+    bytes = cut;
+    mime = 'image/jpeg';
   }
   if (bytes.length > 3 * 1024 * 1024) {
     toast(context, 'Görsel 3 MB’tan küçük olmalı.', error: true);

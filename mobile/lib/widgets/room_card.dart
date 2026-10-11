@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'app_theme.dart';
+import 'room_categories.dart';
 
 /// Ana sayfa oda kartı (Yoho ölçüleri): kare kapak görseli, sol altta tür etiketi, sağ altta dinleyici sayısı ve
 /// üstünde üst üste binen üye avatarları; oda adı görselin altında. Tüm ölçüler kart genişliğine oranlıdır.
@@ -27,8 +28,10 @@ class RoomCard extends StatelessWidget {
       for (final a in (room['avatars'] is List ? room['avatars'] as List : const []))
         if (Api.absoluteUrl(a?.toString()) != null) Api.absoluteUrl(a.toString())!,
     ];
-    final tag = tags.isNotEmpty ? tags.first : (isVideo ? 'Görüntülü' : 'Sohbet');
-    final tagColor = isVideo ? const Color(0xFFFF9F0A) : const Color(0xFF16C25B);
+    // Yayın isim kartı (tür) varsa kendi renkleriyle; yoksa ilk etiket / oda türü.
+    final cat = roomCategoryOf(tags.isNotEmpty ? tags.first : null);
+    final tag = cat?.label ?? (tags.isNotEmpty ? tags.first : (isVideo ? (room['layout'] == 'live' ? 'Canlı' : 'Görüntülü') : 'Sohbet'));
+    final tagColors = cat?.colors ?? (isVideo ? const [Color(0xFFFF9F0A), Color(0xFFFF9F0A)] : const [Color(0xFF16C25B), Color(0xFF16C25B)]);
     return Semantics(
       button: true,
       label: '$name, $count kişi',
@@ -112,7 +115,7 @@ class RoomCard extends StatelessWidget {
                     child: Container(
                       constraints: BoxConstraints(maxWidth: cw * 0.55),
                       padding: EdgeInsets.symmetric(horizontal: tagH * 0.35),
-                      decoration: BoxDecoration(color: tagColor, borderRadius: BorderRadius.circular(tagH * 0.28)),
+                      decoration: BoxDecoration(gradient: LinearGradient(colors: tagColors), borderRadius: BorderRadius.circular(tagH * 0.28)),
                       // widthFactor 1: etiket yazıyı sarar (Container'ın alignment'ı en geniş hâline uzatırdı).
                       child: Center(widthFactor: 1, child: Text(tag, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white, fontSize: tagH * 0.72, height: 1.0, fontWeight: FontWeight.w700))),
                     ),

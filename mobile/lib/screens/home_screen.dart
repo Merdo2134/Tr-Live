@@ -5,16 +5,14 @@ import '../widgets/app_theme.dart';
 import '../widgets/banner_carousel.dart';
 import '../widgets/crown_icon.dart';
 import '../widgets/room_card.dart';
-import '../widgets/room_theme.dart';
-import '../widgets/seat_picker.dart';
 import '../services/api.dart';
 import '../widgets/drag_bubble.dart';
 import '../services/inbox_service.dart';
 import '../services/room_dock.dart';
-import 'discover_screen.dart';
 import '../widgets/common.dart';
 import '../widgets/gift_ribbon.dart';
 import 'feed_screen.dart';
+import 'go_live_screen.dart';
 import 'leaderboard_screen.dart';
 import 'messages_screen.dart';
 import 'profile_screen.dart';
@@ -237,8 +235,7 @@ class RoomsTabState extends State<RoomsTab> {
   String? _error;
   String _q = '';
   Timer? _debounce;
-  String _mode = 'popular'; // friends (İlgili: takip ettiklerin) | popular (Sıcak) | near (Yakında)
-  bool _fresh = false; // Sıcak > "Yeni yayıncı" süzgeci (son 30 günde açılmış hesaplar)
+  String _mode = 'popular'; // popular (Popüler) | friends (Takip: takip ettiğin yayıncılar)
   bool _searching = false;
 
   void toggleSearch() => setState(() {
@@ -271,12 +268,10 @@ class RoomsTabState extends State<RoomsTab> {
 
   Future<void> refresh() async {
     try {
-      final region = _mode == 'popular' ? null : _mode;
       final r = await Api.get('/api/rooms', query: {
         'type': widget.type,
         if (_q.isNotEmpty) 'q': _q,
-        if (region != null) 'region': region,
-        if (_mode == 'popular' && _fresh) 'fresh': '1',
+        if (_mode == 'friends') 'region': 'friends',
       });
       if (!mounted) return;
       setState(() {
@@ -295,67 +290,24 @@ class RoomsTabState extends State<RoomsTab> {
 
   Future<void> _open(String id, String name, {bool locked = false}) => openRoom(context, RoomRequest(roomId: id, name: name, locked: locked));
 
-  /// Oda aç: kayıtlı odan varsa doğrudan girer. Yoksa bir kez kurulum penceresi açılır (ad, etiket, koltuk düzeni, tema).
+  /// Oda aç. Sesli oda bir kez kurulur: kayıtlıysa doğrudan odana girersin. Görüntülü yayın açık değilse her seferinde
+  /// "Yayın başlat" ekranı gelir (kamera önizlemesi, başlık, tür, Canlı/Çoklu seçimi); açıksa doğrudan girersin.
   Future<void> createRoom({String? type}) async {
     final roomType = type ?? widget.type;
     final mine = await guard(context, () => Api.get('/api/rooms/mine'));
     if (mine == null || !mounted) return;
-    final profile = mapOf(mapOf(mine['rooms'])?[roomType]);
-    final body = <String, dynamic>{'roomType': roomType};
-    if (profile == null) {
-      final setup = await _setupDialog(roomType);
-      if (setup == null || !mounted) return;
-      body.addAll(setup);
+    final rooms = mapOf(mine['rooms']) ?? <String, dynamic>{};
+    final profile = mapOf(rooms[roomType]);
+    if (profile != null && (roomType == 'audio' || profile['activeRoomId'] != null)) {
+      final r = await guard(context, () => Api.post('/api/rooms', {'roomType': roomType}));
+      final room = mapOf(r?['room']);
+      if (room != null && mounted) await _open(room['id'] as String, (room['name'] ?? '').toString());
+      return;
     }
-    final r = await guard(context, () => Api.post('/api/rooms', body));
-    final room = mapOf(r?['room']);
-    if (room != null && mounted) await _open(room['id'] as String, room['name'] as String);
-  }
-
-  Future<Map<String, dynamic>?> _setupDialog(String roomType) async {
-    final nameCtl = TextEditingController();
-    final tagsCtl = TextEditingController();
-    var seats = roomType == 'video' ? 4 : 8;
-    var theme = 'default';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setS) => AlertDialog(
-          title: Text(roomType == 'video' ? 'Görüntülü odanı kur' : 'Sesli odanı kur'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text(
-                'Odanı bir kez kurarsın. Sonraki seferlerde "Oda aç"a basman yeterli: aynı ad ve etiketlerle doğrudan odana girersin. Ad ve etiketleri oda içinde oda adına dokunarak değiştirebilirsin.',
-                style: TextStyle(color: Pal.textDim, fontSize: 13, height: 1.35),
-              ),
-              const SizedBox(height: 12),
-              TextField(controller: nameCtl, maxLength: 60, decoration: const InputDecoration(labelText: 'Oda adı')),
-              TextField(controller: tagsCtl, decoration: const InputDecoration(labelText: 'Etiketler (en fazla 3, virgülle)', hintText: 'müzik, sohbet, karaoke')),
-              const SizedBox(height: 12),
-              SeatLayoutPicker(value: seats, onChanged: (v) => setS(() => seats = v)),
-              const SizedBox(height: 12),
-              ThemePicker(value: theme, onChanged: (v) => setS(() => theme = v)),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
-            FilledButton(
-              onPressed: () {
-                if (nameCtl.text.trim().length < 2) return toast(c, 'Oda adı en az 2 karakter olmalı.', error: true);
-                Navigator.pop(c, true);
-              },
-              child: const Text('Kur ve aç'),
-            ),
-          ],
-        ),
-      ),
+    final room = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(fullscreenDialog: true, builder: (_) => GoLiveScreen(initialType: roomType, profiles: rooms)),
     );
-    final name = nameCtl.text.trim();
-    final tags = tagsCtl.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
-    nameCtl.dispose();
-    tagsCtl.dispose();
-    if (ok != true) return null;
-    return {'name': name, 'seatCount': seats, 'theme': theme, if (tags.isNotEmpty) 'tags': tags};
+    if (room != null && mounted) await _open(room['id'] as String, (room['name'] ?? '').toString());
   }
 
   /// Yoho sekmesi: seçili olan büyük ve kalın, altında kısa çizgi; diğerleri küçük ve soluk.
@@ -406,16 +358,15 @@ class RoomsTabState extends State<RoomsTab> {
         );
     // Sekme bloğu 44 dp + 11 dp: banner durum çubuğunun 55 dp altında başlar (Yoho).
     return Padding(
-      padding: EdgeInsets.fromLTRB(m, 0, m - 6, 11),
+      padding: EdgeInsets.fromLTRB(m, 0, m, 11),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
           child: FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.topLeft,
             child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _topTab('friends', 'İlgili'),
-              _topTab('popular', 'Sıcak'),
-              _topTab('near', 'Yakında'),
+              _topTab('popular', 'Popüler'),
+              _topTab('friends', 'Takip'),
             ]),
           ),
         ),
@@ -449,74 +400,8 @@ class RoomsTabState extends State<RoomsTab> {
                 ),
               ),
             ),
-            SizedBox(
-              width: 38,
-              height: 38,
-              child: PopupMenuButton<String>(
-              tooltip: 'Diğer',
-              padding: EdgeInsets.zero,
-              icon: const Icon(Icons.more_vert, color: Pal.text),
-              onSelected: (v) {
-                switch (v) {
-                  case 'fav':
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscoverScreen()));
-                  case 'code':
-                    widget.onJoinCode?.call();
-                  case 'user':
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchScreen()));
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'fav', child: ListTile(leading: Icon(Icons.star), title: Text('Favoriler ve son girilenler'), dense: true)),
-                PopupMenuItem(value: 'code', child: ListTile(leading: Icon(Icons.vpn_key), title: Text('Gizli odaya kodla gir'), dense: true)),
-                PopupMenuItem(value: 'user', child: ListTile(leading: Icon(Icons.person_search), title: Text('Kullanıcı ara'), dense: true)),
-              ],
-            ),
-            ),
           ]),
         ),
-      ]),
-    );
-  }
-
-  /// Süzgeç çipleri (Yoho "Tavsiyeler · Yeni yayıncı"): yalnızca Sıcak sekmesinde.
-  Widget _filterChips(double w) {
-    final m = homeMargin(w);
-    final h = (w * 0.074).clamp(28.0, 36.0).toDouble();
-    Widget chip(String label, Widget lead, bool sel, VoidCallback onTap) => Padding(
-          padding: EdgeInsets.only(right: homeGap(w)),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(h / 2),
-            onTap: onTap,
-            child: Container(
-              height: h,
-              padding: EdgeInsets.symmetric(horizontal: h * 0.5),
-              decoration: BoxDecoration(
-                color: sel ? Pal.green.withValues(alpha: 0.16) : Pal.surface,
-                borderRadius: BorderRadius.circular(h / 2),
-                border: Border.all(color: sel ? Pal.green.withValues(alpha: 0.5) : Pal.outline),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                lead,
-                SizedBox(width: h * 0.22),
-                Text(label, style: TextStyle(fontSize: h * 0.46, fontWeight: FontWeight.w700, color: sel ? Pal.green : Pal.textDim)),
-              ]),
-            ),
-          ),
-        );
-    return Padding(
-      padding: EdgeInsets.fromLTRB(m, homeGap(w), m, homeGap(w)),
-      child: Row(children: [
-        chip('Tavsiyeler', Icon(Icons.star_rounded, size: h * 0.62, color: _fresh ? Pal.textDim : Pal.green), !_fresh, () {
-          if (!_fresh) return;
-          setState(() => _fresh = false);
-          refresh();
-        }),
-        chip('Yeni yayıncı', Icon(Icons.mic_rounded, size: h * 0.58, color: _fresh ? Pal.green : Pal.textDim), _fresh, () {
-          if (_fresh) return;
-          setState(() => _fresh = true);
-          refresh();
-        }),
       ]),
     );
   }
@@ -532,14 +417,10 @@ class RoomsTabState extends State<RoomsTab> {
     final ratio = cw / (cw + RoomCard.titleAreaFor(w));
     final empty = _mode == 'friends'
         ? 'Takip ettiğin kişilerin açık odası yok.'
-        : _mode == 'near'
-            ? 'Şehrinde açık oda yok. Profilinden şehrini girdiysen burada aynı şehirdekiler görünür.'
-            : _fresh
-                ? 'Şu an yeni yayıncıların açık odası yok.'
-                : (_q.isEmpty ? 'Şu an açık oda yok. İlk odayı sen aç!' : 'Aramanıza uyan oda yok.');
+        : (_q.isEmpty ? 'Şu an açık oda yok. İlk odayı sen aç!' : 'Aramanıza uyan oda yok.');
     final head = <Widget>[
       const BannerCarousel(),
-      if (_mode == 'popular') _filterChips(w) else SizedBox(height: gap),
+      SizedBox(height: gap),
     ];
     final Widget body;
     if (_loading) {
@@ -584,11 +465,19 @@ class RoomsTabState extends State<RoomsTab> {
               prefixIcon: const Icon(Icons.search),
               hintText: 'Oda, yayıncı veya etiket ara',
               isDense: true,
-              suffixIcon: IconButton(
-                tooltip: 'Kullanıcı ara',
-                icon: const Icon(Icons.person_search),
-                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchScreen())),
-              ),
+              // Kullanıcı arama ve gizli odaya kodla giriş (eski ⋮ menüsündeydi) arama kutusunun sağında.
+              suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(
+                  tooltip: 'Gizli odaya kodla gir',
+                  icon: const Icon(Icons.vpn_key_outlined),
+                  onPressed: widget.onJoinCode,
+                ),
+                IconButton(
+                  tooltip: 'Kullanıcı ara',
+                  icon: const Icon(Icons.person_search),
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSearchScreen())),
+                ),
+              ]),
             ),
             onChanged: (v) {
               _debounce?.cancel();

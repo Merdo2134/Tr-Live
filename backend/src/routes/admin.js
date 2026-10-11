@@ -916,19 +916,34 @@ router.delete('/banners/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Duyuru kartı görseli (Mesajlar > Ekip / Etkinlik / Ödül).
+router.put('/announcements/image', express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
+  res.json({ url: await saveUpload(req, 'announcement') });
+});
+
 router.post('/announcements', async (req, res) => {
   const kind = oneOf(req.body?.kind, ['team', 'event', 'reward'], 'Tür');
   const title = text(req.body?.title, 'Başlık', { min: 2, max: 80, required: true });
   const body = text(req.body?.text, 'Metin', { min: 1, max: 2000, required: true });
-  const r = await query(`INSERT INTO announcements(kind, title, body, created_by) VALUES($1,$2,$3,$4) RETURNING id`, [kind, title, body, req.user.id]);
+  let imageUrl = null;
+  if (req.body?.imageUrl) {
+    imageUrl = String(req.body.imageUrl);
+    if (!OWN_IMAGE_RE.test(imageUrl)) throw fail('Görsel adresi geçersiz.');
+  }
+  const linkUrl = req.body?.linkUrl ? httpsUrl(req.body.linkUrl, 'Bağlantı') : null;
+  const r = await query(
+    `INSERT INTO announcements(kind, title, body, created_by, image_url, link_url) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [kind, title, body, req.user.id, imageUrl, linkUrl],
+  );
   await auditStaff({ query }, req.user.id, null, 'announcement_add', { id: r.rows[0].id, kind });
   res.status(201).json({ id: r.rows[0].id });
 });
 
 router.delete('/announcements/:id', async (req, res) => {
   const id = uuid(req.params.id);
-  const r = await query(`DELETE FROM announcements WHERE id = $1`, [id]);
+  const r = await query(`DELETE FROM announcements WHERE id = $1 RETURNING image_url`, [id]);
   if (!r.rowCount) throw fail('Duyuru bulunamadı.', 404);
+  await removeUpload(r.rows[0].image_url);
   res.json({ ok: true });
 });
 

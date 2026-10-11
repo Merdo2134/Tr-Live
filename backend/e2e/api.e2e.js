@@ -619,6 +619,31 @@ test('özel mesaj, gizlilik, engelleme', { skip, timeout: 60000 }, async () => {
   status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'tekrar' } }), 403, 'kimse');
   ok(await api('PATCH', '/api/me', { token: U.c.token, body: { whoCanDm: 'everyone' } }));
   status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { text: 'artık olur' } }), 201);
+  // fotoğraf mesajı: önce yüklenir; başkasının yüklediği / dış adres / boş mesaj reddedilir
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const up = await api('PUT', '/api/messages/image', { token: U.b.token, raw: png, headers: { 'Content-Type': 'image/png' } });
+  ok(up, 'sohbet fotoğrafı yükleme');
+  const pic = await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { imageUrl: up.body.url } });
+  status(pic, 201);
+  assert.equal(pic.body.message.imageUrl, up.body.url);
+  assert.equal(pic.body.message.text, '');
+  status(await api('POST', `/api/messages/with/${U.b.id}`, { token: U.c.token, body: { imageUrl: up.body.url } }), 403, 'başkasının fotoğrafı');
+  status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: { imageUrl: 'https://evil.test/a.png' } }), 400, 'dış adres');
+  status(await api('POST', `/api/messages/with/${U.c.id}`, { token: U.b.token, body: {} }), 400, 'boş mesaj');
+  const conv2 = await api('GET', '/api/messages/conversations', { token: U.c.token });
+  assert.equal(conv2.body.conversations.find((x) => x.peer.id === U.b.id).lastMessage, '📷 Fotoğraf');
+  const th2 = await api('GET', `/api/messages/with/${U.b.id}`, { token: U.c.token });
+  assert.equal(th2.body.messages.at(-1).imageUrl, up.body.url);
+  // arkadaşlık isteği 7×24 saat geçerli; süresi dolunca listede/rozette görünmez, yeniden gönderilince tazelenir
+  const fr1 = await register('fr1'); const fr2 = await register('fr2');
+  ok(await api('POST', `/api/friends/request/${fr2.id}`, { token: fr1.token }));
+  assert.equal((await api('GET', '/api/friends/requests', { token: fr2.token })).body.requests.length, 1);
+  await sql(`UPDATE friend_requests SET created_at = NOW() - INTERVAL '8 days' WHERE requester_id = $1 AND target_id = $2`, [fr1.id, fr2.id]);
+  assert.equal((await api('GET', '/api/friends/requests', { token: fr2.token })).body.requests.length, 0, 'süresi dolan istek');
+  assert.equal((await api('GET', '/api/me/badges', { token: fr2.token })).body.friends, 0);
+  ok(await api('POST', `/api/friends/request/${fr2.id}`, { token: fr1.token }));
+  assert.equal((await api('GET', '/api/friends/requests', { token: fr2.token })).body.requests.length, 1, 'yeniden gönderilince geçerli');
+  assert.equal((await api('GET', '/api/me/badges', { token: fr2.token })).body.friends, 1);
   ok(await api('POST', `/api/users/${U.b.id}/follow`, { token: U.c.token }));
   // engelleme: takip kalkar, mesaj/arama kapanır
   ok(await api('POST', `/api/blocks/${U.b.id}`, { token: U.c.token }));
@@ -806,7 +831,24 @@ test('Keşfet akışı, banner ve duyurular', { skip, timeout: 90000 }, async ()
   const ann = await api('GET', '/api/announcements?kind=event', { token: a.token });
   assert.equal(ann.body.announcements[0].title, 'Etkinlik');
   const sum = await api('GET', '/api/inbox-summary', { token: a.token });
-  assert.ok(sum.body.event >= 0);
+  assert.ok(sum.body.event >= 1);
+  // görselli/bağlantılı duyuru kartı; rozetler türe göre ayrı sıfırlanır
+  const apng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const aimg = await api('PUT', '/api/admin/announcements/image', { token: U.d.token, raw: apng, headers: { 'Content-Type': 'image/png' } });
+  ok(aimg, 'duyuru görseli');
+  ok(await api('POST', '/api/admin/announcements', { token: U.d.token, body: { kind: 'reward', title: 'Ödül transferi', text: 'Ödülün gönderildi', imageUrl: aimg.body.url, linkUrl: 'https://example.com/odul' } }));
+  status(await api('POST', '/api/admin/announcements', { token: U.d.token, body: { kind: 'reward', title: 'Kötü', text: 'x', imageUrl: 'https://evil.test/a.png' } }), 400, 'dış görsel');
+  const rw = (await api('GET', '/api/announcements?kind=reward', { token: a.token })).body.announcements[0];
+  assert.equal(rw.imageUrl, aimg.body.url);
+  assert.equal(rw.linkUrl, 'https://example.com/odul');
+  const sumBefore = (await api('GET', '/api/inbox-summary', { token: a.token })).body;
+  assert.ok(sumBefore.reward >= 1 && sumBefore.event >= 1);
+  ok(await api('POST', '/api/inbox-summary/seen', { token: a.token, body: { kind: 'reward' } }));
+  const after2 = (await api('GET', '/api/inbox-summary', { token: a.token })).body;
+  assert.equal(after2.reward, 0, 'ödül kartı okundu');
+  assert.equal(after2.event, sumBefore.event, 'etkinlik rozeti korunur');
+  ok(await api('POST', '/api/inbox-summary/seen', { token: a.token, body: {} }));
+  assert.equal((await api('GET', '/api/inbox-summary', { token: a.token })).body.event, 0, 'türsüz istek hepsini sıfırlar');
   assert.deepEqual((await api('GET', '/api/banners')).body.banners, []);
   // oda bölgesi / şehir filtresi ve yeni koltuk düzeni
   const fc = await register('fc');
@@ -862,6 +904,43 @@ test('kalıcı oda: bir kez kur, tek adımda aç, ad/etiket sabit, yöneticiler 
   const video = await api('POST', '/api/rooms', { token: own.token, body: { name: 'Kamera', roomType: 'video', seatCount: 4 } });
   status(video, 201);
   assert.equal(video.body.room.roomType, 'video');
+  assert.equal(video.body.room.layout, 'grid', 'eski istek: çoklu (ızgara) düzen');
+  // "Yayın başlat" (setup: true): kayıtlı bilgiler güncellenir; canlı yayında koltuk sayısı 4'e sabitlenir
+  ok(await api('POST', `/api/rooms/${video.body.room.id}/close`, { token: own.token }));
+  const live = await api('POST', '/api/rooms', { token: own.token, body: { setup: true, roomType: 'video', layout: 'live', name: 'Canlı Ben', tags: ['Sohbet'], seatCount: 12 } });
+  status(live, 201);
+  assert.equal(live.body.room.layout, 'live');
+  assert.equal(live.body.room.seatCount, 4);
+  assert.equal(live.body.room.name, 'Canlı Ben');
+  assert.deepEqual(live.body.room.tags, ['sohbet']);
+  status(await api('PATCH', `/api/rooms/${live.body.room.id}`, { token: own.token, body: { seatCount: 9 } }), 400, 'canlı yayında koltuk sabit');
+  const listed = (await api('GET', '/api/rooms?type=video', { token: own.token })).body.rooms.find((x) => x.id === live.body.room.id);
+  assert.equal(listed.layout, 'live');
+  ok(await api('POST', `/api/rooms/${live.body.room.id}/close`, { token: own.token }));
+  const grid = await api('POST', '/api/rooms', { token: own.token, body: { setup: true, roomType: 'video', layout: 'grid', name: 'Çoklu Ben', tags: ['eğlence'], seatCount: 6 } });
+  status(grid, 201);
+  assert.equal(grid.body.room.layout, 'grid');
+  assert.equal(grid.body.room.seatCount, 6);
+  assert.deepEqual(grid.body.room.tags, ['eğlence']);
+  const vm = (await api('GET', '/api/rooms/mine', { token: own.token })).body.rooms.video;
+  assert.equal(vm.layout, 'grid');
+  assert.equal(vm.name, 'Çoklu Ben');
+  assert.equal(vm.activeRoomId, grid.body.room.id);
+  // sesli: kapak/duyuru/etiket/mikrofon modu ilk kurulumda kaydedilir; sonraki açılışlar setup olmadan aynı bilgilerle açar
+  const an = await register('pa');
+  const setupA = await api('POST', '/api/rooms', { token: an.token, body: { setup: true, roomType: 'audio', name: 'Duyurulu', tags: ['müzik'], seatCount: 15, announcement: 'Hoş geldiniz!' } });
+  status(setupA, 201);
+  assert.equal(setupA.body.room.announcement, 'Hoş geldiniz!');
+  assert.equal(setupA.body.room.layout, 'grid');
+  assert.equal(setupA.body.room.seatCount, 15);
+  status(await api('POST', '/api/rooms', { token: an.token, body: { setup: true, roomType: 'audio', name: 'X', seatCount: 15 } }), 400, 'kısa ad');
+  status(await api('POST', '/api/rooms', { token: an.token, body: { setup: true, roomType: 'audio', name: 'Yedi', seatCount: 7 } }), 400, 'desteklenmeyen düzen');
+  ok(await api('POST', `/api/rooms/${setupA.body.room.id}/close`, { token: an.token }));
+  const again = await api('POST', '/api/rooms', { token: an.token, body: { roomType: 'audio' } });
+  status(again, 201);
+  assert.equal(again.body.room.name, 'Duyurulu');
+  assert.equal(again.body.room.announcement, 'Hoş geldiniz!');
+  assert.deepEqual(again.body.room.tags, ['müzik']);
 });
 
 test('liderlik tablosu, cüzdan geçmişi ve hesap silme', { skip, timeout: 60000 }, async () => {

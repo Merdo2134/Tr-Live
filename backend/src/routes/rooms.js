@@ -32,7 +32,7 @@ const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_ALPHABET[b %
 // showCode: davet kodunu yalnızca oda sahibi / yardımcı sahip görür.
 const roomJson = (r, { showCode = false } = {}) => ({
   id: r.id, roomNumber: r.room_number ?? null, announcement: r.announcement ?? '', coverUrl: r.cover_url ?? null, name: r.name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.created_at,
-  tags: r.tags ?? [], locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled !== false,
+  layout: r.layout === 'live' ? 'live' : 'grid', tags: r.tags ?? [], locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled !== false,
   hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false, lockedSeats: r.locked_seats ?? [], micRequest: r.mic_request === true,
   ...(showCode && r.join_code ? { joinCode: r.join_code } : {}),
 });
@@ -73,7 +73,7 @@ router.get('/', optionalAuth, async (req, res) => {
   const fresh = req.query.fresh === '1' || req.query.fresh === 'true';
   const r = await query(
     `SELECT r.id AS room_id, r.room_number, r.cover_url, r.announcement, r.theme_image_url,
-       (SELECT COUNT(*)::int FROM lucky_bags lb WHERE lb.room_id = r.id AND lb.status = 'open' AND lb.expires_at > NOW()) AS bag_count, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
+       (SELECT COUNT(*)::int FROM lucky_bags lb WHERE lb.room_id = r.id AND lb.status = 'open' AND lb.expires_at > NOW()) AS bag_count, r.name AS room_name, r.room_type, r.layout AS room_layout, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags,
        (r.password_hash IS NOT NULL) AS locked, r.theme, ${USER_PUBLIC_COLUMNS},
        -- Hayalet (SWIP) dinleyiciler sayılmaz; mikrofona çıkınca görünür olurlar.
        (SELECT COUNT(*)::int FROM room_members rm WHERE rm.room_id = r.id AND (rm.microphone OR rm.user_id NOT IN (SELECT id FROM active_ghosts))) AS member_count,
@@ -101,7 +101,7 @@ router.get('/', optionalAuth, async (req, res) => {
   // Kullanıcı sütunlarındaki "id" (= sahip kimliği) oda kimliğiyle karışmasın diye oda alanları takma adla alınır.
   res.json({
     rooms: r.rows.map((x) => ({
-      id: x.room_id, roomNumber: x.room_number ?? null, coverUrl: x.cover_url ?? null, bagCount: x.bag_count, name: x.room_name, roomType: x.room_type, seatCount: x.seat_count, ownerId: x.owner_id, createdAt: x.room_created_at,
+      id: x.room_id, roomNumber: x.room_number ?? null, coverUrl: x.cover_url ?? null, bagCount: x.bag_count, name: x.room_name, roomType: x.room_type, layout: x.room_layout === 'live' ? 'live' : 'grid', seatCount: x.seat_count, ownerId: x.owner_id, createdAt: x.room_created_at,
       memberCount: x.member_count, micCount: x.mic_count, tags: x.tags ?? [], locked: x.locked, theme: x.theme ?? 'default', themeImageUrl: x.theme_image_url ?? null,
       avatars: Array.isArray(x.avatars) ? x.avatars : [],
       owner: publicUser(x, req.user?.id ?? null),
@@ -112,7 +112,13 @@ router.get('/', optionalAuth, async (req, res) => {
 // ---------- Kalıcı oda ----------
 // Kullanıcı sesli ve görüntülü için birer kez oda kurar (ad, etiketler, koltuk düzeni, tema). Sonraki "oda aç"lar bu bilgilerle
 // tek adımda açar; ad ve etiketler yalnızca oda içinden (oda adına dokunarak) değiştirilir.
-const profileJson = (p) => ({ roomNumber: p.room_number ?? null, announcement: p.announcement ?? '', coverUrl: p.cover_url ?? null, roomType: p.room_type, name: p.name, tags: p.tags ?? [], seatCount: p.seat_count, theme: p.theme });
+const profileJson = (p) => ({
+  roomNumber: p.room_number ?? null, announcement: p.announcement ?? '', coverUrl: p.cover_url ?? null, roomType: p.room_type, name: p.name, tags: p.tags ?? [],
+  seatCount: p.seat_count, theme: p.theme, layout: p.layout === 'live' ? 'live' : 'grid',
+});
+
+/** Canlı yayında koltuk sayısı sabittir: yayıncı + 3 konuk penceresi. */
+export const LIVE_SEATS = 4;
 
 async function profileOf(userId, roomType, run = query) {
   return (await run(`SELECT * FROM room_profiles WHERE owner_id = $1 AND room_type = $2`, [userId, roomType])).rows[0] || null;
@@ -125,8 +131,9 @@ async function openFromProfile(userId, profile, hidden) {
     const existing = (await c.query(`SELECT * FROM rooms WHERE owner_id = $1 AND room_type = $2 AND is_active = TRUE ORDER BY created_at DESC LIMIT 1`, [userId, profile.room_type])).rows[0];
     if (existing) return { room: existing, created: false };
     const r = (await c.query(
-      `INSERT INTO rooms(name, room_type, seat_count, owner_id, tags, is_hidden, join_code, theme, room_number, announcement, cover_url) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [profile.name, profile.room_type, profile.seat_count, userId, profile.tags, hidden, hidden ? await uniqueCode((t, p) => c.query(t, p)) : null, profile.theme, profile.room_number ?? await newRoomNumber((t, p) => c.query(t, p)), profile.announcement ?? null, profile.cover_url ?? null],
+      `INSERT INTO rooms(name, room_type, seat_count, owner_id, tags, is_hidden, join_code, theme, room_number, announcement, cover_url, layout) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [profile.name, profile.room_type, profile.seat_count, userId, profile.tags, hidden, hidden ? await uniqueCode((t, p) => c.query(t, p)) : null, profile.theme, profile.room_number ?? await newRoomNumber((t, p) => c.query(t, p)), profile.announcement ?? null, profile.cover_url ?? null,
+        profile.room_type === 'video' && profile.layout === 'live' ? 'live' : 'grid'],
     )).rows[0];
     await c.query(`INSERT INTO room_members(room_id, user_id, role, microphone, seat_index) VALUES($1,$2,'owner',TRUE,0)`, [r.id, userId]);
     // Onaylı yayıncı ise yayın oturumu başlar (süre istatistikleri için).
@@ -150,23 +157,33 @@ router.get('/mine', requireAuth, async (req, res) => {
 });
 
 // Oda aç: kayıtlı oda varsa doğrudan açar; yoksa gövdedeki bilgilerle bir kez kurar.
+// "Yayın başlat" ekranı setup: true gönderir: kayıtlı odanın bilgileri (ad, etiket, duyuru, koltuk, düzen, tema) de güncellenir.
+// setup gönderilmeyen eski istekler kayıtlı bilgilere dokunmaz (gövdedeki ad yok sayılır).
 router.post('/', requireAuth, userLimit('room_create', 20, 3600e3), async (req, res) => {
-  const roomType = req.body?.roomType === 'video' ? 'video' : 'audio';
+  const b = req.body ?? {};
+  const roomType = b.roomType === 'video' ? 'video' : 'audio';
   const userId = req.user.id;
   let profile = await profileOf(userId, roomType);
-  if (!profile) {
-    const name = cleanPublic(text(req.body?.name, 'Oda adı', { min: 2, max: 60, required: true }), 'Oda adı');
-    const tags = cleanTags(req.body?.tags);
-    const seatCount = Number(req.body?.seatCount ?? 8);
+  if (!profile || b.setup === true) {
+    const name = cleanPublic(text(b.name, 'Oda adı', { min: 2, max: 60, required: true }), 'Oda adı');
+    const tags = cleanTags(b.tags);
+    const layout = roomType === 'video' && b.layout === 'live' ? 'live' : 'grid';
+    let seatCount = Number(b.seatCount ?? profile?.seat_count ?? (roomType === 'video' ? 9 : 8));
+    if (layout === 'live') seatCount = LIVE_SEATS;
     if (!SUPPORTED_SEATS.has(seatCount)) throw fail('Geçersiz koltuk sayısı.');
-    const theme = req.body?.theme === undefined ? 'default' : oneOf(req.body.theme, THEMES, 'Tema');
+    const theme = b.theme === undefined ? (profile?.theme ?? 'default') : oneOf(b.theme, THEMES, 'Tema');
+    const announcement = b.announcement === undefined
+      ? (profile?.announcement ?? null)
+      : (cleanPublic(text(b.announcement ?? '', 'Duyuru', { min: 0, max: 200 }), 'Duyuru') || null);
     profile = (await query(
-      `INSERT INTO room_profiles(owner_id, room_type, name, tags, seat_count, theme, room_number) VALUES($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (owner_id, room_type) DO UPDATE SET updated_at = room_profiles.updated_at RETURNING *`,
-      [userId, roomType, name, tags, seatCount, theme, await newRoomNumber()],
+      `INSERT INTO room_profiles(owner_id, room_type, name, tags, seat_count, theme, room_number, announcement, layout) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (owner_id, room_type) DO UPDATE SET name = EXCLUDED.name, tags = EXCLUDED.tags, seat_count = EXCLUDED.seat_count, theme = EXCLUDED.theme,
+         announcement = EXCLUDED.announcement, layout = EXCLUDED.layout, updated_at = NOW()
+       RETURNING *`,
+      [userId, roomType, name, tags, seatCount, theme, profile?.room_number ?? await newRoomNumber(), announcement, layout],
     )).rows[0];
   }
-  const { room, created } = await openFromProfile(userId, profile, req.body?.hidden === true);
+  const { room, created } = await openFromProfile(userId, profile, b.hidden === true);
   res.status(created ? 201 : 200).json({ room: roomJson(room, { showCode: true }), created });
 });
 
@@ -352,6 +369,7 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   if (b.micRequest !== undefined) { if (typeof b.micRequest !== 'boolean') throw fail('micRequest true/false olmalı.'); set('mic_request', b.micRequest); }
   let newSeats = null;
   if (b.seatCount !== undefined) {
+    if (before.layout === 'live') throw fail('Canlı yayında konuk sayısı sabittir.');
     newSeats = Number(b.seatCount);
     if (!SUPPORTED_SEATS.has(newSeats)) throw fail('Geçersiz koltuk sayısı.');
     set('seat_count', newSeats);

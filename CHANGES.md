@@ -1,3 +1,32 @@
+## v2.40.0 — Yayın başlat (Sesli · Canlı · Çoklu), Yoho mesajlar, fotoğraf kırpma, ana sayfa üst bar
+Yayın başlat (Figma "Hillive")
+- "Oda aç"a basınca yeni **Yayın başlat** ekranı: oda fotoğrafı (seçilmediyse profil fotoğrafın), yayın başlığı, **yayın isim kartı** (Sohbet · Eğlence · Müzik · Yarışma · Film · Oyun; açılır renkli çipler), altta **Çoklu Yayın · Canlı Yayın · Sesli Yayın** düğmeleri ve "… yayına başla".
+- **Sesli:** oda duyurusu ve mikrofon modları (2 · 5 · 8 · 9 · 12 · 15 · 20 · 30; önizlemeler odadaki koltuk yerleşimiyle aynı). Sesli oda **bir kez** kurulur; sonra "Oda aç" doğrudan odana götürür.
+- **Çoklu:** 4 · 6 · 9 · 12 kişilik görüntü ızgarası (4: yayıncı solda büyük; 6: yayıncı 2×2; 9: 3×3; 12: 4×3), yayıncının hücresinde kamera önizlemesi.
+- **Canlı:** arkada tam ekran kamera önizlemesi. Odada yayıncı tam ekran, sağda en fazla 3 küçük konuk penceresi ("Konuk ol"), solda alttan sohbet.
+- Görüntülü yayın açık değilse ekran her seferinde gelir (son bilgilerle dolu); açıksa doğrudan odana girersin. Sihirli değnek = oda teması. Güzellik filtresi henüz yok (düğme "yakında" der).
+- Oda içinde: görüntülü odada kamerayı kapat/aç ve **kamerayı çevir** (koltuğuna dokun veya araçlar). Çoklu yayında "Yayın modu" 4/6/9/12 arasında değişir; canlı yayında konuk sayısı sabit.
+- Oda kartında tür etiketi kendi renginde (ör. Eğlence pembe-mor).
+- Sunucu: `rooms.layout` / `room_profiles.layout` ('grid' | 'live'), `POST /api/rooms` → `setup: true` ile kayıtlı oda bilgileri (ad, tür, duyuru, koltuk, düzen, tema) güncellenir; canlı yayında koltuk sayısı 4 (yayıncı + 3 konuk).
+
+Fotoğraf boyutu ayarı
+- Profil fotoğrafı (daire kılavuzlu kare), profil kapağı (profil sayfasındaki oran), oda fotoğrafı (kare) ve banner (3:1) seçilince **kırpma ekranı** açılır: sürükle, iki parmakla büyüt/küçült, "Kullan". Sonuç JPEG (veritabanında eskisinden ~5-10 kat az yer).
+
+Ana sayfa
+- Üst sekmeler **Popüler · Takip** (Yakında kalktı). Sağdaki ⋮ menüsü kalktı; gizli odaya kodla giriş ve kullanıcı arama, arama kutusunun sağında. Tavsiyeler / Yeni yayıncı çipleri kalktı.
+
+Mesajlar (Yoho düzeni)
+- **Mesajlar sayfası:** solda büyük "Mesajlar" başlığı, sağda arkadaş listesi; altında yana kayan kartlar **Arkadaşlık isteği · TR Live Ekibi · Etkinlik Promosyonu · Çevrimiçi Hizmet · Ödül Bildirimleri** (okunmamış rozetleriyle); altında sohbet listesi (büyük fotoğraf, ad ve rozetler, sağda saat: bugün 14:30 · "Dün 06:48" · eski "26-10-06", altında son mesaj). Üstteki uyarı şeridi ve Tümü/Özel Takip yok.
+- **Oda içinde zarf düğmesi:** alttan açılan **"Sohbet"** penceresi (aynı kartlar ve liste). Sohbete dokununca sohbet tam ekran açılır, geri gelince pencere yerinde; oda arkada çalışmaya devam eder.
+- **Sohbet ekranı:** ortada ad, sağda karşı tarafın fotoğrafı; tarih ayraçları; gelen mesaj solda gri, giden sağda yeşil baloncuk (fotoğraflarla); altta fotoğraf · "Bir şey söyle..." · emoji · gönder. **Fotoğraf gönderme** yeni. Mesaja uzun bas: kopyala / şikâyet et.
+- **Arkadaşlık isteği:** yalnızca son 7×24 saatteki istekler (Kabul et / Reddet), boşsa el sallayan simge. Süresi dolan istek yeniden gönderilince tazelenir.
+- **Ekip / Etkinlik / Ödül:** tarih ayraçlı akış; görselli duyurular kart (görsel + başlık + metin), görselsiz ekip mesajları baloncuk; bağlantı varsa "Görmek için tıklayın" (bağlantıyı kopyalar). Yönetici panelinde duyuruya görsel ve bağlantı eklenebilir. Rozetler kart başına ayrı sıfırlanır.
+- **Çevrimiçi Müşteri Hizmetleri:** üstte "Müşteri Hizmetleri Merkezi · Hemen Yardım Al!" bandı, baloncuklu yazışma, yuvarlak yazı kutusu; sağ üstte konu seçimi.
+- Henüz yok: sohbette hediye ve sesli mesaj, Yoho'daki sağ üst emoji düğmesi.
+
+APK derleme
+- "Build Android APK" iş akışında **Sunucu adresi** kutusu artık boş gelir; boş bırakılırsa depodaki `API_URL` değişkeni kullanılır. Eskiden kutuda `https://api.example.com` yazıyordu ve zip yükleyince otomatik başlayan derleme hiçbir sunucuya bağlanmayan APK üretiyordu. (`.github/workflows/apk_build.yml` elle yüklenmeli.)
+
 ## v2.39.2
 - Veritabanı bağlantı havuzu 10'dan 5'e indi (Aiven Free toplam 20 bağlantı veriyor; Render güncelleme sırasında eski ve yeni sunucu birlikte açık kalınca sınır aşılıp "veritabanına bağlanamıyor" hatası çıkabiliyordu). `DATABASE_POOL_MAX` ile ayarlanır. Bağlantı 15 sn'de alınamazsa istek askıda kalmaz.
 - Bağlantı hatası mesajında kısa hata kodu görünür (ör. "kod: 53300" = bağlantı sınırı, "28P01" = şifre yanlış).

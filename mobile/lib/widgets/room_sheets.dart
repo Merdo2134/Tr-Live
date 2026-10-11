@@ -1,21 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import '../services/api.dart';
 import 'common.dart';
+import 'image_pick.dart';
+import 'room_categories.dart';
 
 const _yellow = Color(0xFFFFE100);
 const roleLabels = {'owner': 'Oda sahibi', 'cohost': 'Yardımcı sahip', 'moderator': 'Moderatör', 'user': 'Üye'};
-const presetTags = ['Sohbet', 'Eğlence', 'Müzik', 'Yarışma', 'Film'];
-const _tagColors = {
-  'Sohbet': [Color(0xFF00B4FF), Color(0xFF0066FF)],
-  'Eğlence': [Color(0xFFFF3DCB), Color(0xFFC800FF)],
-  'Müzik': [Color(0xFF8BD400), Color(0xFF2FB500)],
-  'Yarışma': [Color(0xFFB000FF), Color(0xFF7A00FF)],
-  'Film': [Color(0xFFFF2D55), Color(0xFFC40030)],
-};
+final presetTags = [for (final c in kRoomCategories) c.label];
+
+/// Sunucudaki etiket (küçük harf) → ekranda gösterilen ad ("eğlence" → "Eğlence").
+String tagLabel(String t) => roomCategoryOf(t)?.label ?? t;
 
 Widget tagChip(String t, {bool selected = true, VoidCallback? onTap}) {
-  final c = _tagColors[t] ?? const [Color(0xFF00B4FF), Color(0xFF0066FF)];
+  final c = roomCategoryOf(t)?.colors ?? const [Color(0xFF00B4FF), Color(0xFF0066FF)];
   return GestureDetector(
     onTap: onTap,
     child: Container(
@@ -27,7 +24,7 @@ Widget tagChip(String t, {bool selected = true, VoidCallback? onTap}) {
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         if (selected && onTap != null) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.check_circle, size: 14, color: Colors.white)),
-        Text(t, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: Colors.white)),
+        Text(tagLabel(t), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: Colors.white)),
       ]),
     ),
   );
@@ -324,7 +321,7 @@ class RoomEditScreen extends StatefulWidget {
 class _RoomEditScreenState extends State<RoomEditScreen> {
   late final TextEditingController _name = TextEditingController(text: (widget.room['name'] ?? '').toString());
   late final TextEditingController _ann = TextEditingController(text: (widget.room['announcement'] ?? '').toString());
-  late final Set<String> _tags = {for (final t in (widget.room['tags'] as List?) ?? const []) t.toString()};
+  late final Set<String> _tags = {for (final t in (widget.room['tags'] as List?) ?? const []) tagLabel(t.toString())};
   late List<Map<String, dynamic>> _managers = [...widget.managers];
   String? _cover;
   bool _busy = false;
@@ -342,23 +339,11 @@ class _RoomEditScreenState extends State<RoomEditScreen> {
     super.dispose();
   }
 
-  String? _mime(List<int> b) {
-    if (b.length > 12 && b[0] == 0x89 && b[1] == 0x50) return 'image/png';
-    if (b.length > 3 && b[0] == 0xFF && b[1] == 0xD8) return 'image/jpeg';
-    if (b.length > 12 && b[0] == 0x52 && b[1] == 0x49 && b[8] == 0x57 && b[9] == 0x45) return 'image/webp';
-    return null;
-  }
-
   Future<void> _pickCover() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1200, imageQuality: 85);
-    if (picked == null) return;
-    final bytes = await picked.readAsBytes();
-    final mime = _mime(bytes);
-    if (!mounted) return;
-    if (mime == null) return toast(context, 'Yalnızca png, jpeg veya webp yüklenebilir.', error: true);
-    if (bytes.length > 3 * 1024 * 1024) return toast(context, 'Görsel 3 MB’tan küçük olmalı.', error: true);
+    final img = await pickImage(context, crop: CropSpec.roomCover);
+    if (img == null || !mounted) return;
     setState(() => _busy = true);
-    final r = await guard(context, () => Api.putBytes('/api/rooms/${widget.roomId}/cover', bytes, mime));
+    final r = await guard(context, () => Api.putBytes('/api/rooms/${widget.roomId}/cover', img.bytes, img.mime));
     if (mounted) setState(() { _busy = false; if (r != null) _cover = r['url'] as String?; });
   }
 

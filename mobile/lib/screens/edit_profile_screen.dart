@@ -1,10 +1,10 @@
 import 'dart:io' show File;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import '../services/api.dart';
 import '../services/session.dart';
 import '../widgets/common.dart';
+import '../widgets/image_pick.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -55,16 +55,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return null;
   }
 
+  /// Fotoğraf seçilince kırpma ekranı açılır: profil fotoğrafı kare (daire kılavuzlu), kapak profil sayfasındaki oranda.
   Future<void> _upload(bool cover) async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: cover ? 1600 : 1024, imageQuality: 85);
-    if (picked == null) return;
-    final bytes = await picked.readAsBytes();
-    final mime = _mime(bytes);
-    if (!mounted) return;
-    if (mime == null) return toast(context, 'Yalnızca png, jpeg veya webp yüklenebilir.', error: true);
-    if (bytes.length > 3 * 1024 * 1024) return toast(context, 'Görsel 3 MB’tan küçük olmalı.', error: true);
+    final img = await pickImage(context, crop: cover ? CropSpec.profileCover : CropSpec.avatar);
+    if (img == null || !mounted) return;
     setState(() => _uploading = true);
-    final r = await guard(context, () => Api.putBytes(cover ? '/api/me/cover' : '/api/me/avatar', bytes, mime));
+    final r = await guard(context, () => Api.putBytes(cover ? '/api/me/cover' : '/api/me/avatar', img.bytes, img.mime));
     if (r != null) await guard(context, Session.refresh);
     if (mounted) setState(() => _uploading = false);
   }

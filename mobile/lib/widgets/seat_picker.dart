@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
+import 'video_grid.dart';
 
 /// Koltuk düzeni seçici: sayı çipleri ve seçilen düzenin küçük önizlemesi.
 class SeatLayoutPicker extends StatelessWidget {
@@ -134,14 +135,19 @@ SeatLayoutSpec seatLayoutFor(int n) {
 /// Her satırdaki koltuk sayısı, yukarıdan aşağıya.
 List<int> seatRows(int n) => [for (final r in seatLayoutFor(n).rows) r.xs.length];
 
-/// Mikrofon modu küçük önizlemesi (Yoho: gece sokağı fotoğrafı üstünde yarı saydam + koltuklar).
+/// Mikrofon modu küçük önizlemesi: oda zemini (tema renkleri) üstünde, odadaki yerleşimle aynı oranda mikrofon daireleri.
+/// [colors] verilmezse gece mavisi zemin kullanılır.
 class SeatModeThumb extends StatelessWidget {
   final int n;
-  const SeatModeThumb(this.n, {super.key});
+  final List<Color>? colors;
+  const SeatModeThumb(this.n, {super.key, this.colors});
+
+  static const _night = [Color(0xFF101C52), Color(0xFF1D3580), Color(0xFF2B4FA6)];
 
   @override
   Widget build(BuildContext context) {
     final spec = seatLayoutFor(n);
+    final bg = colors == null || colors!.length < 2 ? _night : colors!;
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth;
       final h = box.maxHeight;
@@ -167,8 +173,8 @@ class SeatModeThumb extends StatelessWidget {
             width: d,
             height: d,
             child: Container(
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.22), border: Border.all(color: Colors.white54, width: 1)),
-              child: Icon(Icons.add, size: d * 0.62, color: Colors.white),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.30), border: Border.all(color: Colors.white.withValues(alpha: 0.55), width: 1)),
+              child: Icon(Icons.mic, size: d * 0.55, color: Colors.white.withValues(alpha: 0.9)),
             ),
           ));
         }
@@ -177,19 +183,9 @@ class SeatModeThumb extends StatelessWidget {
       return Stack(children: [
         Positioned.fill(
           child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1B2733), Color(0xFF2B1A22), Color(0xFF0E0F14)]),
-              borderRadius: BorderRadius.circular(10),
-            ),
+            decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: bg)),
           ),
         ),
-        // Bokeh ışıkları
-        for (final b in const [[0.25, 0.18, Color(0x66FF7043)], [0.62, 0.12, Color(0x55FFB74D)], [0.8, 0.35, Color(0x4426C6DA)], [0.4, 0.62, Color(0x55E53935)], [0.15, 0.55, Color(0x4429B6F6)]])
-          Positioned(
-            left: (b[0] as double) * w - 9,
-            top: (b[1] as double) * h - 9,
-            child: Container(width: 18, height: 18, decoration: BoxDecoration(shape: BoxShape.circle, color: b[2] as Color, boxShadow: [BoxShadow(color: b[2] as Color, blurRadius: 10)])),
-          ),
         ...dots,
       ]);
     });
@@ -198,14 +194,17 @@ class SeatModeThumb extends StatelessWidget {
 
 /// Oda içinde "Mikrofon modu" penceresi (Yoho). Pencere açık kalır; seçim [onSelect] ile uygulanır,
 /// istek modu [onRequestMode] ile değişir. İkisi de başarılıysa true döndürmelidir.
+/// [video]: çoklu (görüntülü) yayın — 4/6/9/12 kişilik ızgara önizlemeleri. [colors]: oda teması (önizleme zemini).
 Future<void> showMicModeSheet(
   BuildContext context, {
   required int current,
   required bool requestMode,
   required Future<bool> Function(int n) onSelect,
   required Future<bool> Function(bool on) onRequestMode,
+  bool video = false,
+  List<Color>? colors,
 }) {
-  const modes = [2, 5, 8, 9, 12, 15, 20, 30];
+  final modes = video ? kVideoGridModes : const [2, 5, 8, 9, 12, 15, 20, 30];
   final cur = current;
   var req = requestMode;
   var busy = false;
@@ -267,7 +266,7 @@ Future<void> showMicModeSheet(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 18),
                     decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF6A8DFF), Color(0xFF5B7CFA), Color(0xFF8B6CF3)])),
-                    child: const Text('Mikrofon modu', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 19)),
+                    child: Text(video ? 'Yayın modu' : 'Mikrofon modu', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 19)),
                   ),
                   const Padding(
                     padding: EdgeInsets.fromLTRB(14, 10, 14, 4),
@@ -298,7 +297,7 @@ Future<void> showMicModeSheet(
                                         border: Border.all(color: n == cur ? const Color(0xFF22C55E) : Colors.transparent, width: 3),
                                       ),
                                       padding: const EdgeInsets.all(1),
-                                      child: ClipRRect(borderRadius: BorderRadius.circular(10), child: SeatModeThumb(n)),
+                                      child: ClipRRect(borderRadius: BorderRadius.circular(10), child: video ? VideoGridThumb(n) : SeatModeThumb(n, colors: colors)),
                                     ),
                                   ),
                                   if (n == cur)
@@ -306,7 +305,7 @@ Future<void> showMicModeSheet(
                                 ]),
                               ),
                               const SizedBox(height: 6),
-                              Text('$n Mikrofon', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600, fontSize: 15)),
+                              Text(video ? '$n Kişi' : '$n Mikrofon', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600, fontSize: 15)),
                             ]),
                           ),
                       ],

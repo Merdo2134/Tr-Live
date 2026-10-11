@@ -266,60 +266,130 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
     }
   }
 
+  /// Üstteki bant (Yoho "Müşteri Hizmeti Merkezi · Hemen Yardım Al!").
+  Widget _banner() => Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: const LinearGradient(colors: [Color(0xFF173D2E), Color(0xFF123B45)]),
+          border: Border.all(color: Pal.outline, width: 0.8),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Müşteri Hizmetleri Merkezi', style: TextStyle(color: Color(0xFF3DDC84), fontSize: 19, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic)),
+              const SizedBox(height: 2),
+              Text(widget.category == null ? 'Hemen Yardım Al!' : 'Konu: ${widget.category}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            ]),
+          ),
+          const Icon(Icons.support_agent_rounded, size: 44, color: Color(0xFF38D5F5)),
+        ]),
+      );
+
   @override
   Widget build(BuildContext context) {
+    const mine = Color(0xFF22C55E);
+    final w = MediaQuery.sizeOf(context).width;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.category == null ? 'Müşteri Hizmetleri Merkezi' : widget.category!, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      appBar: AppBar(
+        centerTitle: true,
+        title: const Text('Çevrimiçi Müşteri Hizmetleri', maxLines: 1, overflow: TextOverflow.ellipsis),
+        actions: [
+          IconButton(
+            tooltip: 'Konu seç',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomerServiceScreen())),
+            icon: const Icon(Icons.home_repair_service_outlined, size: 28),
+          ),
+        ],
+      ),
       body: Column(children: [
         Expanded(
-          child: ListView(controller: _scroll, padding: const EdgeInsets.all(12), children: [
+          child: ListView(controller: _scroll, padding: EdgeInsets.fromLTRB(homeMargin(w), 8, homeMargin(w), 12), children: [
+            _banner(),
             for (final m in _msgs)
-              Align(
-                alignment: m['fromStaff'] == true ? Alignment.centerLeft : Alignment.centerRight,
-                child: Container(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
-                  decoration: BoxDecoration(color: m['fromStaff'] == true ? const Color(0xFF26262A) : Pal.cyan.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(14)),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    if (m['fromStaff'] == true) const Text('Müşteri Hizmetleri', style: TextStyle(fontSize: 10, color: Color(0xFFFFEB3B), fontWeight: FontWeight.w800)),
-                    if (m['category'] != null && m['fromStaff'] != true) Text('[${m['category']}]', style: const TextStyle(fontSize: 10, color: Color(0xFF00212A), fontWeight: FontWeight.w800)),
-                    Text((m['text'] ?? '').toString(), style: TextStyle(color: m['fromStaff'] == true ? Colors.white : const Color(0xFF00212A))),
-                  ]),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(
+                  mainAxisAlignment: m['fromStaff'] == true ? MainAxisAlignment.start : MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (m['fromStaff'] == true) ...[
+                      const CircleAvatar(radius: 17, backgroundColor: Color(0xFF123B45), child: Icon(Icons.support_agent_rounded, size: 20, color: Color(0xFF38D5F5))),
+                      const SizedBox(width: 8),
+                    ],
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        constraints: BoxConstraints(maxWidth: w * 0.7),
+                        decoration: BoxDecoration(color: m['fromStaff'] == true ? Pal.surfaceHi : mine, borderRadius: BorderRadius.circular(16)),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          if (m['fromStaff'] == true) const Text('Müşteri Hizmetleri', style: TextStyle(fontSize: 11, color: Color(0xFFFFE04B), fontWeight: FontWeight.w800)),
+                          if (m['category'] != null && m['fromStaff'] != true) Text('[${m['category']}]', style: const TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w800)),
+                          Text((m['text'] ?? '').toString(), style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3)),
+                        ]),
+                      ),
+                    ),
+                    if (m['fromStaff'] != true) ...[const SizedBox(width: 8), UserAvatar(user: Session.me.value, radius: 17)],
+                  ],
                 ),
               ),
             Container(
               margin: const EdgeInsets.only(top: 10),
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFFFFF3B0), borderRadius: BorderRadius.circular(14)),
+              decoration: BoxDecoration(color: const Color(0xFF3D321A), borderRadius: BorderRadius.circular(14)),
               child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Icon(Icons.campaign, color: Color(0xFFE6A700)),
+                Icon(Icons.campaign, color: Color(0xFFFFC43D)),
                 SizedBox(width: 8),
-                Expanded(child: Text('Merhaba, müşteri hizmetleri ile iletişime geçtiğiniz için teşekkür ediyoruz. Çalışma saatlerimiz her gün saat 09:00\'dan saat 01:00\'a kadardır. Lütfen sorununuzu detaylı bir şekilde bize iletiniz.', style: TextStyle(color: Color(0xFF8A5A00), height: 1.35))),
+                Expanded(child: Text('Merhaba, müşteri hizmetleri ile iletişime geçtiğiniz için teşekkür ediyoruz. Çalışma saatlerimiz her gün saat 09:00\'dan saat 01:00\'a kadardır. Lütfen sorununuzu detaylı bir şekilde bize iletiniz.', style: TextStyle(color: Color(0xFFFFE6A8), height: 1.35))),
               ]),
             ),
           ]),
         ),
-        SafeArea(
-          top: false,
-          child: Container(
-            color: const Color(0xFF1A1A1A),
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-            child: Row(children: [
-              Expanded(
-                child: TextField(
-                  controller: _ctl,
-                  minLines: 1,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _send(),
-                  decoration: InputDecoration(hintText: 'Mesajınızı yazın...', filled: true, fillColor: Colors.white, hintStyle: const TextStyle(color: Colors.black38), isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none)),
-                  style: const TextStyle(color: Colors.black),
-                ),
+        // Yoho: yuvarlak yazı kutusu, içinde sağda gönder düğmesi.
+        Container(
+          color: Pal.surface,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              child: Container(
+                padding: const EdgeInsets.only(left: 16, right: 4),
+                decoration: BoxDecoration(color: Pal.surfaceHi, borderRadius: BorderRadius.circular(26)),
+                child: Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _ctl,
+                      minLines: 1,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _send(),
+                      decoration: const InputDecoration(
+                        hintText: 'Bir şeyler yazın...',
+                        isDense: true,
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Material(
+                      color: _sending ? Pal.outline : mine,
+                      shape: const StadiumBorder(),
+                      child: InkWell(
+                        customBorder: const StadiumBorder(),
+                        onTap: _sending ? null : _send,
+                        child: const SizedBox(width: 56, height: 38, child: Icon(Icons.send_rounded, color: Colors.white)),
+                      ),
+                    ),
+                  ),
+                ]),
               ),
-              const SizedBox(width: 8),
-              IconButton.filled(style: IconButton.styleFrom(backgroundColor: const Color(0xFFFFC107), foregroundColor: Colors.black), onPressed: _sending ? null : _send, icon: const Icon(Icons.send)),
-            ]),
+            ),
           ),
         ),
       ]),

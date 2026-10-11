@@ -38,22 +38,30 @@ router.get('/banners', async (_req, res) => {
 });
 
 // ---------- Duyurular (Mesajlar ekranındaki kartlar) ----------
+const ANNOUNCEMENT_KINDS = ['team', 'event', 'reward'];
+
 router.get('/announcements', requireAuth, async (req, res) => {
-  const kind = ['team', 'event', 'reward'].includes(req.query.kind) ? req.query.kind : null;
+  const kind = ANNOUNCEMENT_KINDS.includes(req.query.kind) ? req.query.kind : null;
   const r = await query(
-    `SELECT id, kind, title, body, created_at FROM announcements WHERE ($1::text IS NULL OR kind = $1) ORDER BY created_at DESC LIMIT 50`,
+    `SELECT id, kind, title, body, image_url, link_url, created_at FROM announcements WHERE ($1::text IS NULL OR kind = $1) ORDER BY created_at DESC LIMIT 50`,
     [kind],
   );
-  res.json({ announcements: r.rows.map((a) => ({ id: a.id, kind: a.kind, title: a.title, text: a.body, createdAt: a.created_at })) });
+  res.json({
+    announcements: r.rows.map((a) => ({
+      id: a.id, kind: a.kind, title: a.title, text: a.body, imageUrl: a.image_url ?? null, linkUrl: a.link_url ?? null, createdAt: a.created_at,
+    })),
+  });
 });
 
-// Kart rozetleri: okunmamış duyuru sayıları ve yeni takipçiler.
+// Kart rozetleri: türe göre okunmamış duyuru sayıları ve yeni takipçiler. Her kart kendi okunma zamanını tutar
+// (users.inbox_seen); hiç açılmamış türde eski ortak okunma zamanı (announcements_seen_at) geçerlidir.
 router.get('/inbox-summary', requireAuth, async (req, res) => {
+  const seen = (k) => `COALESCE((u.inbox_seen->>'${k}')::timestamptz, u.announcements_seen_at)`;
   const r = await query(
     `SELECT
-       (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'team' AND a.created_at > u.announcements_seen_at) AS team,
-       (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'event' AND a.created_at > u.announcements_seen_at) AS event,
-       (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'reward' AND a.created_at > u.announcements_seen_at) AS reward,
+       (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'team' AND a.created_at > ${seen('team')}) AS team,
+       (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'event' AND a.created_at > ${seen('event')}) AS event,
+       (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'reward' AND a.created_at > ${seen('reward')}) AS reward,
        (SELECT COUNT(*)::int FROM follows f WHERE f.followed_id = u.id AND f.created_at > u.announcements_seen_at) AS followers
      FROM users u WHERE u.id = $1`,
     [req.user.id],
@@ -61,8 +69,14 @@ router.get('/inbox-summary', requireAuth, async (req, res) => {
   res.json(r.rows[0] ?? { team: 0, event: 0, reward: 0, followers: 0 });
 });
 
+// Kart açılınca o türün rozeti sıfırlanır; tür verilmezse (eski sürüm) hepsi.
 router.post('/inbox-summary/seen', requireAuth, async (req, res) => {
-  await query(`UPDATE users SET announcements_seen_at = NOW() WHERE id = $1`, [req.user.id]);
+  const kind = ANNOUNCEMENT_KINDS.includes(req.body?.kind) ? req.body.kind : null;
+  if (kind) {
+    await query(`UPDATE users SET inbox_seen = inbox_seen || jsonb_build_object($2::text, NOW()) WHERE id = $1`, [req.user.id, kind]);
+  } else {
+    await query(`UPDATE users SET announcements_seen_at = NOW(), inbox_seen = '{}'::jsonb WHERE id = $1`, [req.user.id]);
+  }
   res.json({ ok: true });
 });
 

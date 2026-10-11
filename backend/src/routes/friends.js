@@ -47,6 +47,7 @@ router.get('/requests', async (req, res) => {
     `SELECT ${USER_PUBLIC_COLUMNS}, fr.created_at AS requested_at
      FROM friend_requests fr JOIN users u ON u.id = fr.requester_id ${USER_PUBLIC_JOINS}
      WHERE fr.target_id = $1 AND fr.status = 'pending' AND u.account_status = 'active'
+       AND fr.created_at > NOW() - INTERVAL '7 days' -- yalnızca geçerli istekler (7×24 saat)
      ORDER BY fr.created_at DESC LIMIT 100`,
     [req.user.id],
   );
@@ -66,7 +67,8 @@ router.post('/request/:userId', userLimit('friendreq', 40, 3600e3), async (req, 
   }
   await query(
     `INSERT INTO friend_requests(requester_id, target_id) VALUES($1,$2)
-     ON CONFLICT (requester_id, target_id) DO NOTHING`,
+     ON CONFLICT (requester_id, target_id) DO UPDATE SET created_at = NOW()
+       WHERE friend_requests.status = 'pending' AND friend_requests.created_at < NOW() - INTERVAL '7 days'`, // süresi dolan istek yenilenir
     [req.user.id, other],
   );
   hub.sendToUser(other, { type: 'friend_update' });

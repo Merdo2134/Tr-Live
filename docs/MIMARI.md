@@ -100,6 +100,18 @@ Yoho ölçüleri (ekran genişliği w'ye oranla; Yoho ile yan yana ekran görün
 Koltuk ölçeği yalnızca ekran genişliğine (çok kısa ekranlarda gövde yüksekliğine) bağlıdır; oturmak, izleyici, klavye,
 başlıktaki rozetler hiçbir ölçüyü değiştirmez. Başlık, koltuk adları, alt bar ve oda kartları telefonun yazı boyutundan etkilenmez.
 
+Yayın başlat ve görüntülü oda düzenleri (v2.40, `screens/go_live_screen.dart`, `widgets/video_grid.dart`):
+
+| Öğe | Değer |
+|---|---|
+| Yayın başlat | kapat düğmesi = alt bar düğmesi (0,084w) · yazı kutuları 0,087w (32–42 dp) · kapak kare = 2 kutu + ara · tür düğmeleri 0,115w · başlat satırı 0,12w |
+| Çoklu yayın ızgarası | 4: yayıncı 0,75w × 1w + sağda 3 hücre (0,25w × w/3) · 6: yayıncı 2×2 hücre (hücre w/3) · 9: 3×3 · 12: 4×3 (hücre 0,25w); kenar boşluğu yok |
+| Canlı yayın | yayıncı tam ekran (koltuk 0) · konuk pencereleri sağda 0,27w × 4:3, en fazla 3 · sohbet solda, sahnenin alt %46'sı |
+| Sesli mikrofon modu önizlemesi | odadaki koltuk yerleşimiyle aynı oran (`seatLayoutFor`) |
+| Mesajlar | kartlar 0,2w × 0,236w (yana kayar) · satır yüksekliği 0,19w · avatar yarıçapı 0,066w |
+
+Sunucu: görüntülü odalarda `rooms.layout` = `grid` (çoklu) | `live` (canlı; koltuk sayısı 4 sabit).
+
 ## Backend dosya yapısı
 
 ```

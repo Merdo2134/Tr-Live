@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import express from 'express';
 import { query } from '../database.js';
 import { requireAuth } from '../auth.js';
 import { fail, uuid, positiveInt } from '../http.js';
@@ -9,11 +10,14 @@ import { screenText } from '../services/moderation.js';
 import { presenceView } from '../services/presence.js';
 import { areFriends } from './friends.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
+import { saveUpload, IMAGE_TYPES, OWN_IMAGE_RE } from '../services/images.js';
 
 export const router = Router();
 router.use(requireAuth);
 
-const msgJson = (m) => ({ id: m.id, senderId: m.sender_id, receiverId: m.receiver_id, text: m.body, createdAt: m.created_at, readAt: m.read_at });
+const msgJson = (m) => ({ id: m.id, senderId: m.sender_id, receiverId: m.receiver_id, text: m.body, imageUrl: m.image_url ?? null, createdAt: m.created_at, readAt: m.read_at });
+// Sohbet listesinde fotoğraf mesajının önizlemesi.
+const PREVIEW = `CASE WHEN body = '' AND image_url IS NOT NULL THEN '📷 Fotoğraf' ELSE body END`;
 
 router.get('/unread-count', async (req, res) => {
   const r = await query(`SELECT COUNT(*)::int AS n FROM direct_messages WHERE receiver_id = $1 AND read_at IS NULL`, [req.user.id]);
@@ -24,7 +28,7 @@ router.get('/conversations', async (req, res) => {
   const r = await query(
     `WITH mine AS (
        SELECT CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END AS peer,
-              id AS message_id, body, created_at AS message_at, sender_id
+              id AS message_id, ${PREVIEW} AS body, created_at AS message_at, sender_id
        FROM direct_messages WHERE sender_id = $1 OR receiver_id = $1
      ), latest AS (
        SELECT DISTINCT ON (peer) peer, message_id, body, message_at, sender_id FROM mine ORDER BY peer, message_at DESC
@@ -61,11 +65,23 @@ router.get('/with/:userId', async (req, res) => {
   res.json({ messages: r.rows.reverse().map(msgJson) });
 });
 
+// Sohbete fotoğraf: önce yüklenir, dönen adres mesajla gönderilir.
+router.put('/image', userLimit('dm_image', 30, 3600e3), express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
+  res.json({ url: await saveUpload(req, 'dm') });
+});
+
 router.post('/with/:userId', userLimit('dm10s', 6, 10e3), userLimit('dm1h', 200, 3600e3), async (req, res) => {
   const peerId = uuid(req.params.userId, 'Kullanıcı');
   if (peerId === req.user.id) throw fail('Kendinize mesaj gönderemezsiniz.');
-  const body = cleanMultiline(req.body?.text, 1000);
-  if (!body) throw fail('Mesaj boş olamaz.');
+  const body = cleanMultiline(req.body?.text ?? '', 1000) ?? '';
+  let imageUrl = null;
+  if (req.body?.imageUrl) {
+    imageUrl = String(req.body.imageUrl);
+    if (!OWN_IMAGE_RE.test(imageUrl)) throw fail('Görsel adresi geçersiz.');
+    const own = await query(`SELECT 1 FROM upload_owners WHERE url = $1 AND owner_id = $2`, [imageUrl, req.user.id]);
+    if (!own.rowCount) throw fail('Yalnızca kendi yüklediğin fotoğrafı gönderebilirsin.', 403);
+  }
+  if (!body && !imageUrl) throw fail('Mesaj boş olamaz.');
 
   const peer = (await query(`SELECT who_can_dm, account_status FROM users WHERE id = $1`, [peerId])).rows[0];
   if (!peer || peer.account_status !== 'active') throw fail('Kullanıcı bulunamadı.', 404);
@@ -78,8 +94,8 @@ router.post('/with/:userId', userLimit('dm10s', 6, 10e3), userLimit('dm1h', 200,
   // Yalnızca arkadaş olan kişiler mesajlaşabilir.
   if (!(await areFriends(req.user.id, peerId))) throw fail('Mesajlaşmak için önce arkadaş olmalısınız.', 403);
   // İçerik denetimi alıcı kontrollerinden sonra: var olmayan / engelli kişiye yazma denemesi ihlal sayılmasın.
-  await screenText(req.user, body, 'dm');
-  const m = (await query(`INSERT INTO direct_messages(sender_id, receiver_id, body) VALUES($1,$2,$3) RETURNING *`, [req.user.id, peerId, body])).rows[0];
+  if (body) await screenText(req.user, body, 'dm');
+  const m = (await query(`INSERT INTO direct_messages(sender_id, receiver_id, body, image_url) VALUES($1,$2,$3,$4) RETURNING *`, [req.user.id, peerId, body, imageUrl])).rows[0];
   const message = msgJson(m);
   hub.sendToUser(peerId, { type: 'dm', message });
   res.status(201).json({ message });
