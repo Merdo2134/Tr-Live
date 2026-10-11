@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: "Sunucu adresi — boş bırakın: depodaki API_URL değişkeni kullanılır (örn. https://tr-live-1.onrender.com)"
+        description: "Sunucu adresi"
         required: false
-        default: ""
+        default: "https://tr-live-1.onrender.com"
       allow_http:
         description: "http:// adresine izin ver (yalnızca test için)"
         type: boolean
@@ -17,9 +17,8 @@ on:
       - "mobile/**"
       - ".github/workflows/apk_build.yml"
 
-# contents: write → derlenen APK, "Releases" sayfasına doğrudan indirilebilir dosya olarak konur (zip açmak gerekmez).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-apk:
@@ -182,7 +181,8 @@ jobs:
           set -euo pipefail
           API_URL="${INPUT_API_URL:-}"
           [ -n "$API_URL" ] || API_URL="${REPO_API_URL:-}"
-          [ -n "$API_URL" ] || API_URL="https://api.example.com"
+          # Kutu boşsa ve depo değişkeni yoksa (zip yükleyince otomatik başlayan derleme) asıl sunucu kullanılır.
+          [ -n "$API_URL" ] || API_URL="https://tr-live-1.onrender.com"
           if ! printf '%s' "$API_URL" | grep -qE '^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$'; then
             echo "::error::Sunucu adresi geçersiz: $API_URL"; exit 1
           fi
@@ -247,33 +247,8 @@ jobs:
             echo "### APK hazır ✅"
             echo "- Dosya: \`$(basename "$APK")\` ($(du -h "$APK" | cut -f1))"
             echo "- Sunucu adresi: \`$API_URL\`"
-            echo "- **En kolayı:** telefondan https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/TR-Live.apk adresini açın; APK doğrudan iner (zip yok)."
-            echo "- Yedek: aşağıdaki **Artifacts** bölümünden \`tr-live-apk\` (zip)."
+            echo "- Aşağıdaki **Artifacts** bölümünden \`tr-live-apk\` dosyasını indirin, zip'ten çıkarıp yükleyin."
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # Zip'li çıktı bazı telefonlarda "arşiv bozuk / sağlama hatası" ile açılamıyor. APK ayrıca Releases sayfasına
-      # TR-Live.apk adıyla konur: .../releases/latest/download/TR-Live.apk her zaman en yeni APK'dır.
-      - name: APK'yı Releases sayfasına koy (doğrudan indirme)
-        if: success()
-        # Bu adım bir sebeple olmazsa zip'li çıktı yine de yüklensin.
-        continue-on-error: true
-        shell: bash
-        working-directory: ${{ env.APP_DIR }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          V="$(grep -E '^version:' pubspec.yaml | sed -E 's/^version: *([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
-          TAG="apk-v${V}-${GITHUB_RUN_NUMBER}"
-          cp "$(ls build/app/outputs/flutter-apk/*.apk | head -1)" TR-Live.apk
-          sha256sum TR-Live.apk
-          gh release create "$TAG" TR-Live.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
-            --title "TR Live v${V} (derleme ${GITHUB_RUN_NUMBER})" \
-            --notes "Sunucu adresi: ${API_URL}. Telefondan TR-Live.apk dosyasına dokunup indirin ve yükleyin."
-          # Eski APK sürümleri: son 5 tanesi kalır.
-          { gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | grep '^apk-v' || true; } | tail -n +6 | while read -r old; do
-            gh release delete "$old" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          done
 
       - name: APK'yı çıktı olarak paylaş
         uses: actions/upload-artifact@v4
@@ -282,7 +257,7 @@ jobs:
           path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
           retention-days: 14
-          # APK zaten sıkıştırılmış: zip içinde yeniden sıkıştırılmadan saklanır.
+          # APK zaten sıkıştırılmış: zip içinde yeniden sıkıştırılmaz.
           compression-level: 0
 
       - name: Hata günlüklerini paylaş
