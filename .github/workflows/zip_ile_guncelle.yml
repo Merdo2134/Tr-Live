@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: zip-guncelle
-  cancel-in-progress: false
+  cancel-in-progres: false
 
 jobs:
   guncelle:
@@ -63,23 +63,28 @@ jobs:
           rm -rf "$T/.github"
           cp -a "$T/." .
           rm -f ./TR-Live-v*.zip
-          grep -m1 '^version:' mobile/pubspec.yaml | tee /tmp/ver.txt
+          
+          # Sürüm numarasını güvenli bir şekilde ayıkla
+          VER=$(grep -m1 '^version:' mobile/pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r' || echo "bilinmeyen")
+          echo "VERSION=$VER" >> "$GITHUB_ENV"
 
       - name: Değişiklikleri kaydet
-        if: env.NOZIP != '1'
+        if: ${{ env.NOZIP != '1' }}
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          if git diff --cached --quiet; then echo "Değişiklik yok."; exit 0; fi
-          VER="$(sed 's/version: *//' /tmp/ver.txt)"
-          git commit -q -m "TR Live v${VER} (zip ile güncellendi)"
+          if git diff --cached --quiet; then 
+            echo "Değişiklik yok."
+            exit 0
+          fi
+          git commit -q -m "TR Live v${{ env.VERSION }} (zip ile güncellendi)"
           git push
 
       - name: APK derlemesini başlat
-        if: env.NOZIP != '1'
+        if: ${{ env.NOZIP != '1' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
