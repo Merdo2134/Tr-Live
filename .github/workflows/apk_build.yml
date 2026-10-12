@@ -18,7 +18,7 @@ on:
       - ".github/workflows/apk_build.yml"
 
 permissions:
-  contents: write  # APK çıktısını yükleyebilmek veya release oluşturabilmek için write yapıldı
+  contents: read
 
 jobs:
   build-apk:
@@ -80,6 +80,7 @@ jobs:
             echo "android klasörü eksik veya yarım; flutter create ile üretiliyor..."
             rm -rf android
             flutter create . --platforms=android --project-name "$APP_NAME" --org com.trlive
+            # flutter create örnek bir test ekleyebilir; bu projede olmayan MyApp'e bağlıdır, silinir.
             if [ -f test/widget_test.dart ] && grep -q 'MyApp' test/widget_test.dart; then rm -f test/widget_test.dart; fi
           fi
           test -f android/app/src/main/AndroidManifest.xml
@@ -93,6 +94,7 @@ jobs:
           python3 - <<'PY'
           import os, re, pathlib, sys
 
+          # 1) minSdk: build.gradle.kts ve build.gradle ikisini de destekler
           gradle = None
           for name in ("android/app/build.gradle.kts", "android/app/build.gradle"):
               if os.path.exists(name):
@@ -113,26 +115,158 @@ jobs:
           if n:
               gradle.write_text(new)
               print(f"{gradle}: minSdk 24 yapıldı")
+
+          # 1b) Tüm eklentileri (file_picker vb.) compileSdk 36 ile derle.
+          # Eski eklentiler android-34 ile derlenir; flutter_plugin_android_lifecycle ise 36 ister ve "checkReleaseAarMetadata" hatası verir.
+          marker_txt = "// TRLIVE_COMPILE_SDK"
+          kts, grv = pathlib.Path("android/build.gradle.kts"), pathlib.Path("android/build.gradle")
+          if kts.exists():
+              t = kts.read_text()
+              if marker_txt not in t:
+                  block = (marker_txt + "\n"
+                           "subprojects {\n"
+                           "    val trliveFix: Project.() -> Unit = {\n"
+                           "        extensions.findByName(\"android\")?.withGroovyBuilder { \"compileSdkVersion\"(36) }\n"
+                           "    }\n"
+                           "    if (state.executed) trliveFix() else afterEvaluate { trliveFix() }\n"
+                           "}\n\n")
+                  kts.write_text(block + t)
+                  print("android/build.gradle.kts: compileSdk 36 zorlandı")
+          elif grv.exists():
+              t = grv.read_text()
+              if marker_txt not in t:
+                  block = (marker_txt + "\n"
+                           "subprojects {\n"
+                           "    def trliveFix = { Project pr ->\n"
+                           "        if (pr.hasProperty('android')) { pr.android.compileSdkVersion 36 }\n"
+                           "    }\n"
+                           "    if (project.state.executed) { trliveFix(project) } else { project.afterEvaluate { trliveFix(it) } }\n"
+                           "}\n\n")
+                  grv.write_text(block + t)
+                  print("android/build.gradle: compileSdk 36 zorlandı")
+          else:
+              print("UYARI: android/build.gradle(.kts) bulunamadı; compileSdk zorlanamadı")
+
+          # 2) Manifest: izinler (+ isteğe bağlı http izni)
+          mf = pathlib.Path("android/app/src/main/AndroidManifest.xml")
+          s = mf.read_text()
+          perms = ["INTERNET", "RECORD_AUDIO", "CAMERA", "MODIFY_AUDIO_SETTINGS", "ACCESS_NETWORK_STATE", "BLUETOOTH_CONNECT",
+                   "WAKE_LOCK", "POST_NOTIFICATIONS", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+                   "FOREGROUND_SERVICE_SPECIAL_USE", "SYSTEM_ALERT_WINDOW", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"]
+          add = "".join(f'    <uses-permission android:name="android.permission.{p}"/>\n' for p in perms if f'android.permission.{p}"' not in s)
+          if add:
+              s = s.replace("<application", add + "    <application", 1)
+          # Arka plan (ön plan servisi) ve diğer uygulamaların üzerinde balon: servis bildirimleri
+          if "xmlns:tools" not in s:
+              s = s.replace("<manifest ", '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
+          services = ""
+          if "flutter_foreground_task.service.ForegroundService" not in s:
+              services += '        <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="microphone|mediaPlayback" android:exported="false" tools:replace="android:foregroundServiceType"/>\n'
+          if "OverlayService" not in s:
+              services += ('        <service android:name="flutter.overlay.window.flutter_overlay_window.OverlayService" android:exported="false" android:foregroundServiceType="specialUse" tools:replace="android:foregroundServiceType">\n'
+                           '            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Oda sesini ve yüzen balonu arka planda göstermek"/>\n'
+                           '        </service>\n')
+          if services:
+              s = s.replace("</application>", services + "    </application>", 1)
+          if os.environ.get("INPUT_ALLOW_HTTP", "").lower() == "true" and "usesCleartextTraffic" not in s:
+              s = s.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
+              print("http (cleartext) izni eklendi — yalnızca test için")
+          mf.write_text(s)
+          print("Manifest izinleri tamam")
           PY
+
+      - name: Sunucu adresini doğrula
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_URL="${INPUT_API_URL:-}"
+          [ -n "$API_URL" ] || API_URL="${REPO_API_URL:-}"
+          # Kutu boşsa ve depo değişkeni yoksa (zip yükleyince otomatik başlayan derleme) asıl sunucu kullanılır.
+          [ -n "$API_URL" ] || API_URL="https://tr-live-1.onrender.com"
+          if ! printf '%s' "$API_URL" | grep -qE '^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$'; then
+            echo "::error::Sunucu adresi geçersiz: $API_URL"; exit 1
+          fi
+          if printf '%s' "$API_URL" | grep -q '^http://' && [ "${INPUT_ALLOW_HTTP:-false}" != "true" ]; then
+            echo "::error::Android http:// adreslerini varsayılan olarak engeller. https kullanın ya da 'allow_http' kutusunu işaretleyin (yalnızca test)."
+            exit 1
+          fi
+          echo "API_URL=$API_URL" >> "$GITHUB_ENV"
+          echo "Sunucu adresi: $API_URL"
+
+      - name: Sürüm tutarlılığı (pubspec ↔ lib/version.dart)
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          P="$(grep -E '^version:' pubspec.yaml | sed -E 's/^version: *([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+          V="$(grep -oE "kAppVersion = '[0-9]+\.[0-9]+\.[0-9]+'" lib/version.dart | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+          echo "pubspec: $P · version.dart: $V"
+          if [ "$P" != "$V" ]; then echo "::error::lib/version.dart ($V) pubspec.yaml sürümüyle ($P) aynı olmalı"; exit 1; fi
 
       - name: Bağımlılıkları indir
         shell: bash
         working-directory: ${{ env.APP_DIR }}
         run: flutter pub get
 
-      - name: Run flutter analyze
+      - name: Kod analizi (hata varsa uzun derlemeyi beklemeden durur)
         shell: bash
         working-directory: ${{ env.APP_DIR }}
-        run: flutter analyze --no-fatal-infos
-        continue-on-error: true # 👈 Hataları görmeye devam edersiniz ama süreciniz kilitlenmez.
+        run: |
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee analyze.log || true
+          ERRORS="$(grep -c ' error • ' analyze.log || true)"
+          WARNINGS="$(grep -c ' warning • ' analyze.log || true)"
+          echo "Hata: $ERRORS, uyarı: $WARNINGS"
+          if [ "${ERRORS:-0}" != "0" ]; then
+            {
+              echo "### Derleme hatası ❌ ($ERRORS)"
+              echo "Aşağıdaki satırlar düzeltilmeden APK üretilemez:"
+              echo '```'
+              grep ' error • ' analyze.log | head -40
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            grep ' error • ' analyze.log | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
 
-      - name: APK Derle
+      - name: APK derle
         shell: bash
         working-directory: ${{ env.APP_DIR }}
-        run: flutter build apk --release
+        run: |
+          set -euo pipefail
+          # arm64: bugünkü telefonların neredeyse tamamı; tek dosya, küçük boyut. Debug anahtarıyla imzalanır (test/yan yükleme için).
+          flutter build apk --release --no-shrink --target-platform android-arm64 \
+            --dart-define=API_URL="$API_URL" 2>&1 | tee build.log
+          ls -la build/app/outputs/flutter-apk/
 
-      - name: APK Dosyasını Kaydet (Artifact)
+      - name: Özet
+        if: success()
+        shell: bash
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          APK="$(ls build/app/outputs/flutter-apk/*.apk | head -1)"
+          {
+            echo "### APK hazır ✅"
+            echo "- Dosya: \`$(basename "$APK")\` ($(du -h "$APK" | cut -f1))"
+            echo "- Sunucu adresi: \`$API_URL\`"
+            echo "- Aşağıdaki **Artifacts** bölümünden \`tr-live-apk\` dosyasını indirin, zip'ten çıkarıp yükleyin."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: APK'yı çıktı olarak paylaş
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
-          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          name: tr-live-apk
+          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
+          # APK zaten sıkıştırılmış: zip içinde yeniden sıkıştırılmaz.
+          compression-level: 0
+
+      - name: Hata günlüklerini paylaş
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            ${{ env.APP_DIR }}/build.log
+            ${{ env.APP_DIR }}/analyze.log
+          if-no-files-found: ignore
+          retention-days: 7
