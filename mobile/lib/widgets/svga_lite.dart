@@ -7,11 +7,11 @@ import 'package:flutter/material.dart';
 // SVGA 2.x oynatıcısı (dış paket gerektirmez). Görsel katmanları (konum, ölçek, dönüş, saydamlık) oynatır.
 // Desteklenmeyenler: vektör şekiller, kırpma yolu, matte maskeleri ve gömülü ses.
 
-class _Reader {
+class SvgaReader {
   final Uint8List d;
   int p;
   final int end;
-  _Reader(this.d, [int start = 0, int? stop])
+  SvgaReader(this.d, [int start = 0, int? stop])
       : p = start,
         end = stop ?? d.length;
   bool get more => p < end;
@@ -21,7 +21,7 @@ class _Reader {
     while (p < end) {
       final b = d[p++];
       r |= (b & 0x7f) << shift;
-      if (b & 0x80 == 0) break;
+      if ((b & 0x80) == 0) break;
       shift += 7;
     }
     return r;
@@ -34,9 +34,9 @@ class _Reader {
   }
 
   /// Uzunluk-önekli alanın içeriği için alt okuyucu.
-  _Reader sub() {
+  SvgaReader sub() {
     final len = varint();
-    final r = _Reader(d, p, p + len);
+    final r = SvgaReader(d, p, p + len);
     p += len;
     return r;
   }
@@ -65,18 +65,18 @@ class _Reader {
   }
 }
 
-class _SvgaFrame {
+class SvgaFrame {
   final double alpha;
   final double w;
   final double h;
   final List<double> m; // a b c d tx ty
-  _SvgaFrame(this.alpha, this.w, this.h, this.m);
+  SvgaFrame(this.alpha, this.w, this.h, this.m);
 }
 
-class _SvgaSprite {
+class SvgaSprite {
   final String key;
-  final List<_SvgaFrame?> frames;
-  _SvgaSprite(this.key, this.frames);
+  final List<SvgaFrame?> frames;
+  SvgaSprite(this.key, this.frames);
 }
 
 class SvgaMovie {
@@ -84,7 +84,7 @@ class SvgaMovie {
   final double vh;
   final int fps;
   final int frames;
-  final List<_SvgaSprite> sprites;
+  final List<SvgaSprite> sprites;
   final Map<String, ui.Image> images;
   SvgaMovie(this.vw, this.vh, this.fps, this.frames, this.sprites, this.images);
 
@@ -110,11 +110,11 @@ class SvgaMovie {
   }
 
   static Future<SvgaMovie> _parse(Uint8List data) async {
-    final rd = _Reader(data);
+    final rd = SvgaReader(data);
     double vw = 0, vh = 0;
     var fps = 20, frames = 0;
     final rawImages = <String, Uint8List>{};
-    final sprites = <_SvgaSprite>[];
+    final sprites = <SvgaSprite>[];
     while (rd.more) {
       final tag = rd.varint();
       final field = tag >> 3;
@@ -171,9 +171,9 @@ class SvgaMovie {
     return SvgaMovie(vw, vh, fps, frames, sprites, images);
   }
 
-  static _SvgaSprite _parseSprite(_Reader r, int total) {
+  static SvgaSprite _parseSprite(SvgaReader r, int total) {
     var key = '';
-    final fr = <_SvgaFrame?>[];
+    final fr = <SvgaFrame?>[];
     while (r.more) {
       final t = r.varint();
       final f = t >> 3;
@@ -186,146 +186,43 @@ class SvgaMovie {
         r.skip(w);
       }
     }
-    return _SvgaSprite(key, fr);
+    return SvgaSprite(key, fr);
   }
 
-  static _SvgaFrame? _parseFrame(_Reader r) {
-    double alpha = 0, lw = 0, lh = 0;
-    var m = <double>[1, 0, 0, 1, 0, 0];
+  static SvgaFrame? _parseFrame(SvgaReader r) {
+    double alpha = 1.0;
+    double w = 0.0, h = 0.0;
+    List<double> m = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
     while (r.more) {
       final t = r.varint();
       final f = t >> 3;
-      final w = t & 7;
-      if (f == 1 && w == 5) {
+      final w2 = t & 7;
+      if (f == 1 && w2 == 5) {
         alpha = r.f32();
-      } else if (f == 2 && w == 2) {
-        final l = r.sub();
-        while (l.more) {
-          final lt = l.varint();
-          final lf = lt >> 3;
-          if (lt & 7 == 5) {
-            final v = l.f32();
-            if (lf == 3) lw = v;
-            if (lf == 4) lh = v;
-          } else {
-            l.skip(lt & 7);
-          }
+      } else if (f == 2 && w2 == 2) {
+        final s = r.sub();
+        while (s.more) {
+          final t2 = s.varint();
+          final f2 = t2 >> 3;
+          if (f2 == 1 && (t2 & 7) == 5) w = s.f32();
+          else if (f2 == 2 && (t2 & 7) == 5) h = s.f32();
+          else s.skip(t2 & 7);
         }
-      } else if (f == 3 && w == 2) {
-        final tr = r.sub();
-        m = <double>[0, 0, 0, 0, 0, 0];
-        while (tr.more) {
-          final tt = tr.varint();
-          final tf = tt >> 3;
-          if (tt & 7 == 5) {
-            final v = tr.f32();
-            if (tf >= 1 && tf <= 6) m[tf - 1] = v;
+      } else if (f == 3 && w2 == 2) {
+        final s = r.sub();
+        int idx = 0;
+        while (s.more && idx < 6) {
+          final t3 = s.varint();
+          if (t3 >> 3 == idx + 1 && (t3 & 7) == 5) {
+            m[idx++] = s.f32();
           } else {
-            tr.skip(tt & 7);
+            s.skip(t3 & 7);
           }
         }
       } else {
-        r.skip(w);
+        r.skip(w2);
       }
     }
-    if (alpha <= 0 || lw <= 0 || lh <= 0) return null;
-    return _SvgaFrame(alpha, lw, lh, m);
-  }
-}
-
-class _SvgaPainter extends CustomPainter {
-  final SvgaMovie movie;
-  final Animation<double> t;
-  final BoxFit fit;
-  _SvgaPainter(this.movie, this.t, this.fit) : super(repaint: t);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final idx = (t.value * movie.frames).floor().clamp(0, movie.frames - 1);
-    final fitted = applyBoxFit(fit, Size(movie.vw, movie.vh), size);
-    final dst = Alignment.center.inscribe(fitted.destination, Offset.zero & size);
-    canvas.save();
-    canvas.clipRect(Offset.zero & size);
-    canvas.translate(dst.left, dst.top);
-    canvas.scale(dst.width / movie.vw, dst.height / movie.vh);
-    final paint = Paint()..filterQuality = FilterQuality.medium;
-    for (final s in movie.sprites) {
-      if (s.key.endsWith('.matte') || idx >= s.frames.length) continue;
-      final f = s.frames[idx];
-      final img = movie.images[s.key];
-      if (f == null || img == null) continue;
-      canvas.save();
-      final m = f.m;
-      canvas.transform(Float64List.fromList(<double>[m[0], m[1], 0, 0, m[2], m[3], 0, 0, 0, 0, 1, 0, m[4], m[5], 0, 1]));
-      paint.color = Color.fromRGBO(255, 255, 255, f.alpha.clamp(0.0, 1.0));
-      canvas.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()), Rect.fromLTWH(0, 0, f.w, f.h), paint);
-      canvas.restore();
-    }
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _SvgaPainter old) => old.movie != movie || old.fit != fit;
-}
-
-class SvgaLite extends StatefulWidget {
-  final File? file;
-  final String? url;
-  final BoxFit fit;
-  final bool repeat;
-  final VoidCallback? onDone;
-  final ValueChanged<String>? onFail;
-  const SvgaLite({super.key, this.file, this.url, this.fit = BoxFit.contain, this.repeat = false, this.onDone, this.onFail});
-
-  @override
-  State<SvgaLite> createState() => _SvgaLiteState();
-}
-
-class _SvgaLiteState extends State<SvgaLite> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this);
-  SvgaMovie? _movie;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final m = await SvgaMovie.load(file: widget.file, url: widget.url);
-      if (!mounted) {
-        m.dispose();
-        return;
-      }
-      _c.duration = m.duration;
-      setState(() => _movie = m);
-      if (widget.repeat) {
-        _c.repeat();
-      } else {
-        _c.forward().whenComplete(() {
-          if (mounted) widget.onDone?.call();
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        widget.onFail?.call('SVGA açılamadı: $e');
-        widget.onDone?.call();
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    _movie?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final m = _movie;
-    if (m == null) return const SizedBox.shrink();
-    return CustomPaint(painter: _SvgaPainter(m, _c, widget.fit), size: Size.infinite);
+    return SvgaFrame(alpha, w, h, m);
   }
 }
