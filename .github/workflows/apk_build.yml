@@ -44,7 +44,6 @@ jobs:
             -not -path '*/node_modules/*' -not -path './.git/*' | sort)
           if [ -z "$APP_PUBSPEC" ]; then
             echo "::error::Depoda Flutter projesi (içinde 'sdk: flutter' geçen pubspec.yaml) bulunamadı."
-            echo "Deponun ilk 3 seviyesi:"; find . -maxdepth 3 -not -path './.git/*' | sort | head -80
             exit 1
           fi
           APP_DIR="$(cd "$(dirname "$APP_PUBSPEC")" && pwd)"
@@ -52,7 +51,6 @@ jobs:
           if ! printf '%s' "$APP_NAME" | grep -qE '^[a-z][a-z0-9_]*$'; then APP_NAME="tr_live"; fi
           echo "APP_DIR=$APP_DIR"   >> "$GITHUB_ENV"
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
-          echo "Flutter projesi bulundu: $APP_DIR (paket adı: $APP_NAME)"
 
       - name: Java 17 kur
         uses: actions/setup-java@v4
@@ -71,48 +69,52 @@ jobs:
         working-directory: ${{ env.APP_DIR }}
         run: |
           set -euo pipefail
-          flutter --version
-          HAS_GRADLE=false
-          if [ -f android/app/build.gradle ] || [ -f android/app/build.gradle.kts ]; then HAS_GRADLE=true; fi
-          if [ -f android/app/src/main/AndroidManifest.xml ] && [ "$HAS_GRADLE" = true ]; then
-            echo "android klasörü zaten var, üretilmiyor."
+          if [ -f android/app/build.gradle ] || [ -f android/app/build.gradle.kts ]; then
+            echo "android klasörü zaten var."
           else
-            echo "android klasörü eksik veya yarım; flutter create ile üretiliyor..."
-            rm -rf android
             flutter create . --platforms=android --project-name "$APP_NAME" --org com.trlive
             if [ -f test/widget_test.dart ] && grep -q 'MyApp' test/widget_test.dart; then rm -f test/widget_test.dart; fi
           fi
-          test -f android/app/src/main/AndroidManifest.xml
-          echo "android/app içeriği:"; ls -la android/app
 
-      - name: Android ayarlarını düzelt (minSdk 24, izinler)
+      - name: Android ayarlarını düzelt (minSdk 24 ve Tüm Eklentileri compileSdk 36 yap)
         shell: bash
         working-directory: ${{ env.APP_DIR }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import os, re, pathlib, sys
-
+          
+          # 1) minSdk ayarını 24 yap
           gradle = None
           for name in ("android/app/build.gradle.kts", "android/app/build.gradle"):
               if os.path.exists(name):
                   gradle = pathlib.Path(name); break
-          if gradle is None:
-              sys.exit("HATA: android/app/build.gradle(.kts) bulunamadı")
-          src = gradle.read_text()
-          new, n = re.subn(r"(minSdk(?:Version)?)(\s*=?\s*)flutter\.minSdkVersion", r"\g<1>\g<2>24", src)
-          if n == 0:
-              m = re.search(r"minSdk(?:Version)?\s*=?\s*(\d+)", src)
-              if m and int(m.group(1)) >= 24:
-                  print(f"minSdk zaten {m.group(1)}")
-              elif m:
+          if gradle:
+              src = gradle.read_text()
+              new, n = re.subn(r"(minSdk(?:Version)?)(\s*=?\s*)flutter\.minSdkVersion", r"\g<1>\g<2>24", src)
+              if not n:
                   new = re.sub(r"(minSdk(?:Version)?)(\s*=?\s*)\d+", r"\g<1>\g<2>24", src, count=1)
-                  n = 1
-              else:
-                  print("UYARI: minSdk satırı bulunamadı; Flutter varsayılanı kullanılacak")
-          if n:
               gradle.write_text(new)
-              print(f"{gradle}: minSdk 24 yapıldı")
+              print("minSdk 24 yapıldı.")
+
+          # 2) Tüm eklentilerin compileSdk sürümünü 36'ya zorla (file_picker hatasını çözer)
+          root_gradle = pathlib.Path("android/build.gradle")
+          if root_gradle.exists():
+              g_src = root_gradle.read_text()
+              subproject_block = """
+          subprojects {
+              afterEvaluate { project ->
+                  if (project.hasProperty('android')) {
+                      project.android {
+                          compileSdkVersion 36
+                      }
+                  }
+              }
+          }
+          """
+              if "subprojects" not in g_src:
+                  root_gradle.write_text(g_src + subproject_block)
+                  print("Eklentiler için compileSdkVersion 36 zorlaması eklendi.")
           PY
 
       - name: Bağımlılıkları indir
@@ -124,7 +126,7 @@ jobs:
         shell: bash
         working-directory: ${{ env.APP_DIR }}
         run: flutter analyze --no-fatal-infos
-        continue-on-error: true # 👈 Tüm hataları detaylıca listeler ama sürecin çökmesini engeller
+        continue-on-error: true
 
       - name: APK Derle
         shell: bash
