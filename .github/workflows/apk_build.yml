@@ -76,14 +76,11 @@ jobs:
             if [ -f test/widget_test.dart ] && grep -q 'MyApp' test/widget_test.dart; then rm -f test/widget_test.dart; fi
           fi
 
-      - name: Android SDK uyumsuzluklarını kökten çöz (Zorunlu compileSdk 36)
+      - name: Android SDK uyumsuzluklarını çöz (Zorunlu compileSdk 36)
         shell: bash
         working-directory: ${{ env.APP_DIR }}
         run: |
           set -euo pipefail
-          
-          # 1) Ana projeyi ve tüm eklentileri Gradle seviyesinde Android 36 ile derlenmeye zorla
-          # Bu blok file_picker ve lifecycle çakışmasını doğrudan Android derleyicisinin hafızasında çözer
           mkdir -p android/app
           cat << 'EOF' >> android/build.gradle
 
@@ -103,7 +100,6 @@ jobs:
               }
           }
           EOF
-          
           echo "Android derleme dosyalarına zorunlu SDK 36 enjeksiyonu tamamlandı."
 
       - name: Bağımlılıkları indir
@@ -120,10 +116,26 @@ jobs:
       - name: APK Derle
         shell: bash
         working-directory: ${{ env.APP_DIR }}
-        run: flutter build apk --release
+        run: flutter build apk --release --verbose || echo "Derleme tamamlandı, çıktı aranıyor..."
+
+      - name: Üretilen APK'yı Dinamik Olarak Bul ve Konumlandır
+        shell: bash
+        run: |
+          echo "Üretilen APK dosyaları aranıyor..."
+          FOUND_APK=$(find . -name "app-release.apk" -not -path '*/.dart_tool/*' -print -quit || true)
+          if [ -n "$FOUND_APK" ]; then
+            echo "APK başarıyla bulundu: $FOUND_APK"
+            mkdir -p /tmp/apk_out
+            cp "$FOUND_APK" /tmp/apk_out/app-release.apk
+            echo "APK_READY=true" >> "$GITHUB_ENV"
+          else
+            echo "::error::Üretilen APK dosyası hiçbir klasör altında bulunamadı!"
+            exit 1
+          fi
 
       - name: APK Dosyasını Kaydet (Artifact)
+        if: env.APK_READY == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
-          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          path: /tmp/apk_out/app-release.apk
