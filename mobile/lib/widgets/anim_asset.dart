@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_vap_kit/flutter_vap_kit.dart';
 import 'package:lottie/lottie.dart';
 import '../services/media_cache.dart';
+import 'net_image.dart';
 import 'svga_lite.dart';
 
 /// Adresin uzantısına göre doğru oynatıcıyı seçer: svga, Lottie (json), şeffaf mp4 (VAP), webp/gif/png.
@@ -84,8 +85,11 @@ class _AnimAssetState extends State<AnimAsset> {
     }
   }
 
+  // Animasyon kendi katmanında çizilir: her karede çevresindeki ekran (koltuklar, sohbet, arka plan) yeniden çizilmez.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => RepaintBoundary(child: _player());
+
+  Widget _player() {
     final w = widget;
     final ext = AnimAsset.extOf(w.url);
     final fmt = w.format ?? '';
@@ -136,7 +140,7 @@ class _AnimAssetState extends State<AnimAsset> {
         return const SizedBox.shrink();
       });
     }
-    return Image.network(w.url, fit: w.fit, gaplessPlayback: true, errorBuilder: (_, err, ___) {
+    return NetImg(w.url, fit: w.fit, gaplessPlayback: true, errorBuilder: (_, err, ___) {
       _fail('Görsel açılamadı: $err');
       return const SizedBox.shrink();
     });

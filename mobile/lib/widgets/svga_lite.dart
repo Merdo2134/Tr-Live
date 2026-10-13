@@ -2,6 +2,7 @@ import 'dart:io' show File, ZLibCodec;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 // SVGA 2.x oynatıcısı (dış paket gerektirmez). Görsel katmanları (konum, ölçek, dönüş, saydamlık) oynatır.
@@ -69,9 +70,25 @@ class _SvgaFrame {
   final double alpha;
   final double w;
   final double h;
-  final List<double> m; // a b c d tx ty
-  _SvgaFrame(this.alpha, this.w, this.h, this.m);
+  final Float64List m4; // a b c d tx ty → 4×4 dönüşüm matrisi (çizimde her karede yeniden kurulmaz)
+  _SvgaFrame(this.alpha, this.w, this.h, List<double> m) : m4 = Float64List.fromList(<double>[m[0], m[1], 0, 0, m[2], m[3], 0, 0, 0, 0, 1, 0, m[4], m[5], 0, 1]);
 }
+
+/// Ayrıştırılmış SVGA (görseller henüz çözülmemiş). Ayrı iş parçacığında üretilir ve bellekte kısa süre saklanır.
+class _SvgaData {
+  final double vw;
+  final double vh;
+  final int fps;
+  final int frames;
+  final List<_SvgaSprite> sprites;
+  final Map<String, Uint8List> rawImages;
+  _SvgaData(this.vw, this.vh, this.fps, this.frames, this.sprites, this.rawImages);
+
+  int get bytes => rawImages.values.fold(0, (a, b) => a + b.length);
+}
+
+/// Ayrı iş parçacığında: zlib açma + protobuf ayrıştırma (büyük dosyada ana iş parçacığını yüzlerce ms kilitliyordu).
+_SvgaData _inflateAndParse(Uint8List raw) => SvgaMovie._parseData(Uint8List.fromList(ZLibCodec().decode(raw)));
 
 class _SvgaSprite {
   final String key;
@@ -96,7 +113,28 @@ class SvgaMovie {
     }
   }
 
-  static Future<SvgaMovie> load({File? file, String? url}) async {
+  // Son açılan birkaç SVGA'nın ayrıştırılmış hali: aynı çerçeve birden çok koltukta ya da aynı hediye art arda
+  // gelince dosya yeniden indirilip açılmaz.
+  static final Map<String, _SvgaData> _memo = {};
+  static final Map<String, Future<_SvgaData>> _pending = {};
+  static const int _memoMaxBytes = 24 * 1024 * 1024;
+
+  static Future<_SvgaData> _data({File? file, String? url}) {
+    final key = file?.path ?? url!;
+    final hit = _memo.remove(key);
+    if (hit != null) {
+      _memo[key] = hit; // en son kullanılan sona
+      return SynchronousFuture<_SvgaData>(hit);
+    }
+    final running = _pending[key];
+    if (running != null) return running;
+    final f = _fetch(key, file: file, url: url);
+    _pending[key] = f;
+    f.whenComplete(() => _pending.remove(key)).ignore();
+    return f;
+  }
+
+  static Future<_SvgaData> _fetch(String key, {File? file, String? url}) async {
     final Uint8List raw;
     if (file != null) {
       raw = await file.readAsBytes();
@@ -105,11 +143,31 @@ class SvgaMovie {
       if (r.statusCode != 200) throw Exception('svga indirilemedi (${r.statusCode})');
       raw = r.bodyBytes;
     }
-    final data = Uint8List.fromList(ZLibCodec().decode(raw));
-    return _parse(data);
+    final d = await compute(_inflateAndParse, raw, debugLabel: 'svga');
+    _memo[key] = d;
+    var total = _memo.values.fold<int>(0, (a, b) => a + b.bytes);
+    while (total > _memoMaxBytes && _memo.length > 1) {
+      final first = _memo.keys.first;
+      total -= _memo.remove(first)!.bytes;
+    }
+    return d;
   }
 
-  static Future<SvgaMovie> _parse(Uint8List data) async {
+  static Future<SvgaMovie> load({File? file, String? url}) async {
+    final d = await _data(file: file, url: url);
+    final images = <String, ui.Image>{};
+    for (final e in d.rawImages.entries) {
+      try {
+        final codec = await ui.instantiateImageCodec(e.value);
+        final fr = await codec.getNextFrame();
+        images[e.key] = fr.image;
+        codec.dispose();
+      } catch (_) {/* görsel çözülemezse o katman çizilmez */}
+    }
+    return SvgaMovie(d.vw, d.vh, d.fps, d.frames, d.sprites, images);
+  }
+
+  static _SvgaData _parseData(Uint8List data) {
     final rd = _Reader(data);
     double vw = 0, vh = 0;
     var fps = 20, frames = 0;
@@ -159,16 +217,8 @@ class SvgaMovie {
       }
     }
     if (vw <= 0 || vh <= 0 || frames <= 0) throw Exception('svga başlığı geçersiz');
-    final images = <String, ui.Image>{};
-    for (final e in rawImages.entries) {
-      try {
-        final codec = await ui.instantiateImageCodec(e.value);
-        final fr = await codec.getNextFrame();
-        images[e.key] = fr.image;
-        codec.dispose();
-      } catch (_) {/* görsel çözülemezse o katman çizilmez */}
-    }
-    return SvgaMovie(vw, vh, fps, frames, sprites, images);
+    // Görsel baytları ana belleğin kopyası olarak taşınır (açılmış dosyanın tamamı tutulmasın).
+    return _SvgaData(vw, vh, fps, frames, sprites, {for (final e in rawImages.entries) e.key: Uint8List.fromList(e.value)});
   }
 
   static _SvgaSprite _parseSprite(_Reader r, int total) {
@@ -255,8 +305,7 @@ class _SvgaPainter extends CustomPainter {
       final img = movie.images[s.key];
       if (f == null || img == null) continue;
       canvas.save();
-      final m = f.m;
-      canvas.transform(Float64List.fromList(<double>[m[0], m[1], 0, 0, m[2], m[3], 0, 0, 0, 0, 1, 0, m[4], m[5], 0, 1]));
+      canvas.transform(f.m4);
       paint.color = Color.fromRGBO(255, 255, 255, f.alpha.clamp(0.0, 1.0));
       canvas.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()), Rect.fromLTWH(0, 0, f.w, f.h), paint);
       canvas.restore();
@@ -326,6 +375,7 @@ class _SvgaLiteState extends State<SvgaLite> with SingleTickerProviderStateMixin
   Widget build(BuildContext context) {
     final m = _movie;
     if (m == null) return const SizedBox.shrink();
-    return CustomPaint(painter: _SvgaPainter(m, _c, widget.fit), size: Size.infinite);
+    // Ayrı katman: her karede yalnızca animasyon yeniden çizilir, çevresindeki ekran değil.
+    return RepaintBoundary(child: CustomPaint(painter: _SvgaPainter(m, _c, widget.fit), size: Size.infinite));
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api.dart';
+import 'net_image.dart';
 
 class RoomThemeDef {
   final String key;
@@ -33,15 +34,27 @@ class RoomThemeBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = themeOf(theme);
     final img = Api.absoluteUrl(imageUrl);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: t.colors.length == 1 ? [t.colors.first, t.colors.first] : t.colors),
-        image: img == null
-            ? null
-            : DecorationImage(image: NetworkImage(img), fit: BoxFit.cover, colorFilter: const ColorFilter.mode(Color(0x66000000), BlendMode.darken)),
+    final size = MediaQuery.sizeOf(context);
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    // Arka plan ayrı katmanda (RepaintBoundary): odada bir şey hareket ettikçe tam ekran görsel yeniden çizilmez.
+    // Görsel ekran boyutunda çözülür ve telefonda saklanır.
+    return Stack(fit: StackFit.expand, children: [
+      RepaintBoundary(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: t.colors.length == 1 ? [t.colors.first, t.colors.first] : t.colors),
+            image: img == null
+                ? null
+                : DecorationImage(
+                    image: NetImage(img, targetW: NetImage.px(size.width, dpr), targetH: NetImage.px(size.height, dpr)),
+                    fit: BoxFit.cover,
+                    colorFilter: const ColorFilter.mode(Color(0x66000000), BlendMode.darken),
+                  ),
+          ),
+        ),
       ),
-      child: child,
-    );
+      child,
+    ]);
   }
 }
 

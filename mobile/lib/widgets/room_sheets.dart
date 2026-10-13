@@ -255,7 +255,7 @@ void showRoomCard(
               height: 104,
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: _yellow, width: 3), color: Colors.white12),
               clipBehavior: Clip.antiAlias,
-              child: cover == null ? const Icon(Icons.image, color: Colors.white38, size: 36) : Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image, color: Colors.white38)),
+              child: cover == null ? const Icon(Icons.image, color: Colors.white38, size: 36) : NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image, color: Colors.white38)),
             ),
             const Spacer(),
             if (canEdit)
@@ -387,7 +387,7 @@ class _RoomEditScreenState extends State<RoomEditScreen> {
                 height: 130,
                 decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: _yellow, width: 3), color: Colors.white12),
                 clipBehavior: Clip.antiAlias,
-                child: cover == null ? const Icon(Icons.image, size: 40, color: Colors.white38) : Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image)),
+                child: cover == null ? const Icon(Icons.image, size: 40, color: Colors.white38) : NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image)),
               ),
               const Positioned(right: -10, bottom: -10, child: CircleAvatar(radius: 18, backgroundColor: _yellow, child: Icon(Icons.camera_alt, color: Colors.black, size: 20))),
             ]),

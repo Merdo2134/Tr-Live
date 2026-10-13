@@ -23,13 +23,14 @@ class ErrorLog {
 
   static void add(String where, Object error, [StackTrace? stack]) {
     final now = DateTime.now();
-    final stackText = (stack ?? StackTrace.empty).toString().split('\n').take(6).join('\n');
-    final line = '${now.toIso8601String()} · $where\n$error\n$stackText';
-    debugPrint(line);
-    // Aynı hata saniyede onlarca kez gelirse (ör. her karede çizim hatası) tek kayıt yeter.
+    // Aynı hata saniyede onlarca kez gelirse (ör. her karede çizim hatası) tek kayıt yeter. Bu denetim en başta:
+    // tekrar eden hatada yığın dökümü yazıya çevrilmez, günlüğe basılmaz (her karede yapılınca ekranı yavaşlatıyordu).
     final head = '$where|$error';
     final last = _lastAdd;
     if (_lastLine == head && last != null && now.difference(last) < const Duration(seconds: 5)) return;
+    final stackText = (stack ?? StackTrace.empty).toString().split('\n').take(6).join('\n');
+    final line = '${now.toIso8601String()} · $where\n$error\n$stackText';
+    debugPrint(line);
     _lastLine = head;
     _lastAdd = now;
     _mem.add(line);

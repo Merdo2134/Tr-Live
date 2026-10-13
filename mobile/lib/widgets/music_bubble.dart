@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/music_service.dart';
 import 'drag_bubble.dart';
+import 'net_image.dart';
 
 final ValueNotifier<Offset?> musicBubblePos = ValueNotifier<Offset?>(null);
 
@@ -51,11 +52,15 @@ class _MusicBubbleState extends State<MusicBubble> with SingleTickerProviderStat
             ),
             child: ClipOval(
               child: Stack(alignment: Alignment.center, fit: StackFit.expand, children: [
-                RotationTransition(
-                  turns: _spin,
-                  child: cover != null
-                      ? Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, color: Colors.pinkAccent))
-                      : const Icon(Icons.music_note, color: Colors.pinkAccent),
+                RepaintBoundary(
+                  child: RotationTransition(
+                    turns: _spin,
+                    child: RepaintBoundary(
+                      child: cover != null
+                          ? NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, color: Colors.pinkAccent))
+                          : const Icon(Icons.music_note, color: Colors.pinkAccent),
+                    ),
+                  ),
                 ),
                 if (!playing) const ColoredBox(color: Colors.black54, child: Icon(Icons.pause, color: Colors.white)),
               ]),

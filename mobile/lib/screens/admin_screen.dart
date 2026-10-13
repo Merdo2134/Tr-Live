@@ -676,7 +676,7 @@ class _CatalogTab extends StatelessWidget {
                 ),
               ),
               if (icon.text.trim().isNotEmpty)
-                Padding(padding: const EdgeInsets.only(top: 4), child: Container(width: 72, height: 72, decoration: BoxDecoration(color: const Color(0xFF0B3C5D), borderRadius: BorderRadius.circular(10)), child: Image.network(Api.absoluteUrl(icon.text.trim()) ?? '', fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white38)))),
+                Padding(padding: const EdgeInsets.only(top: 4), child: Container(width: 72, height: 72, decoration: BoxDecoration(color: const Color(0xFF0B3C5D), borderRadius: BorderRadius.circular(10)), child: NetImg(Api.absoluteUrl(icon.text.trim()) ?? '', fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white38)))),
               if (anim.text.trim().isNotEmpty)
                 Align(
                   alignment: Alignment.centerRight,

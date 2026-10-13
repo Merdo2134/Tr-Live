@@ -202,8 +202,8 @@ class _WipScreenState extends State<WipScreen> {
           ),
         ]),
         const SizedBox(height: 12),
-        // Önizleme: giriş aracı
-        Text('Giriş aracı: ${s.vehicle} ${s.vehicleName}', style: const TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w600)),
+        // Önizleme: giriş şeridi (fotoğraf, ad, WIP rozeti, seviye). Araç ayrı bir mağaza efektidir.
+        const Text('Giriş efekti: odaya girince adın, WIP rozetin ve seviyen duyurulur', style: TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w600)),
         const SizedBox(height: 6),
         ClipRRect(
           borderRadius: BorderRadius.circular(10),
@@ -211,7 +211,7 @@ class _WipScreenState extends State<WipScreen> {
             height: 64,
             color: Colors.black26,
             alignment: Alignment.center,
-            child: EntranceBanner(key: ValueKey('entrance-$sel'), user: {'displayName': myName, 'wipLevel': sel}, loop: true),
+            child: EntranceBanner(key: ValueKey('entrance-$sel'), user: {'displayName': myName, 'avatarUrl': me['avatarUrl'], 'coinLevel': me['coinLevel'], 'wipLevel': sel}, loop: true),
           ),
         ),
       ]),
@@ -234,7 +234,7 @@ class _WipScreenState extends State<WipScreen> {
       _perkTile(s, Icons.text_fields, s.nameFxText, true, null),
       _perkTile(s, Icons.chat_bubble_outline, 'Özel sohbet balonu', true, null),
       _perkTile(s, Icons.radio_button_checked, s.animatedFrame ? 'Hareketli çerçeve' : 'Avatar çerçevesi', true, null),
-      _perkTile(s, Icons.directions_car_filled_outlined, 'Giriş aracı: ${s.vehicleName}', true, null),
+      _perkTile(s, Icons.campaign_outlined, 'Giriş efekti (ad, WIP, seviye)', true, null),
       _perkTile(s, Icons.meeting_room_outlined, 'Aynı anda ${f['maxRooms'] ?? 1} oda', true, null),
       for (final p in _perks)
         if (minLevel(p.$1) != null) _perkTile(s, p.$2, p.$3, f[p.$1] == true, minLevel(p.$1)),

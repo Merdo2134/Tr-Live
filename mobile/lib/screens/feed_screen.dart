@@ -265,7 +265,7 @@ class _PostCardState extends State<PostCard> {
               borderRadius: BorderRadius.circular(14),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 480),
-                child: Image.network(img, width: double.infinity, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox(height: 120, child: Center(child: Icon(Icons.broken_image, color: Pal.textDim)))),
+                child: NetImg(img, width: double.infinity, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox(height: 120, child: Center(child: Icon(Icons.broken_image, color: Pal.textDim)))),
               ),
             ),
           ),

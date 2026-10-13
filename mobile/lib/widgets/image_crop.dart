@@ -168,7 +168,9 @@ class _CropScreenState extends State<_CropScreen> {
         _layout(box.biggest);
         final w = _imgW * _scale;
         final h = _imgH * _scale;
-        return Stack(children: [
+        // fit: expand → kırpma alanı tüm ekranı kaplar. (Yalnızca başlık yazısı konumsuz olduğu için yığın onun
+        // genişliğine küçülüyor, görsel ve çerçeve sağdan kesiliyordu.)
+        return Stack(fit: StackFit.expand, children: [
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,

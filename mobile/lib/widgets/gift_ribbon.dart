@@ -175,9 +175,13 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     _timer = Timer(const Duration(milliseconds: 5200), _next);
   }
 
+  int _entranceSeq = 0;
+
   void _showEntrance(Map<String, dynamic> e, Map<String, dynamic> effect) {
+    // Oda küçültülmüşken giriş aracı / efekti oynatılmaz.
+    if (widget.roomId != null && RoomDock.minimized.value) return;
     _entranceTimer?.cancel();
-    setState(() => _entrance = {'user': e['user'], 'effect': effect});
+    setState(() => _entrance = {'user': e['user'], 'effect': effect, 'seq': ++_entranceSeq});
     final ms = (effect['durationMs'] as num?)?.toInt() ?? 4000;
     _entranceTimer = Timer(Duration(milliseconds: ms.clamp(1000, 10000)), () {
       if (mounted) setState(() => _entrance = null);
@@ -279,7 +283,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
             gradient: LinearGradient(colors: [Color(0x00FF4081), Color(0xFFFF4081), Color(0xFF7C4DFF), Color(0x007C4DFF)]),
           ),
           child: Row(children: [
-            if (icon != null) Image.network(icon, width: 32, height: 32, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard)) else const Icon(Icons.card_giftcard),
+            if (icon != null) NetImg(icon, width: 32, height: 32, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard)) else const Icon(Icons.card_giftcard),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -322,15 +326,25 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     );
   }
 
+  /// Giriş aracı / özel giriş efekti. Araç sabit bir görselse (png/webp/jpg) odanın ortasından sağdan sola geçer;
+  /// animasyonsa (svga, Lottie, şeffaf mp4, gif) tam ekran oynar. Altında "X, Araç ile geldi" yazar.
   Widget _buildEntrance(double top) {
     final user = mapOf(_entrance!['user']);
     final effect = mapOf(_entrance!['effect']) ?? {};
     final url = Api.absoluteUrl(effect['animationUrl'] as String?);
+    final vehicle = effect['kind'] == 'vehicle';
+    final ext = url == null ? '' : AnimAsset.extOf(url);
+    final still = const {'png', 'jpg', 'jpeg', 'webp'}.contains(ext);
+    final ms = ((effect['durationMs'] as num?)?.toInt() ?? 4000).clamp(1000, 10000);
+    final name = (user?['displayName'] ?? 'Biri').toString();
+    final itemName = (effect['itemName'] ?? '').toString();
     return Positioned.fill(
       child: IgnorePointer(
         child: Stack(alignment: Alignment.center, children: [
-          if (url != null)
-            AnimAsset(url: url, cache: false),
+          if (url != null && vehicle && still)
+            _VehicleDrive(key: ValueKey('veh-${_entrance!['seq']}'), url: url, durationMs: ms)
+          else if (url != null)
+            AnimAsset(key: ValueKey('ent-${_entrance!['seq']}'), url: url, cache: false),
           Positioned(
             bottom: 140,
             child: Material(
@@ -341,7 +355,15 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   UserAvatar(user: user, radius: 14),
                   const SizedBox(width: 8),
-                  Text('${user?['displayName'] ?? 'Biri'} odaya girdi', style: const TextStyle(color: Colors.white)),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.62),
+                    child: Text(
+                      vehicle && itemName.isNotEmpty ? '$name, $itemName ile geldi' : '$name odaya girdi',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                    ),
+                  ),
                 ]),
               ),
             ),
@@ -352,6 +374,58 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   }
 }
 
+/// Sabit görselli giriş aracı: sağdan gelir, ortada kısa süre durur (hafifçe sallanarak), soldan çıkar.
+class _VehicleDrive extends StatefulWidget {
+  final String url;
+  final int durationMs;
+  const _VehicleDrive({super.key, required this.url, required this.durationMs});
+
+  @override
+  State<_VehicleDrive> createState() => _VehicleDriveState();
+}
+
+class _VehicleDriveState extends State<_VehicleDrive> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: Duration(milliseconds: widget.durationMs))..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final size = w * 0.62;
+    // Kendi katmanında: araç kayarken yalnızca konumu değişir, görsel ve oda yeniden çizilmez.
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        final t = _c.value;
+        const inEnd = 0.25, outStart = 0.75;
+        double dx;
+        if (t < inEnd) {
+          dx = (1 - Curves.easeOutCubic.transform(t / inEnd)) * w;
+        } else if (t > outStart) {
+          dx = -Curves.easeInCubic.transform((t - outStart) / (1 - outStart)) * w;
+        } else {
+          dx = 0;
+        }
+        final bob = (t * widget.durationMs / 120) % 2 < 1 ? 1.5 : -1.5;
+        return Transform.translate(offset: Offset(dx, bob), child: child);
+      },
+      child: RepaintBoundary(
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: NetImg(widget.url, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+        ),
+      ),
+      ),
+    );
+  }
+}
 
 /// Şeridi sağdan sola kaydırarak geçirir (giriş → bekleme → çıkış).
 class _SlideStrip extends StatefulWidget {
@@ -381,19 +455,21 @@ class _SlideStripState extends State<_SlideStrip> with SingleTickerProviderState
   @override
   Widget build(BuildContext context) {
     final w = MediaQuery.sizeOf(context).width;
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, child) {
-        final t = _c.value;
-        double dx = 0;
-        if (t < 0.12) {
-          dx = (1 - Curves.easeOutCubic.transform(t / 0.12)) * w;
-        } else if (t > 0.88) {
-          dx = -Curves.easeInCubic.transform((t - 0.88) / 0.12) * w;
-        }
-        return Transform.translate(offset: Offset(dx, 0), child: child);
-      },
-      child: widget.child,
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, child) {
+          final t = _c.value;
+          double dx = 0;
+          if (t < 0.12) {
+            dx = (1 - Curves.easeOutCubic.transform(t / 0.12)) * w;
+          } else if (t > 0.88) {
+            dx = -Curves.easeInCubic.transform((t - 0.88) / 0.12) * w;
+          }
+          return Transform.translate(offset: Offset(dx, 0), child: child);
+        },
+        child: RepaintBoundary(child: widget.child),
+      ),
     );
   }
 }

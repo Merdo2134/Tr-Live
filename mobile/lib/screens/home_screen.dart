@@ -54,7 +54,21 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Stack(children: [
-      Positioned.fill(child: _scaffold(context)),
+      // Oda tam ekran açıkken ana sayfa arkada çizilmez ve animasyonları durur (oda kapanınca/küçülünce aynen geri gelir).
+      Positioned.fill(
+        child: ValueListenableBuilder<RoomRequest?>(
+          valueListenable: RoomDock.request,
+          builder: (context, req, child) => ValueListenableBuilder<bool>(
+            valueListenable: RoomDock.minimized,
+            builder: (context, min, child) {
+              final covered = req != null && !min;
+              return Offstage(offstage: covered, child: TickerMode(enabled: !covered, child: child!));
+            },
+            child: child,
+          ),
+          child: _scaffold(context),
+        ),
+      ),
       // Açık oda: küçültülünce Offstage ile arka planda yaşamaya devam eder (ses kesilmez).
       ValueListenableBuilder<RoomRequest?>(
         valueListenable: RoomDock.request,
@@ -195,12 +209,13 @@ class _HomeScreenState extends State<HomeScreen> {
             child: SafeArea(
               bottom: false,
               child: GiftRibbonOverlay(
+              // Görünmeyen sekmelerin animasyonları durur (TickerMode); yalnızca açık sekme çalışır.
               child: IndexedStack(index: _index, children: [
-                RoomsTab(key: _audioKey, type: 'audio', onJoinCode: _joinByCode),
-                const FeedScreen(),
-                RoomsTab(key: _videoKey, type: 'video', onJoinCode: _joinByCode),
-                const MessagesScreen(),
-                const ProfileScreen(),
+                TickerMode(enabled: _index == 0, child: RoomsTab(key: _audioKey, type: 'audio', onJoinCode: _joinByCode)),
+                TickerMode(enabled: _index == 1, child: const FeedScreen()),
+                TickerMode(enabled: _index == 2, child: RoomsTab(key: _videoKey, type: 'video', onJoinCode: _joinByCode)),
+                TickerMode(enabled: _index == 3, child: const MessagesScreen()),
+                TickerMode(enabled: _index == 4, child: const ProfileScreen()),
               ]),
             ),
             ),

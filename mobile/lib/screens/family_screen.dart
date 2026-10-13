@@ -46,7 +46,7 @@ class _FamilyBrowserState extends State<_FamilyBrowser> {
   Widget _logo(Map<String, dynamic> f) {
     final url = Api.absoluteUrl(f['logoUrl'] as String?);
     return CircleAvatar(
-      backgroundImage: url == null ? null : NetworkImage(url),
+      backgroundImage: url == null ? null : NetImage(url, targetW: 192, targetH: 192),
       onBackgroundImageError: url == null ? null : (_, __) {},
       child: url == null ? const Icon(Icons.groups) : null,
     );

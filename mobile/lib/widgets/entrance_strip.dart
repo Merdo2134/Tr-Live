@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'wip_style.dart';
+import 'common.dart';
 
 /// Gelen girişleri sıraya alır; aynı anda yalnızca bir şerit gösterilir.
 class EntranceQueue extends ChangeNotifier {
@@ -38,7 +38,8 @@ class EntranceQueue extends ChangeNotifier {
   }
 }
 
-/// Odanın ortasından geçen WIP giriş şeridi: kademenin aracı (scooter → ejderha, SWIP'te UFO) şeridi çeker.
+/// Odanın ortasından geçen WIP giriş şeridi: kullanıcının fotoğrafı, adı, WIP rozeti ve seviyesi.
+/// (Araç burada yok: araç, mağazadan alınan ayrı "giriş aracı" efektidir ve yalnızca onu takanlarda odada belirir.)
 class EntranceStrip extends StatelessWidget {
   final EntranceQueue queue;
   const EntranceStrip({super.key, required this.queue});
@@ -104,6 +105,11 @@ class _EntranceBannerState extends State<EntranceBanner> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
+    // Kendi katmanında: şerit kayarken odanın geri kalanı yeniden çizilmez.
+    return RepaintBoundary(child: _banner());
+  }
+
+  Widget _banner() {
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth.isFinite ? box.maxWidth : MediaQuery.sizeOf(context).width;
       final s = _s;
@@ -125,47 +131,36 @@ class _EntranceBannerState extends State<EntranceBanner> with SingleTickerProvid
           } else {
             dx = 0;
           }
-          final ms = t * total;
-          final bob = math.sin(ms / 90) * (lvl >= 7 ? 2.2 : 1.4); // araç hafifçe sallanır / süzülür
+          final level = (widget.user['coinLevel'] as num?)?.toInt();
           return Transform.translate(
             offset: Offset(dx, 0),
             child: Container(
               width: w,
-              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 12),
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
               decoration: BoxDecoration(
                 gradient: LinearGradient(colors: [s.gradient.first.withValues(alpha: 0), ...s.gradient, s.gradient.last.withValues(alpha: 0)]),
                 boxShadow: [BoxShadow(color: s.color.withValues(alpha: lvl >= 6 ? 0.7 : 0.4), blurRadius: 6.0 + lvl * 2.5)],
               ),
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                // Araç önde (sola doğru gidiyor); arkasında hız çizgileri.
-                Transform.translate(
-                  offset: Offset(0, bob),
-                  child: Text(
-                    s.vehicle,
-                    style: TextStyle(fontSize: 22 + lvl * 1.3, shadows: [Shadow(color: s.color, blurRadius: lvl >= 6 ? 12 : 4)]),
-                  ),
-                ),
-                _SpeedLines(color: textColor.withValues(alpha: 0.7), phase: ms / 120),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    '$name ${s.vehicleName} ile geldi',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: textColor,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13.5 + math.min(lvl, 10) * 0.25,
-                      shadows: light ? null : const [Shadow(blurRadius: 4, color: Colors.black54)],
-                    ),
-                  ),
+                Container(
+                  padding: const EdgeInsets.all(1.5),
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: s.color),
+                  child: UserAvatar(user: widget.user, radius: 14),
                 ),
                 const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                  decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8)),
-                  child: Text(s.label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900)),
+                Flexible(
+                  child: WipNameText(
+                    name,
+                    level: lvl,
+                    color: textColor,
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14 + math.min(lvl, 10) * 0.2, shadows: light ? null : const [Shadow(blurRadius: 4, color: Colors.black54)]),
+                  ),
                 ),
+                const SizedBox(width: 5),
+                Text('odaya girdi', style: TextStyle(color: textColor, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 8),
+                _chip(s.label, Colors.black38),
+                if (level != null) ...[const SizedBox(width: 4), _chip('Lv $level', const Color(0xCCFF4F9A), icon: Icons.star_rounded)],
               ]),
             ),
           );
@@ -173,28 +168,13 @@ class _EntranceBannerState extends State<EntranceBanner> with SingleTickerProvid
       );
     });
   }
-}
 
-/// Aracın arkasında akan üç kısa çizgi.
-class _SpeedLines extends StatelessWidget {
-  final Color color;
-  final double phase;
-  const _SpeedLines({required this.color, required this.phase});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 16,
-      height: 18,
-      child: Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        for (var i = 0; i < 3; i++)
-          Container(
-            margin: EdgeInsets.only(left: ((phase + i * 0.7) % 3) * 2),
-            width: 8 - i * 1.5,
-            height: 1.6,
-            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(1)),
-          ),
-      ]),
-    );
-  }
+  Widget _chip(String text, Color bg, {IconData? icon}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (icon != null) Icon(icon, size: 12, color: Colors.white),
+          Text(text, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900)),
+        ]),
+      );
 }

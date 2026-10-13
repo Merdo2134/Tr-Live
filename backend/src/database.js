@@ -39,7 +39,12 @@ export function db() {
       connectionString: t.connectionString,
       ssl: t.sslDisabled ? false : sslOption(),
       max: POOL_MAX,
-      idleTimeoutMillis: 10000,
+      // Boştaki bağlantılar 5 dk açık tutulur: veritabanı ayrı bir sunucuda (Aiven) olduğundan her yeni bağlantı
+      // (TCP + SSL + şifre doğrulama) birkaç gidiş-dönüş, yani her istekte fazladan ~0,3–1 sn demekti. Eskiden 10 sn
+      // boşta kalan bağlantı kapanıyor, az kullanıcıyla neredeyse her istek yeni bağlantı açıyordu.
+      idleTimeoutMillis: 5 * 60 * 1000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
       // Bağlantı alınamazsa istek sonsuza dek beklemesin: 15 sn sonra anlaşılır hata döner.
       connectionTimeoutMillis: 15000,
     });

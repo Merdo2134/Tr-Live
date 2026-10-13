@@ -1,3 +1,31 @@
+## v2.40.3 — Hızlandırma
+- **Görseller telefonda saklanır:** avatarlar, oda kapakları, bannerlar, tema görselleri, hediye simgeleri ve mesaj
+  fotoğrafları bir kez indirilir; uygulama her açıldığında yeniden indirilmez (sunucu ve internet yükü azalır, listeler
+  daha hızlı dolar). Görseller ekranda çizilecekleri boyutta çözülür (büyük fotoğraflar belleği ve işlemciyi yormaz).
+- **Oda açıkken ana sayfa arkada durur:** oda tam ekranken arkadaki ana sayfa çizilmez, animasyonları çalışmaz.
+  Görünmeyen sekmelerin (Akış, Mesajlar, Profil…) animasyonları da durur.
+- **Hareketli parçalar kendi katmanında:** koltuk çerçeveleri (SVGA/Lottie), WIP renkli adlar, giriş şeridi, araç,
+  hediye şeridi ve uçan hediye, müzik balonu artık her karede odanın tamamını (arka plan, koltuklar, sohbet) yeniden
+  çizdirmiyor. Oda arka plan görseli bir kez çizilir.
+- **SVGA dosyaları arka planda açılır:** büyük hediye/çerçeve dosyası açılırken ekran donmaz; aynı dosya tekrar
+  gelince yeniden indirilip açılmaz.
+- **Ses sunucusu olayları:** oda yalnızca konuşan kişi, görüntü ya da bağlantı değişince yeniden çizilir (önceden
+  bağlantı kalitesi bildirimlerinde de saniyede birkaç kez tüm oda yeniden çiziliyordu).
+- **Sunucu:** veritabanı bağlantıları 10 sn yerine 5 dk açık tutulur. Az kullanıcıyla neredeyse her istek yeni SSL
+  bağlantısı açıyor, her istekte fazladan ~0,3–1 sn bekletiyordu.
+
+## v2.40.2 — Yayın başlat tasarımı, kırpma düzeltmesi, giriş efektleri
+- **Yayın başlat ekranı yenilendi:** daha canlı mor → lacivert → turkuaz zemin (köşelerde yumuşak ışık), çerçeveli ve gölgeli oda fotoğrafı (sağ altta kamera rozeti), koyu ve kenarlı yazı kutuları, sesli odada duyuru kutusunda megafon simgesi. Mikrofon modlarında seçili kutu sarı çerçeve + parıltı + onay işareti, her kutuda kişi sayısı. Çoklu yayında kişi sayısı tek bir şerit içinde. Tür düğmeleri biraz daha aralıklı (yazılar artık birbirine değmez), seçili olan mor parıltılı. "… yayına başla" düğmesi turkuaz gölgeli. Ölçüler ekran genişliğine göre, küçük/büyük telefonda sınırlı.
+- **Fotoğraf kırpma ekranı düzeltildi:** görsel ve çerçeve sağdan kesiliyordu; artık tüm ekranı kaplıyor.
+- **WIP giriş efekti:** odaya girişte üstte kayan bantta artık araç yok; **fotoğrafın, adın (WIP renginde), WIP rozetin ve seviyen** görünür.
+- **Araç giriş efekti ayrı:** mağazadan alınan araç yalnızca **odaya giriş efekti** olarak görünür: araç sağdan ekrana girer, ortada durur, sola çıkar; altında "Ad, Araç ile geldi". Takılı (seçili) giriş efekti öncelikli; yoksa araç, o da yoksa diğer giriş efekti.
+
+## v2.40.1 — APK iş akışı
+- APK derlemesi eski usulde: Actions → Build Android APK → Run workflow → Artifacts'tan zip. Sunucu adresi kutusu artık
+  **https://tr-live-1.onrender.com** ile dolu gelir; zip yükleyince otomatik başlayan derleme de bu adresi kullanır
+  (eskiden `api.example.com` ile bağlanamayan APK üretiyordu). APK zip içinde yeniden sıkıştırılmaz.
+- İki eski kod analizi uyarısı giderildi (GitHub'daki "Mobile / analyze" kontrolü kırmızı çıkıyordu).
+
 ## v2.40.0 — Yayın başlat (Sesli · Canlı · Çoklu), Yoho mesajlar, fotoğraf kırpma, ana sayfa üst bar
 Yayın başlat (Figma "Hillive")
 - "Oda aç"a basınca yeni **Yayın başlat** ekranı: oda fotoğrafı (seçilmediyse profil fotoğrafın), yayın başlığı, **yayın isim kartı** (Sohbet · Eğlence · Müzik · Yarışma · Film · Oyun; açılır renkli çipler), altta **Çoklu Yayın · Canlı Yayın · Sesli Yayın** düğmeleri ve "… yayına başla".

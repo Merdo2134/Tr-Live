@@ -314,7 +314,8 @@ class _WipAuraState extends State<WipAura> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     final s = WipStyle.of(widget.level);
     if (s == null) return const SizedBox.shrink();
-    return AnimatedBuilder(
+    return RepaintBoundary(
+      child: AnimatedBuilder(
       animation: _c,
       builder: (context, child) {
         final t = Curves.easeInOut.transform(_c.value);
@@ -329,6 +330,7 @@ class _WipAuraState extends State<WipAura> with SingleTickerProviderStateMixin {
           ),
         );
       },
+      ),
     );
   }
 }

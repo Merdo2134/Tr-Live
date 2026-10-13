@@ -420,7 +420,7 @@ class _SupportAdminTabState extends State<SupportAdminTab> {
             : ListView(children: [
                 for (final t in th)
                   ListTile(
-                    leading: CircleAvatar(backgroundImage: (t['avatarUrl'] as String?) == null ? null : NetworkImage(Api.absoluteUrl(t['avatarUrl'] as String)!), child: (t['avatarUrl'] as String?) == null ? const Icon(Icons.person) : null),
+                    leading: CircleAvatar(backgroundImage: (t['avatarUrl'] as String?) == null ? null : NetImage(Api.absoluteUrl(t['avatarUrl'] as String)!, targetW: 128, targetH: 128), child: (t['avatarUrl'] as String?) == null ? const Icon(Icons.person) : null),
                     title: Text('${t['displayName'] ?? t['username']}  ·  ID ${t['publicId'] ?? '-'}'),
                     subtitle: Text('${t['lastFromStaff'] == true ? 'Sen: ' : ''}${t['lastMessage']}', maxLines: 1, overflow: TextOverflow.ellipsis),
                     trailing: (t['waiting'] as num? ?? 0) > 0 ? Badge(label: Text('${t['waiting']}'), backgroundColor: Colors.red) : null,

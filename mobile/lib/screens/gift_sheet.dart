@@ -469,7 +469,7 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(6, 8, 6, 22),
                 child: icon != null
-                    ? Image.network(icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => _fallbackIcon(g))
+                    ? NetImg(icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => _fallbackIcon(g))
                     : _fallbackIcon(g),
               ),
             ),

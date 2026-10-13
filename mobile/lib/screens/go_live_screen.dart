@@ -250,37 +250,40 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
 
   Widget _body(double w, double h) {
     final pad = MediaQuery.paddingOf(context);
-    final g = RoomGeom(w);
     final m = homeMargin(w);
-    final pillH = (w * 0.087).clamp(32.0, 42.0).toDouble();
-    final pillGap = (w * 0.02).clamp(6.0, 10.0).toDouble();
-    final coverS = pillH * 2 + pillGap;
-    final closeD = g.btn;
-    final infoTop = pad.top + 8 + closeD + (w * 0.03).clamp(8.0, 16.0).toDouble();
-    final pillsLeft = m + coverS + pillGap * 1.2;
-    final infoBottom = infoTop + coverS + (_voice ? pillGap + pillH : 0);
+    // Ölçüler ekran genişliğine oranlı (oda ekranıyla aynı sistem), telefon boyutuna göre dp sınırlarıyla.
+    final closeD = (w * 0.08).clamp(28.0, 40.0).toDouble();
+    final coverS = (w * 0.205).clamp(66.0, 92.0).toDouble();
+    final pillH = (w * 0.078).clamp(28.0, 36.0).toDouble();
+    final pillGap = (w * 0.026).clamp(8.0, 12.0).toDouble();
+    final infoTop = pad.top + 10 + closeD + (w * 0.03).clamp(8.0, 16.0).toDouble();
+    final pillsLeft = m + coverS + (w * 0.03).clamp(8.0, 14.0).toDouble();
+    // İki kutu kapağın ortasına hizalı (Figma).
+    final pillsTop = infoTop + (coverS - (2 * pillH + pillGap)) / 2;
+    final annTop = infoTop + coverS + (w * 0.03).clamp(8.0, 14.0).toDouble();
+    final infoBottom = _voice ? annTop + pillH : infoTop + coverS;
 
     // Alttan yukarı: başlat satırı, tür düğmeleri, (çoklu) kişi sayısı.
-    final bottomPad = pad.bottom + (w * 0.04).clamp(10.0, 20.0).toDouble();
-    final startH = (w * 0.12).clamp(42.0, 54.0).toDouble();
+    final bottomPad = pad.bottom + (w * 0.05).clamp(14.0, 24.0).toDouble();
+    final startH = (w * 0.113).clamp(40.0, 52.0).toDouble();
     final startTop = h - bottomPad - startH;
-    final modeD = (w * 0.115).clamp(42.0, 54.0).toDouble();
-    final modeBlockH = modeD + 4 + 16;
-    final modesTop = startTop - (w * 0.05).clamp(14.0, 22.0).toDouble() - modeBlockH;
-    final chipH = (w * 0.068).clamp(24.0, 30.0).toDouble();
-    final chipsTop = modesTop - (w * 0.035).clamp(10.0, 16.0).toDouble() - chipH;
-    final contentTop = infoBottom + (w * 0.03).clamp(8.0, 14.0).toDouble();
+    final modeD = (w * 0.112).clamp(40.0, 52.0).toDouble();
+    final modeBlockH = modeD + 6 + 16;
+    final modesTop = startTop - (w * 0.055).clamp(16.0, 24.0).toDouble() - modeBlockH;
+    final chipH = (w * 0.07).clamp(24.0, 30.0).toDouble();
+    final chipsTop = modesTop - (w * 0.04).clamp(12.0, 18.0).toDouble() - chipH;
+    final contentTop = infoBottom + (w * 0.035).clamp(10.0, 16.0).toDouble();
     final contentBottom = (_mode == LiveMode.multi ? chipsTop : modesTop) - (w * 0.03).clamp(8.0, 14.0).toDouble();
 
     final camera = _mode == LiveMode.live;
-    final cardBottom = infoTop + pillH * 2 + pillGap;
+    final cardBottom = pillsTop + pillH * 2 + pillGap;
 
-    return Stack(children: [
-      // Zemin: canlı yayında kamera önizlemesi, diğerlerinde mor → mavi → turkuaz geçiş.
-      Positioned.fill(child: camera ? _cameraBackdrop() : const DecoratedBox(decoration: BoxDecoration(gradient: _bgGradient))),
+    return Stack(fit: StackFit.expand, children: [
+      // Zemin: canlı yayında kamera önizlemesi; diğerlerinde mor → lacivert → turkuaz geçiş ve iki yumuşak ışık.
+      if (camera) Positioned.fill(child: _cameraBackdrop()) else ..._background(),
       if (camera) ...[
-        const Positioned(left: 0, right: 0, top: 0, height: 220, child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(gradient: _topScrim)))),
-        const Positioned(left: 0, right: 0, bottom: 0, height: 260, child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(gradient: _bottomScrim)))),
+        const Positioned(left: 0, right: 0, top: 0, height: 230, child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(gradient: _topScrim)))),
+        const Positioned(left: 0, right: 0, bottom: 0, height: 280, child: IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(gradient: _bottomScrim)))),
       ],
       // İçerik: sesli → mikrofon modları, çoklu → kişi ızgarası.
       if (_mode == LiveMode.voice)
@@ -290,30 +293,31 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
       // Kapat
       Positioned(
         right: m,
-        top: pad.top + 8,
+        top: pad.top + 10,
         width: closeD,
         height: closeD,
         child: Material(
-          color: Colors.black.withValues(alpha: 0.45),
-          shape: const CircleBorder(),
+          color: const Color(0x73140A24),
+          shape: CircleBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.14))),
           child: InkWell(
             customBorder: const CircleBorder(),
             onTap: _busy ? null : () => Navigator.of(context).pop(),
-            child: Icon(Icons.close, color: Colors.white, size: closeD * 0.62),
+            child: Icon(Icons.close_rounded, color: Colors.white, size: closeD * 0.6),
           ),
         ),
       ),
       // Kapak + başlık + yayın isim kartı (+ sesli odada duyuru)
       Positioned(left: m, top: infoTop, width: coverS, height: coverS, child: _coverBox(coverS)),
-      Positioned(left: pillsLeft, right: m, top: infoTop, height: pillH, child: _fieldPill(pillH, _voice ? _titleA : _titleV, 'Yayın başlığı giriniz', 60)),
-      Positioned(left: pillsLeft, right: m, top: infoTop + pillH + pillGap, height: pillH, child: _cardPill(pillH)),
-      if (_voice) Positioned(left: m, right: m, top: infoTop + coverS + pillGap, height: pillH, child: _fieldPill(pillH, _annA, 'Oda duyurusu (isteğe bağlı)', 200)),
+      Positioned(left: pillsLeft, right: m, top: pillsTop, height: pillH, child: _fieldPill(pillH, _voice ? _titleA : _titleV, 'Yayın başlığı giriniz', 60)),
+      Positioned(left: pillsLeft, right: m, top: pillsTop + pillH + pillGap, height: pillH, child: _cardPill(pillH)),
+      if (_voice)
+        Positioned(left: m, right: m, top: annTop, height: pillH, child: _fieldPill(pillH, _annA, 'Oda duyurusu (isteğe bağlı)', 200, icon: Icons.campaign_outlined)),
       // Çoklu: kişi sayısı
       if (_mode == LiveMode.multi) Positioned(left: 0, right: 0, top: chipsTop, height: chipH, child: _seatChips(chipH)),
       // Tür düğmeleri
       Positioned(left: 0, right: 0, top: modesTop, height: modeBlockH, child: _modeButtons(w, modeD)),
-      // Güzellik · Başlat · Efekt/tema
-      Positioned(left: m, right: m, top: startTop, height: startH, child: _startRow(startH, pillGap)),
+      // Güzellik · Başlat · Oda teması
+      Positioned(left: m, right: m, top: startTop, height: startH, child: _startRow(startH, (w * 0.025).clamp(8.0, 12.0).toDouble())),
       // Yayın isim kartı listesi (açılır): dışına dokununca kapanır.
       if (_catOpen) ...[
         Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => setState(() => _catOpen = false))),
@@ -322,12 +326,21 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
     ]);
   }
 
+  /// Figma zemini: dikey renk geçişi + sağ üstte mor, sol altta turkuaz yumuşak ışık.
+  List<Widget> _background() => const [
+        Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: _bgGradient))),
+        Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: _glowTop))),
+        Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: _glowBottom))),
+      ];
+
   static const _bgGradient = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
-    colors: [Color(0xFF6E1990), Color(0xFF4A1C86), Color(0xFF1E3A8F), Color(0xFF0B5C9E), Color(0xFF0A98AA)],
-    stops: [0, 0.22, 0.5, 0.72, 1],
+    colors: [Color(0xFF6F1A93), Color(0xFF4F1C8C), Color(0xFF24308F), Color(0xFF0B5E9F), Color(0xFF0B9CAC)],
+    stops: [0, 0.24, 0.52, 0.74, 1],
   );
+  static const _glowTop = RadialGradient(center: Alignment(0.7, -0.84), radius: 0.9, colors: [Color(0x73BE3CE6), Color(0x00BE3CE6)]);
+  static const _glowBottom = RadialGradient(center: Alignment(-0.8, 0.84), radius: 0.9, colors: [Color(0x5914D2DC), Color(0x0014D2DC)]);
   static const _topScrim = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x8C000000), Color(0x00000000)]);
   static const _bottomScrim = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00000000), Color(0xA6000000)]);
 
@@ -353,30 +366,40 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
   Widget _coverBox(double s) {
     final picked = _voice ? _coverA : _coverV;
     final url = Api.absoluteUrl(_voice ? _coverUrlA : _coverUrlV) ?? Api.absoluteUrl(Session.me.value?['avatarUrl'] as String?);
-    final px = (s * MediaQuery.devicePixelRatioOf(context)).round().clamp(64, 720);
     final Widget image = picked != null
         ? Image.memory(picked.bytes, fit: BoxFit.cover, gaplessPlayback: true)
         : url != null
-            ? Image.network(url, fit: BoxFit.cover, cacheWidth: px, errorBuilder: (_, __, ___) => const _CoverPlaceholder())
+            ? NetImg(url, box: Size.square(s), fit: BoxFit.cover, errorBuilder: (_, __, ___) => const _CoverPlaceholder())
             : const _CoverPlaceholder();
-    final badge = s * 0.26;
+    final badge = s * 0.3;
     return GestureDetector(
       onTap: _busy ? null : _pickCover,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Stack(fit: StackFit.expand, children: [
-          image,
-          Positioned(
-            right: 4,
-            bottom: 4,
-            width: badge,
-            height: badge,
-            child: Container(
-              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(6)),
-              child: Icon(Icons.add_photo_alternate_outlined, color: Colors.white, size: badge * 0.72),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.22), width: 1.5),
+          boxShadow: const [BoxShadow(color: Color(0x4D000000), blurRadius: 12, offset: Offset(0, 4))],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10.5),
+          child: Stack(fit: StackFit.expand, children: [
+            image,
+            Positioned(
+              right: 4,
+              bottom: 4,
+              width: badge,
+              height: badge,
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFC04BF2), Color(0xFF5B6CFF)]),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                child: Icon(Icons.photo_camera_rounded, color: Colors.white, size: badge * 0.55),
+              ),
             ),
-          ),
-        ]),
+          ]),
+        ),
       ),
     );
   }
@@ -386,22 +409,25 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
         onTap: onTap,
         child: Container(
           height: h,
-          padding: EdgeInsets.symmetric(horizontal: h * 0.42),
+          padding: EdgeInsets.only(left: h * 0.5, right: h * 0.3),
           decoration: BoxDecoration(
-            color: const Color(0x73120A2A),
+            color: const Color(0xCC1C0A33),
             borderRadius: BorderRadius.circular(h / 2),
-            boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 6, offset: Offset(0, 2))],
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 8, offset: Offset(0, 3))],
           ),
           child: child,
         ),
       );
 
-  Widget _fieldPill(double h, TextEditingController ctl, String hint, int max) {
-    final fs = h * 0.4;
+  Widget _fieldPill(double h, TextEditingController ctl, String hint, int max, {IconData? icon}) {
+    final fs = h * 0.46;
     return _pillBox(
       h,
-      Center(
-        child: TextField(
+      Row(children: [
+        if (icon != null) Padding(padding: const EdgeInsets.only(right: 6), child: Icon(icon, color: Colors.white.withValues(alpha: 0.85), size: fs * 1.25)),
+        Expanded(
+          child: TextField(
           controller: ctl,
           maxLength: max,
           maxLines: 1,
@@ -414,7 +440,7 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
             filled: false,
             counterText: '',
             hintText: hint,
-            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: fs, fontWeight: FontWeight.w600),
+            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: fs, fontWeight: FontWeight.w600),
             contentPadding: EdgeInsets.zero,
             border: InputBorder.none,
             enabledBorder: InputBorder.none,
@@ -422,7 +448,8 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
             disabledBorder: InputBorder.none,
           ),
         ),
-      ),
+        ),
+      ]),
     );
   }
 
@@ -432,11 +459,11 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
       h,
       Row(children: [
         Expanded(
-          child: Text('Yayın isim kartı', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white, fontSize: h * 0.4, fontWeight: FontWeight.w600)),
+          child: Text('Yayın isim kartı', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white, fontSize: h * 0.46, fontWeight: FontWeight.w600)),
         ),
-        CategoryChip(category: cat, height: h * 0.58),
-        SizedBox(width: h * 0.15),
-        Icon(_catOpen ? Icons.keyboard_arrow_down : Icons.chevron_right, color: Colors.white, size: h * 0.62),
+        CategoryChip(category: cat, height: h * 0.64),
+        SizedBox(width: h * 0.12),
+        Icon(_catOpen ? Icons.keyboard_arrow_down_rounded : Icons.chevron_right_rounded, color: Colors.white, size: h * 0.7),
       ]),
       onTap: _busy ? null : () => setState(() => _catOpen = !_catOpen),
     );
@@ -450,7 +477,12 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
       final cw = (box.maxWidth - 16 - gap * 2) / 3;
       return Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: const Color(0xB3120A2A), borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(
+          color: const Color(0xE61C0A33),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          boxShadow: const [BoxShadow(color: Color(0x59000000), blurRadius: 14, offset: Offset(0, 6))],
+        ),
         child: Wrap(spacing: gap, runSpacing: gap, children: [
           for (final c in kRoomCategories)
             SizedBox(
@@ -476,7 +508,7 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
 
   /// Sesli: mikrofon modları (3 sütun). Önizlemedeki yerleşim odadaki koltuk yerleşimiyle aynıdır.
   Widget _voiceModesGrid(double w) {
-    final gap = homeGap(w);
+    final gap = (w * 0.016).clamp(5.0, 8.0).toDouble();
     final themeColors = _themeA == 'default' ? null : themeOf(_themeA).colors;
     return LayoutBuilder(builder: (context, box) {
       final rows = (_voiceModes.length / 3).ceil();
@@ -494,10 +526,32 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
                   height: tile,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: n == _voiceSeats ? const Color(0xFFFFE04B) : Colors.transparent, width: 2.2),
+                    border: Border.all(color: n == _voiceSeats ? const Color(0xFFFFE04B) : Colors.white.withValues(alpha: 0.12), width: n == _voiceSeats ? 2.4 : 1),
+                    boxShadow: n == _voiceSeats ? const [BoxShadow(color: Color(0x73FFE04B), blurRadius: 12)] : null,
                   ),
-                  padding: const EdgeInsets.all(1.5),
-                  child: ClipRRect(borderRadius: BorderRadius.circular(10), child: SeatModeThumb(n, colors: themeColors)),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(n == _voiceSeats ? 9.6 : 11),
+                    child: Stack(fit: StackFit.expand, children: [
+                      SeatModeThumb(n, colors: themeColors),
+                      // Kaç mikrofonlu olduğu sol altta küçük yazı; seçili olanda sağ üstte onay.
+                      Positioned(
+                        left: 6,
+                        bottom: 4,
+                        child: Text('$n', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: tile * 0.11, fontWeight: FontWeight.w800, shadows: const [Shadow(color: Colors.black54, blurRadius: 3)])),
+                      ),
+                      if (n == _voiceSeats)
+                        Positioned(
+                          right: 5,
+                          top: 5,
+                          child: Container(
+                            width: tile * 0.17,
+                            height: tile * 0.17,
+                            decoration: const BoxDecoration(color: Color(0xFFFFE04B), shape: BoxShape.circle),
+                            child: Icon(Icons.check_rounded, size: tile * 0.13, color: const Color(0xFF2B2100)),
+                          ),
+                        ),
+                    ]),
+                  ),
                 ),
               ),
           ]),
@@ -542,33 +596,39 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
     });
   }
 
+  /// Çoklu yayın kişi sayısı: yarı saydam bir şerit içinde 4 seçenek, seçili olan açık zeminli.
   Widget _seatChips(double h) {
-    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-      for (final n in kVideoGridModes)
-        Padding(
-          padding: EdgeInsets.symmetric(horizontal: h * 0.28),
-          child: GestureDetector(
-            onTap: () => setState(() => _gridSeats = n),
-            child: Container(
-              height: h,
-              padding: EdgeInsets.symmetric(horizontal: h * 0.5),
-              decoration: BoxDecoration(color: n == _gridSeats ? Colors.white.withValues(alpha: 0.38) : Colors.transparent, borderRadius: BorderRadius.circular(h / 2)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.weekend, size: h * 0.62, color: Colors.white),
-                const SizedBox(width: 2),
-                Text('$n', style: TextStyle(color: Colors.white, fontSize: h * 0.6, fontWeight: FontWeight.w700, height: 1.0)),
-              ]),
+    final cw = h * 2.3;
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(color: const Color(0x38000000), borderRadius: BorderRadius.circular(h / 2)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          for (final n in kVideoGridModes)
+            GestureDetector(
+              onTap: () => setState(() => _gridSeats = n),
+              child: Container(
+                width: cw,
+                height: h - 4,
+                margin: const EdgeInsets.symmetric(horizontal: 1),
+                decoration: BoxDecoration(color: n == _gridSeats ? Colors.white.withValues(alpha: 0.35) : Colors.transparent, borderRadius: BorderRadius.circular(h / 2)),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.weekend_rounded, size: h * 0.56, color: Colors.white),
+                  const SizedBox(width: 3),
+                  Text('$n', style: TextStyle(color: Colors.white, fontSize: h * 0.52, fontWeight: FontWeight.w800, height: 1.0)),
+                ]),
+              ),
             ),
-          ),
-        ),
-    ]);
+        ]),
+      ),
+    );
   }
 
   Widget _modeButtons(double w, double d) {
     Widget item(LiveMode m, IconData icon, String label) {
       final sel = _mode == m;
       return SizedBox(
-        width: w * 0.24,
+        width: w * 0.23,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => _setMode(m),
@@ -578,17 +638,23 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
               height: d,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: sel ? const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF4F7BFF), Color(0xFFB146F5)]) : null,
-                color: sel ? null : (_mode == LiveMode.live ? const Color(0x99000000) : const Color(0xCC0D3442)),
+                gradient: sel ? const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFC04BF2), Color(0xFF5B6CFF)]) : null,
+                color: sel ? null : (_mode == LiveMode.live ? const Color(0x8C000000) : const Color(0xBF0E2A3A)),
+                border: sel ? null : Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                boxShadow: sel ? const [BoxShadow(color: Color(0x99A050F0), blurRadius: 14)] : null,
               ),
-              child: Icon(icon, color: Colors.white, size: d * 0.55),
+              child: Icon(icon, color: Colors.white, size: d * 0.52),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             SizedBox(
               height: 16,
               child: FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Text(label, maxLines: 1, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600, height: 1.2)),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(color: Colors.white.withValues(alpha: sel ? 1 : 0.85), fontSize: 12, fontWeight: sel ? FontWeight.w800 : FontWeight.w600, height: 1.2),
+                ),
               ),
             ),
           ]),
@@ -612,14 +678,14 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
     Widget side(IconData icon, String tip, VoidCallback onTap) => Tooltip(
           message: tip,
           child: Material(
-            color: const Color(0xE60D2B36),
-            shape: const CircleBorder(),
-            child: InkWell(customBorder: const CircleBorder(), onTap: _busy ? null : onTap, child: SizedBox(width: h, height: h, child: Icon(icon, color: Colors.white, size: h * 0.55))),
+            color: const Color(0xCC0C2B36),
+            shape: CircleBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.12))),
+            child: InkWell(customBorder: const CircleBorder(), onTap: _busy ? null : onTap, child: SizedBox(width: h, height: h, child: Icon(icon, color: Colors.white, size: h * 0.52))),
           ),
         );
     return Row(children: [
       side(Icons.face_retouching_natural, 'Güzellik', () => toast(context, 'Güzellik filtresi yakında eklenecek.')),
-      SizedBox(width: gap * 1.2),
+      SizedBox(width: gap),
       Expanded(
         child: GestureDetector(
           onTap: _start,
@@ -628,16 +694,16 @@ class _GoLiveScreenState extends State<GoLiveScreen> {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(h / 2),
-              gradient: const LinearGradient(colors: [Color(0xFFB07CF7), Color(0xFF7FA6F6), Color(0xFF3FE3F3)]),
-              boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 8, offset: Offset(0, 3))],
+              gradient: const LinearGradient(colors: [Color(0xFFB47AF7), Color(0xFF7FB0F7), Color(0xFF40E3F2)]),
+              boxShadow: const [BoxShadow(color: Color(0x5940E3F2), blurRadius: 14, offset: Offset(0, 4))],
             ),
             child: _busy
                 ? SizedBox(width: h * 0.45, height: h * 0.45, child: const CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                : Text(label, maxLines: 1, style: TextStyle(color: Colors.white, fontSize: h * 0.36, fontWeight: FontWeight.w800)),
+                : Text(label, maxLines: 1, style: TextStyle(color: Colors.white, fontSize: h * 0.37, fontWeight: FontWeight.w800, letterSpacing: 0.3, shadows: const [Shadow(color: Color(0x40000000), blurRadius: 4)])),
           ),
         ),
       ),
-      SizedBox(width: gap * 1.2),
+      SizedBox(width: gap),
       side(Icons.auto_fix_high, 'Oda teması', _pickTheme),
     ]);
   }

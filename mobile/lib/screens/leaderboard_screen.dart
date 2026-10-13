@@ -47,7 +47,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
       case 'agencies':
         final a = mapOf(e['agency']);
         title = Text((a?['name'] ?? '').toString(), style: const TextStyle(fontWeight: FontWeight.w700));
-        leading = CircleAvatar(backgroundImage: a?['logoUrl'] == null ? null : NetworkImage(Api.absoluteUrl(a!['logoUrl'] as String)!), child: a?['logoUrl'] == null ? const Icon(Icons.business) : null);
+        leading = CircleAvatar(backgroundImage: a?['logoUrl'] == null ? null : NetImage(Api.absoluteUrl(a!['logoUrl'] as String)!, targetW: 128, targetH: 128), child: a?['logoUrl'] == null ? const Icon(Icons.business) : null);
       case 'rooms':
         final r = mapOf(e['room']);
         title = Text((r?['name'] ?? '').toString(), style: const TextStyle(fontWeight: FontWeight.w700));

@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'app_theme.dart';
+import 'net_image.dart';
 import 'wip_style.dart';
+export 'net_image.dart';
 export 'wip_style.dart';
 
 OverlayEntry? _toastEntry;
@@ -208,11 +210,11 @@ class UserAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = Api.absoluteUrl(user?['avatarUrl'] as String?);
     final name = (user?['displayName'] ?? '?').toString();
-    // Görsel, gösterileceği boyutta çözülür: küçük avatar için 1024 px'lik dosyayı tam çözmek belleği tüketiyordu.
-    final px = (radius * 2 * MediaQuery.devicePixelRatioOf(context)).round().clamp(32, 512);
+    // Görsel, gösterileceği boyutta çözülür ve telefonda saklanır (her açılışta yeniden indirilmez).
+    final px = NetImage.px(radius * 2, MediaQuery.devicePixelRatioOf(context));
     final avatar = CircleAvatar(
       radius: radius,
-      backgroundImage: url == null ? null : ResizeImage(NetworkImage(url), width: px),
+      backgroundImage: url == null ? null : NetImage(url, targetW: px, targetH: px),
       onBackgroundImageError: url == null ? null : (_, __) {},
       child: url == null ? Text(name.isEmpty ? '?' : trUpper(name.characters.first)) : null,
     );
@@ -332,28 +334,32 @@ class _WipNameTextState extends State<WipNameText> with TickerProviderStateMixin
     final glow = widget.color ?? s.color;
     final c = _c;
     if (fx == WipNameFx.glow || c == null) return plain(base.copyWith(shadows: [Shadow(color: glow.withValues(alpha: 0.85), blurRadius: 6)]));
+    // Hareketli adlar kendi katmanında çizilir (RepaintBoundary): sohbet/koltuk listesinin tamamı her karede yeniden çizilmez.
+    final eased = c.drive(CurveTween(curve: Curves.easeInOut));
     if (fx == WipNameFx.pulse) {
-      return AnimatedBuilder(
-        animation: c,
-        builder: (context, child) {
-          final t = Curves.easeInOut.transform(c.value);
-          return plain(base.copyWith(shadows: [Shadow(color: glow.withValues(alpha: 0.45 + 0.55 * t), blurRadius: 3 + 9 * t)]));
-        },
+      // Nabız: güçlü ışıklı kopya üstte belirip kaybolur. Yazı her karede yeniden dizilmez, yalnızca saydamlık değişir.
+      return RepaintBoundary(
+        child: Stack(fit: StackFit.passthrough, children: [
+          plain(base.copyWith(shadows: [Shadow(color: glow.withValues(alpha: 0.45), blurRadius: 3)])),
+          FadeTransition(opacity: eased, child: plain(base.copyWith(shadows: [Shadow(color: glow, blurRadius: 12)]))),
+        ]),
       );
     }
     final shadow = fx == WipNameFx.fire ? const Color(0xAAFF5722) : s.color.withValues(alpha: 0.67);
-    return AnimatedBuilder(
-      animation: c,
+    final shimmer = AnimatedBuilder(
+      animation: eased,
       builder: (context, child) {
-        final t = Curves.easeInOut.transform(c.value);
-        final masked = ShaderMask(
+        final t = eased.value;
+        return ShaderMask(
           blendMode: BlendMode.srcIn,
           shaderCallback: (r) => LinearGradient(begin: Alignment(-2.0 + 2.0 * t, 0), end: Alignment(2.0 * t, 0), colors: s.nameColors, tileMode: TileMode.mirror).createShader(r),
           child: child,
         );
-        return fx == WipNameFx.ghost ? Opacity(opacity: 0.6 + 0.4 * t, child: masked) : masked;
       },
       child: plain(base.copyWith(color: Colors.white, shadows: [Shadow(color: shadow, blurRadius: 6)])),
+    );
+    return RepaintBoundary(
+      child: fx == WipNameFx.ghost ? FadeTransition(opacity: c.drive(Tween(begin: 0.6, end: 1.0).chain(CurveTween(curve: Curves.easeInOut))), child: shimmer) : shimmer,
     );
   }
 }

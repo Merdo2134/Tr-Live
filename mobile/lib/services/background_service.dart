@@ -49,6 +49,8 @@ class BackgroundService with WidgetsBindingObserver {
     }
     try {
       // Balona dokunulunca uygulamayı öne getir.
+      // Önceki dinleyici varsa kapatılır (tek dinleyici kalsın).
+      _overlaySub?.cancel();
       _overlaySub = FlutterOverlayWindow.overlayListener.listen((data) {
         if (data == 'open') FlutterForegroundTask.launchApp();
       });

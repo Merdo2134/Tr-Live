@@ -567,7 +567,7 @@ class _OfficialChannelScreenState extends State<OfficialChannelScreen> {
         if (img != null)
           AspectRatio(
             aspectRatio: 1.8,
-            child: Image.network(img, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const ColoredBox(color: Pal.surfaceHi)),
+            child: NetImg(img, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const ColoredBox(color: Pal.surfaceHi)),
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),

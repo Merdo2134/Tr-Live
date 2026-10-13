@@ -105,7 +105,7 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
           decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.black, border: Border.all(color: Colors.white24, width: 4)),
           child: ClipOval(
             child: cover != null
-                ? Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, color: Colors.pinkAccent, size: 32))
+                ? NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, color: Colors.pinkAccent, size: 32))
                 : const Icon(Icons.music_note, color: Colors.pinkAccent, size: 32),
           ),
         );

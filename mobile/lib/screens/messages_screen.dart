@@ -240,7 +240,7 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (_) => Scaffold(
         backgroundColor: Colors.black,
         appBar: AppBar(backgroundColor: Colors.black),
-        body: Center(child: InteractiveViewer(maxScale: 5, child: Image.network(url, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white38)))),
+        body: Center(child: InteractiveViewer(maxScale: 5, child: NetImg(url, fullRes: true, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white38)))),
       ),
     ));
   }
@@ -255,7 +255,7 @@ class _ChatScreenState extends State<ChatScreen> {
           borderRadius: BorderRadius.circular(12),
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: w * 0.5, maxHeight: w * 0.7, minWidth: 60, minHeight: 60),
-            child: Image.network(img, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox(width: 120, height: 120, child: ColoredBox(color: Pal.surfaceHi, child: Icon(Icons.broken_image, color: Pal.textDim)))),
+            child: NetImg(img, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox(width: 120, height: 120, child: ColoredBox(color: Pal.surfaceHi, child: Icon(Icons.broken_image, color: Pal.textDim)))),
           ),
         ),
       );
@@ -268,7 +268,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (img != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
-            child: GestureDetector(onTap: () => _openImage(img), child: ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(img, width: w * 0.5, fit: BoxFit.cover))),
+            child: GestureDetector(onTap: () => _openImage(img), child: ClipRRect(borderRadius: BorderRadius.circular(8), child: NetImg(img, width: w * 0.5, fit: BoxFit.cover))),
           ),
         Text(text, style: TextStyle(fontSize: 15, height: 1.3, color: mine ? Colors.white : Pal.text)),
       ]),

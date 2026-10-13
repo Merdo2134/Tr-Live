@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'app_theme.dart';
 import 'room_categories.dart';
+import 'net_image.dart';
 
 /// Ana sayfa oda kartı (Yoho ölçüleri): kare kapak görseli, sol altta tür etiketi, sağ altta dinleyici sayısı ve
 /// üstünde üst üste binen üye avatarları; oda adı görselin altında. Tüm ölçüler kart genişliğine oranlıdır.
@@ -56,13 +57,7 @@ class RoomCard extends StatelessWidget {
                 child: Stack(fit: StackFit.expand, children: [
                   const ColoredBox(color: Pal.surfaceHi),
                   if (image != null)
-                    Image.network(
-                      image,
-                      fit: BoxFit.cover,
-                      cacheWidth: (cw * MediaQuery.devicePixelRatioOf(context)).round().clamp(64, 720),
-                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                      loadingBuilder: (c, w, p) => p == null ? w : const SizedBox.shrink(),
-                    )
+                    NetImg(image, box: Size.square(cw), fit: BoxFit.cover)
                   else
                     Center(child: Icon(isVideo ? Icons.videocam : Icons.graphic_eq, size: cw * 0.28, color: Pal.textDim)),
                   const DecoratedBox(
@@ -96,12 +91,7 @@ class RoomCard extends StatelessWidget {
                             child: Container(
                               decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.2), color: Pal.surfaceHi),
                               child: ClipOval(
-                                child: Image.network(
-                                  shown[i],
-                                  fit: BoxFit.cover,
-                                  cacheWidth: (av * MediaQuery.devicePixelRatioOf(context)).round().clamp(24, 96),
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                ),
+                                child: NetImg(shown[i], box: Size.square(av), fit: BoxFit.cover),
                               ),
                             ),
                           ),

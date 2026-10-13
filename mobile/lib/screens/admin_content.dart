@@ -155,7 +155,7 @@ class _ContentTabState extends State<ContentTab> {
           child: ListTile(
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: SizedBox(width: 72, height: 40, child: Image.network(Api.absoluteUrl(b['imageUrl'] as String?) ?? '', fit: BoxFit.cover, errorBuilder: (_, __, ___) => const ColoredBox(color: Pal.surfaceHi))),
+              child: SizedBox(width: 72, height: 40, child: NetImg(Api.absoluteUrl(b['imageUrl'] as String?) ?? '', fit: BoxFit.cover, errorBuilder: (_, __, ___) => const ColoredBox(color: Pal.surfaceHi))),
             ),
             title: Text((b['title'] ?? 'Başlıksız').toString()),
             subtitle: Text(b['active'] == true ? 'Yayında' : 'Gizli'),

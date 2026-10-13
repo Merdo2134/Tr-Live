@@ -101,7 +101,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             top: 0,
             height: coverH,
             child: cover != null && !hidden
-                ? Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: Colors.white12))
+                ? NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: Colors.white12))
                 : Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF7C4DFF), Color(0xFFFF4081)], begin: Alignment.topLeft, end: Alignment.bottomRight))),
           ),
           Positioned(
@@ -193,7 +193,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Widget _medalImg(Map<String, dynamic> m, double size) {
     final url = Api.absoluteUrl(m['assetUrl'] as String?);
-    return SizedBox(width: size, height: size, child: url == null ? const Icon(Icons.military_tech, color: Colors.amber) : Image.network(url, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.military_tech, color: Colors.amber)));
+    return SizedBox(width: size, height: size, child: url == null ? const Icon(Icons.military_tech, color: Colors.amber) : NetImg(url, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.military_tech, color: Colors.amber)));
   }
 
   Widget _tabs() {
@@ -354,7 +354,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   Expanded(
                     child: Api.absoluteUrl(g['iconUrl'] as String?) == null
                         ? const Icon(Icons.card_giftcard, color: Colors.amber)
-                        : Image.network(Api.absoluteUrl(g['iconUrl'] as String?)!, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard, color: Colors.amber)),
+                        : NetImg(Api.absoluteUrl(g['iconUrl'] as String?)!, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard, color: Colors.amber)),
                   ),
                   Text('x${g['quantity']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                 ])),

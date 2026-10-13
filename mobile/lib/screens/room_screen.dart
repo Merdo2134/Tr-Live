@@ -67,6 +67,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   bool _lkConnecting = false;
   int _lkRetries = 0; // ses bağlantısı koparsa artan bekleme ile yeniden bağlanılır
   Timer? _lkTick; // LiveKit değişikliklerinde tüm odayı saniyede onlarca kez yeniden çizmemek için
+  String? _lkSig; // son çizilen LiveKit durumu (bkz. _lkSignature)
   String? _password; // kilitli odada yeniden katılırken gerekir
   String? _lkError;
   bool _micOn = true;
@@ -616,12 +617,44 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         if (mounted && !_closing && _joined && _lk == null) _connectLivekit();
       });
     }
-    // Konuşma göstergeleri vb. için yeniden çizim: en fazla 200 ms'de bir.
+    // Konuşma göstergeleri ve görüntüler için yeniden çizim: en fazla 200 ms'de bir ve yalnızca ekranda görünen bir şey
+    // (kim konuşuyor, kimin görüntüsü var, bağlantı) değiştiyse. Ses sunucusu bağlantı kalitesi gibi olayları saniyede
+    // birkaç kez bildirir; her birinde tüm odayı yeniden çizmek telefonu yoruyordu.
     if (_lkTick?.isActive ?? false) return;
     _lkTick = Timer(const Duration(milliseconds: 200), () {
       _lkTick = null;
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      final sig = _lkSignature();
+      if (sig == _lkSig) return;
+      _lkSig = sig;
+      setState(() {});
     });
+  }
+
+  /// Ekranda LiveKit'ten gösterilen her şeyin özeti; değişmediyse oda yeniden çizilmez.
+  String _lkSignature() {
+    final r = _lk;
+    if (r == null) return '-';
+    final b = StringBuffer(r.connectionState.name);
+    void add(lk.Participant p) {
+      b
+        ..write('|')
+        ..write(p.identity)
+        ..write(p.isSpeaking ? '+' : '-');
+      for (final pub in p.videoTrackPublications) {
+        b
+          ..write(pub.sid)
+          ..write(pub.muted ? 'm' : '')
+          ..write(pub.track != null ? 't${identityHashCode(pub.track)}' : '');
+      }
+    }
+
+    final local = r.localParticipant;
+    if (local != null) add(local);
+    for (final p in r.remoteParticipants.values) {
+      add(p);
+    }
+    return b.toString();
   }
 
   Future<void> _connectLivekit() async {
@@ -1548,7 +1581,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                                             child: Tooltip(
                                               message: (md['name'] ?? '').toString(),
                                               child: Api.absoluteUrl(md['assetUrl'] as String?) != null
-                                                  ? Image.network(Api.absoluteUrl(md['assetUrl'] as String?)!, width: 52, height: 52, errorBuilder: (_, __, ___) => const Icon(Icons.military_tech, color: Pal.amber, size: 40))
+                                                  ? NetImg(Api.absoluteUrl(md['assetUrl'] as String?)!, width: 52, height: 52, errorBuilder: (_, __, ___) => const Icon(Icons.military_tech, color: Pal.amber, size: 40))
                                                   : const Icon(Icons.military_tech, color: Pal.amber, size: 40),
                                             ),
                                           ),
@@ -2275,7 +2308,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                         width: pic,
                         height: pic,
                         child: cover != null
-                            ? Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => UserAvatar(user: ownerUser, radius: pic / 2))
+                            ? NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => UserAvatar(user: ownerUser, radius: pic / 2))
                             : FittedBox(child: UserAvatar(user: ownerUser, radius: pic / 2)),
                       ),
                     ),
@@ -2380,7 +2413,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               CircleAvatar(
                 radius: h * 0.36,
                 backgroundColor: Colors.amber,
-                backgroundImage: logo != null ? NetworkImage(logo) : null,
+                backgroundImage: logo != null ? NetImage(logo, targetW: NetImage.px(h * 0.72, MediaQuery.devicePixelRatioOf(context)), targetH: NetImage.px(h * 0.72, MediaQuery.devicePixelRatioOf(context))) : null,
                 child: logo == null ? Icon(Icons.favorite, size: h * 0.45, color: Colors.black87) : null,
               ),
               const SizedBox(width: 4),
@@ -2785,7 +2818,8 @@ class _GiftFlightState extends State<_GiftFlight> with SingleTickerProviderState
     final d = widget.data;
     return Positioned.fill(
       child: IgnorePointer(
-        child: AnimatedBuilder(
+        child: RepaintBoundary(
+          child: AnimatedBuilder(
           animation: _c,
           builder: (_, __) {
             final t = Curves.easeInOutCubic.transform(_c.value);
@@ -2799,10 +2833,11 @@ class _GiftFlightState extends State<_GiftFlight> with SingleTickerProviderState
                 top: pos.dy - size / 2,
                 width: size,
                 height: size,
-                child: Opacity(opacity: opacity.clamp(0.0, 1.0), child: Image.network(d.icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const SizedBox.shrink())),
+                child: Opacity(opacity: opacity.clamp(0.0, 1.0), child: NetImg(d.icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const SizedBox.shrink())),
               ),
             ]);
           },
+          ),
         ),
       ),
     );

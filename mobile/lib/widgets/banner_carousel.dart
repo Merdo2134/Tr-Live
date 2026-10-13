@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'app_theme.dart';
-import 'common.dart';
+import 'net_image.dart';
 
 /// Ana sayfa üstündeki banner'lar. Yönetici panelinden eklenir; yoksa hiçbir şey çizilmez.
 class BannerCarousel extends StatefulWidget {
@@ -75,7 +75,7 @@ class _BannerCarouselState extends State<BannerCarousel> {
                 final url = Api.absoluteUrl(_items[i % _items.length]['imageUrl'] as String?);
                 return url == null
                     ? const ColoredBox(color: Pal.surfaceHi)
-                    : Image.network(url, fit: BoxFit.cover, width: double.infinity, errorBuilder: (_, __, ___) => const ColoredBox(color: Pal.surfaceHi));
+                    : NetImg(url, fit: BoxFit.cover, width: double.infinity, errorBuilder: (_, __, ___) => const ColoredBox(color: Pal.surfaceHi));
               },
             ),
             if (_items.length > 1)
