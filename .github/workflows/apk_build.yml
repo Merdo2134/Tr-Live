@@ -76,46 +76,35 @@ jobs:
             if [ -f test/widget_test.dart ] && grep -q 'MyApp' test/widget_test.dart; then rm -f test/widget_test.dart; fi
           fi
 
-      - name: Android ayarlarını düzelt (minSdk 24 ve Tüm Eklentileri compileSdk 36 yap)
+      - name: Android SDK uyumsuzluklarını kökten çöz (Zorunlu compileSdk 36)
         shell: bash
         working-directory: ${{ env.APP_DIR }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import os, re, pathlib, sys
           
-          # 1) minSdk ayarını 24 yap
-          gradle = None
-          for name in ("android/app/build.gradle.kts", "android/app/build.gradle"):
-              if os.path.exists(name):
-                  gradle = pathlib.Path(name); break
-          if gradle:
-              src = gradle.read_text()
-              new, n = re.subn(r"(minSdk(?:Version)?)(\s*=?\s*)flutter\.minSdkVersion", r"\g<1>\g<2>24", src)
-              if not n:
-                  new = re.sub(r"(minSdk(?:Version)?)(\s*=?\s*)\d+", r"\g<1>\g<2>24", src, count=1)
-              gradle.write_text(new)
-              print("minSdk 24 yapıldı.")
+          # 1) Ana projeyi ve tüm eklentileri Gradle seviyesinde Android 36 ile derlenmeye zorla
+          # Bu blok file_picker ve lifecycle çakışmasını doğrudan Android derleyicisinin hafızasında çözer
+          mkdir -p android/app
+          cat << 'EOF' >> android/build.gradle
 
-          # 2) Tüm eklentilerin compileSdk sürümünü 36'ya zorla (file_picker hatasını çözer)
-          root_gradle = pathlib.Path("android/build.gradle")
-          if root_gradle.exists():
-              g_src = root_gradle.read_text()
-              subproject_block = """
           subprojects {
               afterEvaluate { project ->
                   if (project.hasProperty('android')) {
                       project.android {
                           compileSdkVersion 36
+                          buildToolsVersion "36.0.0"
+                          
+                          defaultConfig {
+                              minSdkVersion 24
+                              targetSdkVersion 36
+                          }
                       }
                   }
               }
           }
-          """
-              if "subprojects" not in g_src:
-                  root_gradle.write_text(g_src + subproject_block)
-                  print("Eklentiler için compileSdkVersion 36 zorlaması eklendi.")
-          PY
+          EOF
+          
+          echo "Android derleme dosyalarına zorunlu SDK 36 enjeksiyonu tamamlandı."
 
       - name: Bağımlılıkları indir
         shell: bash
