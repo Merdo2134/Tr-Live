@@ -1,3 +1,8 @@
+## v2.42.2 — Açılışta logoda takılma düzeltmesi
+- Bildirim izni penceresi uygulamanın ilk ekranı çizilmeden açılıyordu; bazı telefonlarda uygulama açılış logosunda
+  takılı kalıyordu. Bildirim servisi artık ekran açıldıktan 4 sn sonra başlar.
+- Açılıştaki hazırlık adımları (arka plan servisi, kayıtlı oturum) hata verse ya da gecikse de ekran yine açılır.
+
 ## v2.42.1 — APK derleme hatası düzeltildi
 - APK derlemesi `workmanager` eklentisi yüzünden kırılıyordu (`WorkmanagerPlugin` bulunamadı: eklentinin yeni sürümü
   Kotlin derlemesini yeni Android Gradle'a bırakıyor). Eklenti kaldırıldı.

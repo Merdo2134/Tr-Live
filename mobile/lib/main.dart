@@ -42,8 +42,17 @@ Future<void> _boot() async {
   if (kReleaseMode) {
     ErrorWidget.builder = (details) => const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white24, size: 28));
   }
-  BackgroundService.instance.init();
-  await AuthService.restore();
+  // Açılış hiçbir koşulda takılmasın: hazırlık adımları hata verse / gecikse de uygulama ekranı açılır.
+  try {
+    BackgroundService.instance.init();
+  } catch (e, s) {
+    ErrorLog.add('Arka plan servisi', e, s);
+  }
+  try {
+    await AuthService.restore().timeout(const Duration(seconds: 5));
+  } catch (e, s) {
+    ErrorLog.add('Oturum okunamadı', e, s);
+  }
   // Oturum sona erdiğinde (401, yasaklı hesap, şifre değişimi) giriş ekranına dön.
   Api.onUnauthorized = () async {
     if (_loggingOut) return;
@@ -72,8 +81,13 @@ Future<void> _boot() async {
   };
   PresenceService.init();
   runApp(const TRLiveApp());
-  // Yönetimden "herkese telefon bildirimi": izin + soket + açılışta/öne gelişte kontrol.
-  unawaited(PushService.start());
+  // Yönetimden "herkese telefon bildirimi". İzin penceresi açılış ekranı çizilmeden açılırsa bazı telefonlarda
+  // uygulama logoda takılı kalıyordu: ilk kare çizildikten birkaç saniye sonra başlatılır.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    Future.delayed(const Duration(seconds: 4), () {
+      unawaited(PushService.start().catchError((Object e, StackTrace s) => ErrorLog.add('Bildirim servisi', e, s)));
+    });
+  });
 }
 
 class TRLiveApp extends StatelessWidget {
