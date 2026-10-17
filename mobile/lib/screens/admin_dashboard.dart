@@ -462,6 +462,8 @@ class _AppConfigScreenState extends State<AppConfigScreen> {
     'latestAppVersion': TextEditingController(),
     'updateUrl': TextEditingController(),
     'updateMessage': TextEditingController(),
+    'roomNotice': TextEditingController(),
+    'flyTextCoins': TextEditingController(),
     'strikeLimit': TextEditingController(),
     'strikeWindowMin': TextEditingController(),
     'muteMinutes': TextEditingController(),
@@ -478,7 +480,7 @@ class _AppConfigScreenState extends State<AppConfigScreen> {
   bool _saving = false;
   String? _error;
 
-  static const _ints = ['strikeLimit', 'strikeWindowMin', 'muteMinutes', 'maxMuteMinutes', 'luckyMaxWin', 'luckyAnnounceMultiplier'];
+  static const _ints = ['flyTextCoins', 'strikeLimit', 'strikeWindowMin', 'muteMinutes', 'maxMuteMinutes', 'luckyMaxWin', 'luckyAnnounceMultiplier'];
 
   /// Sunucu baz puan tutar (7000 = %70); panelde yüzde gösterilir.
   static String _pct(dynamic bps) {
@@ -537,6 +539,7 @@ class _AppConfigScreenState extends State<AppConfigScreen> {
       'latestAppVersion': _text['latestAppVersion']!.text.trim(),
       'updateUrl': _text['updateUrl']!.text.trim(),
       'updateMessage': _text['updateMessage']!.text.trim(),
+      'roomNotice': _text['roomNotice']!.text.trim(),
       'blockLinks': _blockLinks,
       'blockPhones': _blockPhones,
       'luckyEnabled': _luckyEnabled,
@@ -605,6 +608,11 @@ class _AppConfigScreenState extends State<AppConfigScreen> {
                   _field('latestAppVersion', 'Güncel sürüm', hint: 'Bu telefondaki: $kAppVersion'),
                   _field('updateUrl', 'İndirme bağlantısı (https)', hint: 'https://...'),
                   _field('updateMessage', 'Güncelleme mesajı', maxLines: 3),
+                  const Divider(height: Gap.xl),
+                  const Text('Oda', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: Gap.m),
+                  _field('roomNotice', 'Uygulama uyarı duyurusu (odaya girince sohbetin başında; boş = kapalı)', maxLines: 4),
+                  _field('flyTextCoins', 'Uçan yazı ücreti (Coin, 0 = ücretsiz)', number: true),
                   const Divider(height: Gap.xl),
                   const Text('Otomatik moderasyon', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                   SwitchListTile(

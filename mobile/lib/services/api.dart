@@ -200,8 +200,17 @@ class Api {
       return await _send(req, mutating: true);
     } on ApiException catch (e) {
       if (e.statusCode != null) rethrow; // sunucu yanıt verdi: sonuç kesin
-      await Future<void>.delayed(const Duration(seconds: 1));
-      return _send(req, mutating: true);
+    }
+    // Yanıt gelmedi (yavaş bağlantı): aynı anahtarla tekrar sorulur. İlk istek sunucuda hâlâ sürüyorsa (409)
+    // birkaç kez beklenip sonucu alınır; böylece işlem yapıldığı halde hata gösterilmez.
+    for (var i = 0; ; i++) {
+      await Future<void>.delayed(Duration(seconds: i == 0 ? 1 : 2));
+      try {
+        return await _send(req, mutating: true);
+      } on ApiException catch (e) {
+        final running = e.statusCode == 409 && e.message.contains('sürüyor');
+        if (!running || i >= 5) rethrow;
+      }
     }
   }
 

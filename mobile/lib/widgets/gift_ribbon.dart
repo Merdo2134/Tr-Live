@@ -48,18 +48,18 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     _timer?.cancel();
     _entranceTimer?.cancel();
     _animTimer?.cancel();
+    _gTimer?.cancel();
     super.dispose();
   }
 
   void _onEvent(Map<String, dynamic> e) {
     if (!GiftRibbonOverlay.effectsOn) return;
     final type = e['type'];
-    if (type == 'lucky_bag_global' || type == 'lucky_gift_win') {
-      _enqueue(e); // süper çanta / büyük şanslı hediye kazancı duyurusu: tüm odalarda ve ana ekranda
-    } else if (type == 'global_gift_ribbon') {
-      // Aynı odadaysak zaten room_gift ile göstereceğiz.
-      if (widget.roomId != null && e['roomId'] == widget.roomId) return;
-      _enqueue(e);
+    if (type == 'lucky_bag_global' || type == 'lucky_gift_win' || type == 'global_gift_ribbon') {
+      // Global duyurular (büyük hediye, süper çanta, büyük şanslı kazanç): yalnızca açık odalarda (hediyenin atıldığı
+      // oda dahil), odanın üstünden geçen ayrı şeritte. Ana ekranda ve oda küçültülmüşken gösterilmez.
+      if (widget.roomId == null || RoomDock.minimized.value) return;
+      _enqueueGlobal(e);
     } else if (type == 'room_gift' && widget.roomId != null && e['roomId'] == widget.roomId) {
       // Önce ikon koltuğa uçar (oda ekranı), sonra tam ekran animasyon başlar.
       final g = mapOf(e['gift']);
@@ -156,6 +156,32 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     return false;
   }
 
+  // Global şerit kanalı (oda şeridinden bağımsız sıra).
+  final List<Map<String, dynamic>> _gQueue = [];
+  Map<String, dynamic>? _gCurrent;
+  int _gSeq = 0;
+  Timer? _gTimer;
+
+  void _enqueueGlobal(Map<String, dynamic> e) {
+    if (_gQueue.length < 8) _gQueue.add(e);
+    if (_gCurrent == null) _nextGlobal();
+  }
+
+  void _nextGlobal() {
+    _gTimer?.cancel();
+    if (!mounted) return;
+    if (_gQueue.isEmpty) {
+      setState(() => _gCurrent = null);
+      return;
+    }
+    final e = _gQueue.removeAt(0);
+    setState(() {
+      _gCurrent = e;
+      _gSeq++;
+    });
+    _gTimer = Timer(const Duration(milliseconds: 5200), _nextGlobal);
+  }
+
   void _enqueue(Map<String, dynamic> e) {
     if (_queue.length < 10) _queue.add(e);
     if (_current == null) _next();
@@ -197,17 +223,25 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   Widget build(BuildContext context) {
     final top = MediaQuery.of(context).padding.top + 8;
     // Odada şerit odanın ortasından geçer (koltukların altı, sohbetin üstü); ana sayfada en üstte.
-    final ribbonTop = widget.roomId != null ? MediaQuery.sizeOf(context).height * 0.42 : top;
+    final ribbonTop = MediaQuery.sizeOf(context).height * 0.42;
     return Stack(children: [
       widget.child,
       if (_anim != null) _buildAnim(),
       if (_entrance != null) _buildEntrance(top),
       if (_current != null)
         Positioned(
-          top: ribbonTop,
+          top: widget.roomId != null ? ribbonTop : top,
           left: 0,
           right: 0,
           child: _SlideStrip(key: ValueKey(_currentSeq), bump: _bump, durationMs: _stripMs(_current!), child: _buildRibbon(_current!)),
+        ),
+      // Global şerit: odada ve ana ekranda en üstten (durum çubuğunun hemen altından) geçer.
+      if (_gCurrent != null)
+        Positioned(
+          top: MediaQuery.of(context).padding.top,
+          left: 0,
+          right: 0,
+          child: _SlideStrip(key: ValueKey('g$_gSeq'), durationMs: 5000, child: _buildRibbon(_gCurrent!)),
         ),
     ]);
   }
@@ -258,9 +292,10 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     final icon = Api.absoluteUrl(gift['iconUrl'] as String?);
     return IgnorePointer(
       child: LayoutBuilder(builder: (context, box) {
-        final w = (box.maxWidth * 0.96).clamp(0.0, 520.0).toDouble();
+        // Küçük tutulur (üstten geçerken odayı kapatmasın): ekranın ~%68'i, en fazla 290 dp; yükseklik görsel oranında.
+        final w = (box.maxWidth * 0.68).clamp(0.0, 290.0).toDouble();
         final h = w / 3;
-        final fs = (h * 0.15).clamp(10.0, 16.0).toDouble();
+        final fs = (h * 0.16).clamp(9.0, 14.0).toDouble();
         return Center(
           child: SizedBox(
             width: w,
@@ -378,57 +413,129 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
         .toList();
     final icon = Api.absoluteUrl(gift['iconUrl'] as String?);
     final combo = (e['combo'] as num?)?.toInt() ?? 1;
+    final qty = (e['quantity'] as num?)?.toInt() ?? 1;
     // Şanslı hediyede en yüksek çarpan şeritte gösterilir (x2 ve üzeri).
     final lucky = mapOf(e['lucky']);
     final luckyBest = (lucky?['best'] as num?)?.toInt() ?? 0;
+    Map<String, dynamic>? firstReceiver;
+    if (receivers.isNotEmpty) {
+      final r = receivers.first;
+      firstReceiver = r is Map && r['user'] is Map ? Map<String, dynamic>.from(r['user'] as Map) : (r is Map ? Map<String, dynamic>.from(r) : null);
+    }
     return IgnorePointer(
       child: Material(
         color: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(colors: [Color(0x00FF4081), Color(0xFFFF4081), Color(0xFF7C4DFF), Color(0x007C4DFF)]),
-          ),
-          child: Row(children: [
-            if (icon != null) NetImg(icon, width: 32, height: 32, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard)) else const Icon(Icons.card_giftcard),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '${sender?['displayName'] ?? 'Biri'} → ${names.isEmpty ? 'herkes' : names.join(', ')}: ${gift['name'] ?? 'Hediye'} x${e['quantity']}',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ),
-            if (luckyBest >= 2) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: const Color(0xFF00C853), borderRadius: BorderRadius.circular(8)),
-                child: Text('🔔 x$luckyBest', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12)),
-              ),
-            ],
-            if (combo > 1) ...[
-              const SizedBox(width: 8),
-              // Her combo'da sayı büyüyüp yerine oturur.
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 260),
-                transitionBuilder: (child, anim) => ScaleTransition(scale: Tween<double>(begin: 1.8, end: 1).animate(anim), child: child),
-                child: Text(
-                  'x$combo',
-                  key: ValueKey(combo),
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    fontStyle: FontStyle.italic,
-                    color: Color(0xFFFFD54F),
-                    shadows: [Shadow(color: Color(0xFFFF6D00), blurRadius: 8)],
-                  ),
+        child: LayoutBuilder(builder: (context, box) {
+          // Ekran genişliğine göre kendini ölçekler; isimler uzunsa kısaltılır, şerit içeriği kadar genişler.
+          final sw = box.maxWidth.isFinite ? box.maxWidth : MediaQuery.sizeOf(context).width;
+          final k = (sw / 400).clamp(0.82, 1.2).toDouble();
+          final h = 46 * k;
+          final giftSize = 58 * k;
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: EdgeInsets.only(left: 6 * k),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: sw * 0.94),
+                child: SizedBox(
+                  height: giftSize,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Flexible(
+                      child: Container(
+                        height: h,
+                        padding: EdgeInsets.fromLTRB(3 * k, 3 * k, 14 * k, 3 * k),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(h / 2),
+                          gradient: const LinearGradient(colors: [Color(0xF26A11CB), Color(0xE6C2185B), Color(0x99FF6FA8), Color(0x00FF6FA8)], stops: [0, 0.45, 0.8, 1]),
+                          border: const Border(top: BorderSide(color: Color(0x88FFFFFF), width: 0.8)),
+                          boxShadow: const [BoxShadow(color: Color(0x66E040FB), blurRadius: 12)],
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          // Gönderen: altın halkalı fotoğraf
+                          Container(
+                            padding: EdgeInsets.all(1.6 * k),
+                            decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFFFFF1A8), Color(0xFFFFB300), Color(0xFFFF8F00)])),
+                            child: UserAvatar(user: sender, radius: (h - 9 * k) / 2),
+                          ),
+                          SizedBox(width: 7 * k),
+                          Flexible(
+                            child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(
+                                '${sender?['displayName'] ?? 'Biri'}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13.5 * k, height: 1.1, shadows: const [Shadow(color: Colors.black45, blurRadius: 3)]),
+                              ),
+                              Text.rich(
+                                TextSpan(children: [
+                                  TextSpan(text: 'gönderdi ', style: TextStyle(color: Colors.white70, fontSize: 11 * k)),
+                                  TextSpan(
+                                    text: names.isEmpty ? 'herkese' : (names.length == 1 ? names.first : '${names.first} +${names.length - 1}'),
+                                    style: TextStyle(color: const Color(0xFFFFE082), fontSize: 11.5 * k, fontWeight: FontWeight.w800),
+                                  ),
+                                ]),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(height: 1.15),
+                              ),
+                            ]),
+                          ),
+                          if (firstReceiver != null) ...[
+                            SizedBox(width: 6 * k),
+                            Container(
+                              padding: EdgeInsets.all(1.2 * k),
+                              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFFF80AB)),
+                              child: UserAvatar(user: firstReceiver, radius: 12 * k),
+                            ),
+                          ],
+                        ]),
+                      ),
+                    ),
+                    // Hediye: şeridin ucuna taşan, arkası parlayan büyük ikon
+                    Transform.translate(
+                      offset: Offset(-10 * k, 0),
+                      child: Container(
+                        width: giftSize,
+                        height: giftSize,
+                        alignment: Alignment.center,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(colors: [Color(0xAAFFE082), Color(0x33FF4081), Color(0x00FF4081)]),
+                        ),
+                        child: icon != null
+                            ? NetImg(icon, width: giftSize * 0.86, height: giftSize * 0.86, errorBuilder: (_, __, ___) => Icon(Icons.card_giftcard, color: Colors.white, size: 30 * k))
+                            : Icon(Icons.card_giftcard, color: Colors.white, size: 30 * k),
+                      ),
+                    ),
+                    if (luckyBest >= 2)
+                      Container(
+                        margin: EdgeInsets.only(right: 4 * k),
+                        padding: EdgeInsets.symmetric(horizontal: 5 * k, vertical: 1),
+                        decoration: BoxDecoration(color: const Color(0xFF00C853), borderRadius: BorderRadius.circular(8)),
+                        child: Text('🔔 x$luckyBest', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11 * k)),
+                      ),
+                    // Adet / combo: her artışta büyüyüp yerine oturur.
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 260),
+                      transitionBuilder: (child, anim) => ScaleTransition(scale: Tween<double>(begin: 1.8, end: 1).animate(anim), child: child),
+                      child: Text(
+                        'x${combo > 1 ? combo : qty}',
+                        key: ValueKey('$combo-$qty'),
+                        style: TextStyle(
+                          fontSize: 28 * k,
+                          fontWeight: FontWeight.w900,
+                          fontStyle: FontStyle.italic,
+                          color: const Color(0xFFFFE082),
+                          shadows: const [Shadow(color: Color(0xFFFF6D00), blurRadius: 8), Shadow(color: Color(0xFF6A11CB), offset: Offset(1.5, 1.5))],
+                        ),
+                      ),
+                    ),
+                  ]),
                 ),
               ),
-            ],
-          ]),
-        ),
+            ),
+          );
+        }),
       ),
     );
   }

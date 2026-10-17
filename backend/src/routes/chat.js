@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { query } from '../database.js';
+import { query, tx } from '../database.js';
+import { getConfig } from '../services/app_config.js';
 import { requireAuth } from '../auth.js';
 import { fail, uuid, positiveInt } from '../http.js';
 import { userLimit } from '../firewall.js';
@@ -36,16 +37,46 @@ router.post('/:roomId/messages', userLimit('chat10s', 8, 10e3), userLimit('chat1
   if (room.chat_enabled === false && !MANAGERS.includes(member.role)) throw fail('Bu odada sohbet kapalı.', 403);
   if (member.chat_muted_until && new Date(member.chat_muted_until) > new Date()) throw fail('Bu odada sohbette susturuldunuz.', 403);
 
-  const body = cleanLine(req.body?.text, 300);
+  const fly = req.body?.fly === true;
+  const body = cleanLine(req.body?.text, fly ? 80 : 300);
   if (!body) throw fail('Mesaj boş olamaz.');
+  // "Hoş geldin" mesajı: yeni gelen kişiye selam (odada uçan yazı olarak da görünür).
+  let welcomeTo = null;
+  if (req.body?.welcome != null) {
+    const wid = uuid(req.body.welcome, 'Kullanıcı');
+    if (wid === req.user.id) throw fail('Kendinize hoş geldin diyemezsiniz.');
+    const w = await loadPublicRow(wid);
+    if (!w) throw fail('Kullanıcı bulunamadı.', 404);
+    welcomeTo = publicUser(w, null);
+  }
   await screenText(req.user, body, 'room_chat');
 
-  const m = (await query(`INSERT INTO room_messages(room_id, user_id, body) VALUES($1,$2,$3) RETURNING id, created_at`, [roomId, req.user.id, body])).rows[0];
+  let balance = null;
+  const insert = async (run) => (await run(`INSERT INTO room_messages(room_id, user_id, body) VALUES($1,$2,$3) RETURNING id, created_at`, [roomId, req.user.id, body])).rows[0];
+  let m;
+  if (fly) {
+    // Uçan yazı ücretli: Coin düşülür ve kayda geçer; mesaj aynı işlemde yazılır (yarım kalmaz).
+    const cost = BigInt((await getConfig()).flyTextCoins ?? 0);
+    m = await tx(async (c) => {
+      if (cost > 0n) {
+        const u = (await c.query(`UPDATE users SET coins = coins - $2, updated_at = NOW() WHERE id = $1 AND coins >= $2 RETURNING coins`, [req.user.id, cost.toString()])).rows[0];
+        if (!u) throw fail(`Uçan yazı için ${cost} Coin gerekiyor.`, 402);
+        balance = String(u.coins);
+        await c.query(
+          `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'fly_text',$2,$3,'Uçan yazı')`,
+          [req.user.id, (-cost).toString(), roomId],
+        );
+      }
+      return insert((sql, params) => c.query(sql, params));
+    });
+  } else {
+    m = await insert(query);
+  }
   const row = await loadPublicRow(req.user.id);
-  const message = { id: m.id, roomId, user: publicUser(row, null), text: body, createdAt: m.created_at };
+  const message = { id: m.id, roomId, user: publicUser(row, null), text: body, createdAt: m.created_at, fly, welcomeTo };
   hub.broadcastRoom(roomId, { type: 'room_message', ...message });
   noteTask(req.user.id, 'chat');
-  res.status(201).json({ message });
+  res.status(201).json({ message, balance });
 });
 
 router.get('/:roomId/messages', async (req, res) => {

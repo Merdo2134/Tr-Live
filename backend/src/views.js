@@ -6,7 +6,7 @@ export const HIDDEN_NAME = 'Gizli Kullanıcı';
 
 // "u" takma adlı users tablosu ile kullanılır.
 export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.public_id, u.display_name, u.avatar_url, u.is_hidden,
-  u.coin_level, u.gift_level, uw.level AS wip_level, wt.features AS wip_features,
+  u.coin_level, u.gift_level, u.created_at AS u_created_at, u.kyc_status AS u_kyc_status, uw.level AS wip_level, wt.features AS wip_features,
   (SELECT COALESCE(fr.image_url, fi.metadata->>'assetUrl') FROM inventory_items fi
      LEFT JOIN frames fr ON fr.id::text = fi.item_key
     WHERE fi.user_id = u.id AND fi.item_type = 'frame' AND fi.is_active = TRUE
@@ -50,6 +50,9 @@ export function publicUser(row, viewerId = null) {
     // CP: odada yan yana oturunca kalp efekti için (yalnızca onaylı CP ilişkisi).
     cpPartnerId: row.cp_exp != null ? row.cp_partner_id : null,
     cpLevel: row.cp_exp != null ? cpLevelFor(row.cp_exp) : null,
+    // Sohbette "yakın zamanda kayıt oldu" kartı (son 3 gün) ve "Doğrulanmış" rozeti.
+    isNew: row.u_created_at ? Date.now() - new Date(row.u_created_at).getTime() < 3 * 86400e3 : false,
+    verified: row.u_kyc_status === 'approved',
   };
 }
 

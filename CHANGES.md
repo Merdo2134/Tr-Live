@@ -1,3 +1,31 @@
+## v2.43.1 — Akış düzeni, global şerit yalnızca odalarda
+- **Global hediye şeridi** yalnızca açık odalarda görünür (ana ekranda, profilde ve oda küçültülmüşken görünmez).
+- **Akış gönderileri** ekranı kaplamıyor: solda fotoğraf, sağda ad + WIP ve seviye rozetleri, "+ Takip et",
+  yazı, küçük görsel (dokununca tam ekran, yakınlaştırılabilir), zaman, beğeni / yorum / sil.
+
+## v2.43.0 — Oda görünümü: hediye şeritleri, araçlar, giriş şeridi, uçan yazı, sohbet
+1. **Global hediye şeridi** artık hediyenin atıldığı oda dahil her odada görünür; en üstten (durum çubuğunun altından)
+   geçer ve küçültüldü. Oda içi hediye şeridi de aynı anda ortadan geçer.
+2. **Oda hediye şeridi yeni tasarım:** gönderenin altın halkalı fotoğrafı, adı, "gönderdi → alan", alanın fotoğrafı,
+   şeridin ucuna taşan parlayan hediye ikonu ve büyük "x adet/combo". Ekran genişliğine göre kendini ölçekler, uzun
+   isimler kısaltılır.
+3. **Araçlar paneli** tasarımdaki gibi: koyu panel, "İnteraktif Özellikler" kare kutular (PK, Ludo, Şanslı Çanta),
+   "Temel Araçlar" küçük metalik yuvarlak düğmeler (satırda 4–6).
+4. **Giriş şeridi** herkes için (WIP olmayanlar lacivert-gümüş, WIP'ler kademe renginde altın kenarlı): çerçeveli
+   fotoğraf, WIP rozeti, gönderme/alma seviyesi, ad ve "odaya girdi". Kalabalık odada WIP girişleri öne geçer.
+5. **Uçan yazı:** yazı alanındaki "Uçan" anahtarı açıkken mesaj odanın üstünden sağdan sola uçarak geçer (en fazla
+   80 karakter). Ücreti yönetimden ayarlanır (varsayılan 99 Coin, 0 = ücretsiz).
+6. **Sohbet satırı:** fotoğraf, ad, altında rozet sırası (WIP, taç/kalp seviyeleri, CP, "Doğrulanmış") ve balon.
+   Girişler rozetli satır olarak; son 3 günde kayıt olanlar için "Bu kullanıcı yakın zamanda kayıt oldu" kartı ve
+   "👏 Hoş geldiniz" düğmesi (selam sohbete yazılır ve uçan yazı olarak geçer, ücretsiz).
+7. **Uygulama uyarı duyurusu:** odaya girince sohbetin en başında "TR Live Sistem Duyurusu" kartı (Yönetim → Uygulama
+   ayarları → Oda'dan değiştirilir; boş bırakılırsa gösterilmez). Yayıncıyı takip etmeyenlere bir dakika sonra
+   "Bu yayıncıyı takip edin" kartı çıkar (dokununca favorilere eklenir).
+8. **Süper şanslı çanta kişi sayısı:** 50, 100, 150 veya 200 kişi seçilebilir.
+9. **Çanta açma penceresi sadeleşti** (küçük kart); açınca "Açıldı! +X Coin" yazar ve pencere kendiliğinden kapanır.
+10. **"Bu işlem hâlâ sürüyor" hatası:** yavaş bağlantıda çanta (ve diğer para işlemleri) gönderildiği halde bu hata
+    çıkıyordu. Uygulama artık birkaç saniye bekleyip sonucu alır.
+
 ## v2.42.3 — Açılış çökmesi (shared_preferences) düzeltildi
 - 16 Ekim'de yayınlanan `shared_preferences_android 2.5.0` yayın APK'sında açılışta `NoSuchMethodError
   SharedPreferencesApiRegistrar.getAll` hatası veriyordu (uygulama hiçbir kayıtlı veriyi okuyamıyordu). Bir önceki

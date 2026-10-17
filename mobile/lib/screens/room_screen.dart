@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../widgets/anim_asset.dart';
 import 'family_screen.dart';
 import '../widgets/entrance_strip.dart';
+import '../widgets/fly_text.dart';
 import '../widgets/lucky_bag.dart';
 import '../widgets/room_sheets.dart';
 import 'package:flutter/services.dart';
@@ -100,6 +101,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   bool get _isGrid => _isVideo && !_isLive;
   lk.CameraPosition _camPos = lk.CameraPosition.front;
   final EntranceQueue _entrance = EntranceQueue();
+  // Uçan yazı (ücretli mesaj ve "Hoş geldin" selamı) ve uygulama uyarı duyurusu.
+  final FlyTextQueue _fly = FlyTextQueue();
+  bool _flyMode = false;
+  int _flyCost = 99;
+  String _appNotice = '';
+  Timer? _followTimer;
+  final Set<String> _welcomed = {};
   final List<Map<String, dynamic>> _bags = []; // bu odadaki açık şanslı çantalar
   int get _seatCount => (_room?['seatCount'] as num?)?.toInt() ?? 8;
   String get _myRole => (_me['role'] ?? 'user').toString();
@@ -168,6 +176,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       t.cancel();
     }
     _entrance.dispose();
+    _fly.dispose();
+    _followTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     if (RoomDock.exitHandler == _onBack) RoomDock.exitHandler = null;
     _sub?.cancel();
@@ -256,7 +266,37 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         _queue = ((q['queue'] as List?) ?? const []).map((x) => x.toString()).toList();
         _fav = f?['favorite'] == true;
       });
+      // Yayıncıyı takip etmeyenlere bir dakika sonra sohbette "takip edin" kartı.
+      if (ownerId != null && ownerId != Session.id && !_fav) {
+        _followTimer?.cancel();
+        _followTimer = Timer(const Duration(seconds: 60), () {
+          if (!mounted || _fav || _messages.any((m) => m['follow'] == true)) return;
+          setState(() => _messages.add({'id': 'follow-card', 'follow': true}));
+          _scrollChatToEnd();
+        });
+      }
     } catch (_) {}
+    try {
+      final c = await Api.get('/api/app/config');
+      if (!mounted) return;
+      setState(() {
+        _appNotice = (c['roomNotice'] ?? '').toString().trim();
+        _flyCost = (c['flyTextCoins'] as num?)?.toInt() ?? _flyCost;
+      });
+    } catch (_) {}
+  }
+
+  /// Yeni gelen kişiye "Hoş geldin" (sohbete yazılır ve odada uçan yazı olarak geçer).
+  Future<void> _sendWelcome(Map<String, dynamic> u) async {
+    final id = u['id']?.toString();
+    if (id == null || _welcomed.contains(id)) return;
+    if (!_chatOpen) {
+      toast(context, 'Bu odada yazılı sohbet kapalı.', error: true);
+      return;
+    }
+    setState(() => _welcomed.add(id));
+    final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/messages', {'text': 'Hoş geldin ${u['displayName'] ?? ''}', 'welcome': id}));
+    if (r == null && mounted) setState(() => _welcomed.remove(id));
   }
 
   // ---------- Sıra, favori, oda değiştirme ----------
@@ -357,10 +397,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final text = _chatCtl.text.trim();
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
-    final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/messages', {'text': text}));
+    final fly = _flyMode;
+    final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/messages', {'text': text, if (fly) 'fly': true}));
     if (!mounted) return;
     setState(() => _sending = false);
-    if (r != null) _chatCtl.clear();
+    if (r != null) {
+      _chatCtl.clear();
+      if (r['balance'] != null) Session.setCoins(r['balance'].toString());
+    }
   }
 
   Future<void> _rejoin() async {
@@ -560,9 +604,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       case 'room_message':
         if (!_messages.any((m) => m['id'] == e['id'])) {
           setState(() {
-            _messages.add({'id': e['id'], 'user': e['user'], 'text': e['text'], 'createdAt': e['createdAt']});
+            _messages.add({'id': e['id'], 'user': e['user'], 'text': e['text'], 'createdAt': e['createdAt'], 'fly': e['fly'] == true, 'welcomeTo': e['welcomeTo']});
             if (_messages.length > 200) _messages.removeAt(0);
           });
+          if (e['fly'] == true || e['welcomeTo'] != null) _fly.add(e);
           _scrollChatToEnd(force: mapOf(e['user'])?['id']?.toString() == Session.id);
         }
         break;
@@ -1119,20 +1164,47 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           toast(context, 'Bu aracı kullanma yetkiniz yok.', error: true);
         }
 
+        // Temel araç: koyu metalik yuvarlak düğme + iki satır etiket (tasarımdaki gibi, küçük).
         Widget feature(IconData icon, String label, VoidCallback onTap, {Color? color}) => InkWell(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
               onTap: onTap,
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.symmetric(vertical: 5),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Container(
-                    width: 66,
-                    height: 66,
-                    decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(22), border: Border.all(color: Colors.white12)),
-                    child: Icon(icon, size: 30, color: color ?? Colors.white70),
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF6B6B70), Color(0xFF2A2A2E), Color(0xFF18181B)]),
+                      border: Border.all(color: const Color(0x40FFFFFF), width: 0.8),
+                      boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4, offset: Offset(0, 2))],
+                    ),
+                    child: Icon(icon, size: 21, color: color ?? Colors.white),
                   ),
-                  const SizedBox(height: 6),
-                  Text(label, textAlign: TextAlign.center, maxLines: 2, style: const TextStyle(fontSize: 12, color: Colors.white70, height: 1.15)),
+                  const SizedBox(height: 5),
+                  Text(label, textAlign: TextAlign.center, maxLines: 2, style: const TextStyle(fontSize: 11, color: Color(0xFFDADADF), height: 1.15)),
+                ]),
+              ),
+            );
+
+        // İnteraktif özellik: kare görsel kutu + etiket.
+        Widget tile(Widget art, String label, VoidCallback onTap, {List<Color> colors = const [Color(0xFF2B2B30), Color(0xFF151518)]}) => InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: onTap,
+              child: SizedBox(
+                width: 64,
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    clipBehavior: Clip.antiAlias,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(9), gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: colors)),
+                    child: art,
+                  ),
+                  const SizedBox(height: 5),
+                  Text(label, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: Color(0xFFDADADF))),
                 ]),
               ),
             );
@@ -1176,33 +1248,42 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           }),
           if (_myRole == 'owner') feature(Icons.power_settings_new, 'Odayı\nKapat', () => run(_closeRoom), color: Colors.redAccent),
         ];
-        return DraggableScrollableSheet(
-          initialChildSize: 0.62,
-          minChildSize: 0.3,
-          maxChildSize: 0.92,
-          expand: false,
-          builder: (_, scroll) => Container(
-            decoration: const BoxDecoration(color: Color(0xFF1B1B1F), borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
-            child: ListView(controller: scroll, padding: const EdgeInsets.fromLTRB(16, 10, 16, 24), children: [
-              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
-              Row(children: [
-                const Expanded(child: Text('İnteraktif Özellikler', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
-                IconButton(onPressed: () => Navigator.pop(sheet), icon: const Icon(Icons.close)),
-              ]),
-              Wrap(spacing: 18, runSpacing: 4, children: [
-                if (_myRole == 'owner') feature(Icons.sports_mma, 'PK', () => pkFree ? run(() => showPkChallengeSheet(context, roomId: widget.roomId)) : toast(context, 'Zaten bir PK sürüyor.', error: true), color: Colors.redAccent),
-                feature(Icons.casino, 'Oyunlar\n(Ludo)', () => run(_openGames), color: Colors.lightBlueAccent),
-                feature(Icons.redeem, 'Şanslı\nÇanta', () => run(() => showBagSend(context, widget.roomId)), color: Colors.redAccent),
-              ]),
-              const SizedBox(height: 10),
-              const Text('Temel Araçlar', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 6),
-              LayoutBuilder(builder: (context, box) {
-                final per = (box.maxWidth / 84).floor().clamp(3, 6);
-                final w = box.maxWidth / per;
-                return Wrap(runSpacing: 6, children: [for (final t in tools) SizedBox(width: w, child: t)]);
-              }),
-            ]),
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.82),
+          child: Container(
+            decoration: const BoxDecoration(color: Color(0xFF1C1C1F), borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Expanded(child: Text('İnteraktif Özellikler', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white))),
+                    InkResponse(onTap: () => Navigator.pop(sheet), radius: 18, child: const Icon(Icons.close, size: 22, color: Colors.white)),
+                  ]),
+                  const SizedBox(height: 10),
+                  Wrap(spacing: 10, runSpacing: 8, children: [
+                    if (_myRole == 'owner')
+                      tile(
+                        const Text('VS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, color: Colors.white, shadows: [Shadow(color: Color(0xFFFF1744), blurRadius: 10), Shadow(color: Color(0xFF2979FF), blurRadius: 14, offset: Offset(-2, 0))])),
+                        'PK',
+                        () => pkFree ? run(() => showPkChallengeSheet(context, roomId: widget.roomId)) : toast(context, 'Zaten bir PK sürüyor.', error: true),
+                        colors: const [Color(0xFF1A237E), Color(0xFF0D0D1A), Color(0xFFB71C1C)],
+                      ),
+                    tile(const Text('🎲', style: TextStyle(fontSize: 30)), 'Ludo', () => run(_openGames), colors: const [Color(0xFF7C4DFF), Color(0xFF2962FF)]),
+                    tile(Image.asset('assets/images/lucky_pouch.webp', width: 48, height: 48), 'Şanslı Çanta', () => run(() => showBagSend(context, widget.roomId)), colors: const [Color(0xFF3A1010), Color(0xFF1A0808)]),
+                  ]),
+                  const SizedBox(height: 16),
+                  const Text('Temel Araçlar', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                  const SizedBox(height: 8),
+                  LayoutBuilder(builder: (context, box) {
+                    final per = (box.maxWidth / 62).floor().clamp(4, 6);
+                    final w = box.maxWidth / per;
+                    return Wrap(runSpacing: 4, children: [for (final t in tools) SizedBox(width: w, child: t)]);
+                  }),
+                ]),
+              ),
+            ),
           ),
         );
       },
@@ -1315,61 +1396,208 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     _scrollChatToEnd();
   }
 
+  /// Sohbetteki rozet sırası: WIP, gönderme (taç) ve alma (kalp) seviyesi, CP ve doğrulanmış hesap.
+  Widget _badgeRow(Map<String, dynamic>? u, {double h = 16}) {
+    final wip = wipLevelOf(u?['wipBadge'] ?? u?['wipLevel']);
+    final gift = (u?['giftLevel'] as num?)?.toInt() ?? 1;
+    final cp = (u?['cpLevel'] as num?)?.toInt();
+    final items = <Widget>[
+      if (wip != null) WipChip(level: wip, colorHex: u?['nameColor'] as String?),
+      LevelPill(level: u?['coinLevel'] ?? 1, send: true, height: h),
+      if (gift > 1) LevelPill(level: gift, send: false, height: h),
+      if (cp != null && cp >= 1) CpLevelPill(level: cp, height: h),
+      if (u?['verified'] == true)
+        Container(
+          height: h,
+          padding: const EdgeInsets.symmetric(horizontal: 5),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(h / 2),
+            gradient: const LinearGradient(colors: [Color(0xFF1E3A8A), Color(0xFF3B82F6)]),
+            border: Border.all(color: const Color(0xFFFFD54F), width: 0.7),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.verified, size: h * 0.7, color: const Color(0xFFFFD54F)),
+            const SizedBox(width: 2),
+            Text('Doğrulanmış', style: TextStyle(fontSize: h * 0.56, height: 1.0, fontWeight: FontWeight.w800, fontStyle: FontStyle.italic, color: Colors.white)),
+          ]),
+        ),
+    ];
+    return Wrap(spacing: 4, runSpacing: 3, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      // WipChip kendi sol boşluğunu taşır; satır başında hizalansın.
+      for (final w in items) w is WipChip ? Transform.translate(offset: const Offset(-6, 0), child: w) : w,
+    ]);
+  }
+
+  Widget _nameText(Map<String, dynamic>? u, {double size = 13.5, Color? fallback}) => WipNameText(
+        '${u?['displayName'] ?? ''}',
+        level: (u?['wipLevel'] as num?)?.toInt(),
+        color: parseColor(u?['nameColor'] as String?) ?? fallback ?? const Color(0xFF7DD3FC),
+        style: TextStyle(fontSize: size, fontWeight: FontWeight.w800, shadows: const [Shadow(color: Colors.black54, blurRadius: 2)]),
+      );
+
+  /// Uygulama uyarı duyurusu: odaya girince sohbetin en başında (yönetim panelinden değiştirilir).
+  Widget _noticeCard(double maxW) => Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          constraints: BoxConstraints(maxWidth: maxW),
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
+          decoration: BoxDecoration(
+            color: const Color(0x99101828),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x55FFD54F)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            const Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.shield_rounded, size: 16, color: Color(0xFFFFD54F)),
+              SizedBox(width: 5),
+              Text('TR Live Sistem Duyurusu', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFFFFD54F))),
+            ]),
+            const SizedBox(height: 4),
+            Text(_appNotice, style: const TextStyle(fontSize: 13, height: 1.35, color: Color(0xFFE5E7EB))),
+          ]),
+        ),
+      );
+
+  Widget _announcementCard(String ann, double maxW) => Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          constraints: BoxConstraints(maxWidth: maxW),
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [Color(0xB37C3AED), Color(0xB3DB2777)]),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Text.rich(
+            TextSpan(children: [
+              const WidgetSpan(alignment: PlaceholderAlignment.middle, child: Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.campaign_rounded, size: 16, color: Colors.amberAccent))),
+              const TextSpan(text: 'Oda duyurusu: ', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.amberAccent)),
+              TextSpan(text: ann),
+            ]),
+            style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.white),
+          ),
+        ),
+      );
+
+  /// "Bu yayıncıyı takip edin" kartı (dokununca yayıncı favorilere eklenir).
+  Widget _followCard(double maxW) {
+    final owner = _members.where((m) => m['role'] == 'owner');
+    final ou = owner.isEmpty ? null : mapOf(owner.first['user']);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: GestureDetector(
+        onTap: () async {
+          if (!_fav) await _toggleFavorite();
+          if (mounted && _fav) setState(() => _messages.removeWhere((m) => m['follow'] == true));
+        },
+        child: Container(
+          constraints: BoxConstraints(maxWidth: maxW),
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+          decoration: BoxDecoration(color: const Color(0xFF22D37E), borderRadius: BorderRadius.circular(22)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.add, color: Colors.white, size: 24),
+            const SizedBox(width: 8),
+            const Flexible(child: Text('Bu yayıncıyı takip edin, eğlenceyi kaçırmayın!', style: TextStyle(color: Colors.white, fontSize: 14, height: 1.25, fontWeight: FontWeight.w600))),
+            const SizedBox(width: 8),
+            Container(padding: const EdgeInsets.all(1.5), decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white), child: UserAvatar(user: ou, radius: 15)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// Girdi satırı. Son 3 günde kayıt olanlar için "yakın zamanda kayıt oldu" kartı ve "Hoş geldiniz" düğmesi.
+  Widget _joinLine(Map<String, dynamic>? ju, double maxW) {
+    final id = ju?['id']?.toString();
+    final isNew = ju?['isNew'] == true && id != Session.id;
+    final head = Wrap(spacing: 4, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      _badgeRow(ju, h: 15),
+      _nameText(ju),
+      const Text('odaya girdi', style: TextStyle(fontSize: 13, color: Colors.white70)),
+    ]);
+    if (!isNew) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          constraints: BoxConstraints(maxWidth: maxW),
+          margin: const EdgeInsets.symmetric(vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(color: const Color(0x6613285A), borderRadius: BorderRadius.circular(14)),
+          child: head,
+        ),
+      );
+    }
+    final done = _welcomed.contains(id);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(maxWidth: maxW),
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+        decoration: BoxDecoration(color: const Color(0x8C13285A), borderRadius: BorderRadius.circular(14)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(color: const Color(0xFFFF3D71), borderRadius: BorderRadius.circular(6)),
+              child: const Text('YENİ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.white)),
+            ),
+            Flexible(child: head),
+          ]),
+          const SizedBox(height: 5),
+          const Text('Bu kullanıcı yakın zamanda kayıt oldu.', style: TextStyle(fontSize: 14, color: Color(0xFFFFE27A), fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: done
+                ? null
+                : () {
+                    if (ju != null) _sendWelcome(ju);
+                  },
+            child: Opacity(
+              opacity: done ? 0.55 : 1,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFF2563EB)]),
+                  border: Border.all(color: const Color(0xFFFDE047), width: 1.5),
+                ),
+                child: Text(done ? '👏 Selam gönderildi' : '👏 Hoş geldiniz', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
   /// Sohbet akışı (Yoho): koltukların altından alt bara kadar, saydam renkli balonlar.
   /// [overlay]: klavye açıkken karartının üstünde balonsuz düz yazı.
   Widget _chatPanel(double w, {bool overlay = false, double? rightPad}) {
-    // Oda duyurusu sohbetin en başında sabit durur.
+    // Sabit başlık kartları: uygulama uyarı duyurusu ve oda duyurusu.
     final ann = (_room?['announcement'] ?? '').toString().trim();
-    final head = ann.isEmpty ? 0 : 1;
-    if (_messages.isEmpty && head == 0) return const SizedBox.shrink();
     final maxW = w * 0.78;
+    final heads = <Widget>[
+      if (_appNotice.isNotEmpty && !overlay) _noticeCard(maxW),
+      if (ann.isNotEmpty) _announcementCard(ann, maxW),
+    ];
+    final head = heads.length;
+    if (_messages.isEmpty && head == 0) return const SizedBox.shrink();
     return ListView.builder(
       controller: _chatScroll,
       padding: EdgeInsets.fromLTRB(8, overlay ? 10 : 2, rightPad ?? w * 0.2, 8),
       itemCount: _messages.length + head,
       itemBuilder: (_, idx) {
-        if (head == 1 && idx == 0) {
-          return Align(
-            alignment: Alignment.centerLeft,
-            child: Container(
-              constraints: BoxConstraints(maxWidth: maxW),
-              margin: const EdgeInsets.symmetric(vertical: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xB37C3AED), Color(0xB3DB2777)]),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: Text.rich(
-                TextSpan(children: [
-                  const WidgetSpan(alignment: PlaceholderAlignment.middle, child: Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.campaign_rounded, size: 16, color: Colors.amberAccent))),
-                  const TextSpan(text: 'Oda duyurusu: ', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.amberAccent)),
-                  TextSpan(text: ann),
-                ]),
-                style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.white),
-              ),
-            ),
-          );
-        }
+        if (idx < head) return heads[idx];
         final i = idx - head;
         final m = _messages[i];
-        if (m['join'] == true) {
-          final ju = mapOf(m['user']);
-          return Align(
-            alignment: Alignment.centerLeft,
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 3),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: const Color(0x5913285A), borderRadius: BorderRadius.circular(12)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Flexible(
-                  child: WipNameText('${ju?['displayName'] ?? ''}', level: (ju?['wipLevel'] as num?)?.toInt(), color: parseColor(ju?['nameColor'] as String?) ?? const Color(0xFF7DD3FC), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
-                ),
-                const Text(' odaya girdi', style: TextStyle(fontSize: 13.5, color: Colors.white70)),
-              ]),
-            ),
-          );
-        }
+        if (m['follow'] == true) return overlay ? const SizedBox.shrink() : _followCard(maxW);
+        if (m['join'] == true) return _joinLine(mapOf(m['user']), maxW);
         if (m['system'] == true) {
           return Align(
             alignment: Alignment.centerLeft,
@@ -1383,7 +1611,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           );
         }
         final u = mapOf(m['user']);
-        final color = parseColor(u?['nameColor'] as String?) ?? Colors.white;
+        final text = Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 15, height: 1.25, shadows: [Shadow(color: Colors.black38, blurRadius: 2)]));
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onLongPress: () => _messageActions(m),
@@ -1393,30 +1621,31 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             if (mem.isNotEmpty) _memberSheet(mem.first);
           },
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
+            padding: const EdgeInsets.symmetric(vertical: 5),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              UserAvatar(user: u, radius: 17),
+              UserAvatar(user: u, radius: 18),
               const SizedBox(width: 8),
               Flexible(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(mainAxisSize: MainAxisSize.min, children: [
-                    Flexible(child: WipNameText('${u?['displayName'] ?? ''}', level: (u?['wipLevel'] as num?)?.toInt(), color: color, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                    const SizedBox(width: 6),
-                    LevelPill(level: u?['coinLevel'] ?? 1, send: true, height: 16),
-                  ]),
-                  const SizedBox(height: 4),
+                  // Ad, altında rozet sırası, altında mesaj balonu.
+                  _nameText(u, size: 13.5, fallback: Colors.white),
+                  const SizedBox(height: 3),
+                  _badgeRow(u),
+                  const SizedBox(height: 5),
                   if (overlay)
-                    Container(
-                      constraints: BoxConstraints(maxWidth: maxW - 42),
-                      child: Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 15, height: 1.25)),
-                    )
+                    Container(constraints: BoxConstraints(maxWidth: maxW - 44), child: text)
                   else
                     // WIP sohbet balonu (kademeye göre renk, ışık ve köşe süsü); WIP yoksa seviye rengi.
                     WipBubble(
                       level: wipLevelOf(u?['wipBubble'] ?? u?['wipLevel']),
                       fallback: _bubbleColor(u),
-                      constraints: BoxConstraints(maxWidth: maxW - 42),
-                      child: Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 15, height: 1.25, shadows: [Shadow(color: Colors.black38, blurRadius: 2)])),
+                      constraints: BoxConstraints(maxWidth: maxW - 44),
+                      child: m['fly'] == true
+                          ? Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.send_rounded, size: 14, color: Color(0xFFFF80AB))),
+                              Flexible(child: text),
+                            ])
+                          : text,
                     ),
                 ]),
               ),
@@ -1450,11 +1679,33 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
       child: Row(children: [
         IconButton(tooltip: 'Kapat', onPressed: _closeInput, icon: const Icon(Icons.keyboard_hide_outlined, color: Colors.black54)),
+        // Uçan yazı anahtarı: açıkken mesaj odanın üstünden uçarak geçer (ücretli).
+        GestureDetector(
+          onTap: () {
+            setState(() => _flyMode = !_flyMode);
+            if (_flyMode) toast(context, _flyCost > 0 ? 'Uçan yazı açık: her mesaj $_flyCost Coin.' : 'Uçan yazı açık.');
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            margin: const EdgeInsets.only(right: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              gradient: _flyMode ? const LinearGradient(colors: [Color(0xFFFF4081), Color(0xFF7C4DFF)]) : null,
+              color: _flyMode ? null : const Color(0xFFF1F2F4),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.send_rounded, size: 15, color: _flyMode ? Colors.white : Colors.black45),
+              const SizedBox(width: 3),
+              Text('Uçan', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _flyMode ? Colors.white : Colors.black54)),
+            ]),
+          ),
+        ),
         Expanded(
           child: TextField(
             controller: _chatCtl,
             autofocus: true,
-            maxLength: 300,
+            maxLength: _flyMode ? 80 : 300,
             enabled: !_chatMuted,
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => _sendChat(),
@@ -1462,7 +1713,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             decoration: InputDecoration(
               isDense: true,
               counterText: '',
-              hintText: _chatMuted ? 'Sohbette susturuldunuz' : 'Selam...',
+              hintText: _chatMuted ? 'Sohbette susturuldunuz' : (_flyMode ? (_flyCost > 0 ? 'Uçan yazı ($_flyCost Coin)' : 'Uçan yazı') : 'Selam...'),
               hintStyle: const TextStyle(color: Colors.black38),
               filled: true,
               fillColor: const Color(0xFFF1F2F4),
@@ -2996,6 +3247,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.36, child: EntranceStrip(queue: _entrance)),
+                Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.24, child: FlyTextLayer(queue: _fly)),
                 MusicBubble(onOpen: _openMusic),
                 for (final f in _flights)
                   _GiftFlight(key: ValueKey(f.id), data: f, onDone: () {

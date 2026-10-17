@@ -9,7 +9,7 @@ import { cleanLine } from '../text_safety.js';
 import { screenText } from '../services/moderation.js';
 import { loadPublicRow } from '../services/users.js';
 import { publicUser } from '../views.js';
-import { BAG_TIERS } from '../services/rewards_config.js';
+import { BAG_TIERS, SUPER_BAG_SLOTS } from '../services/rewards_config.js';
 import { noteTask, dailyState } from '../services/daily.js';
 import { idempotent } from '../idempotency.js';
 
@@ -38,7 +38,10 @@ async function bagJson(b, viewerId, c = { query }) {
 }
 
 router.get('/lucky-bags/config', (req, res) => {
-  res.json({ tiers: Object.entries(BAG_TIERS).map(([id, t]) => ({ id, kind: t.kind, totalCoins: t.total, slots: t.slots, countdown: t.countdown, window: t.window })) });
+  res.json({
+    tiers: Object.entries(BAG_TIERS).map(([id, t]) => ({ id, kind: t.kind, totalCoins: t.total, slots: t.slots, countdown: t.countdown, window: t.window })),
+    superSlots: SUPER_BAG_SLOTS,
+  });
 });
 
 router.get('/rooms/:roomId/lucky-bags', async (req, res) => {
@@ -56,6 +59,12 @@ router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), 
   const tierKey = String(req.body?.tier ?? '');
   const tier = Object.hasOwn(BAG_TIERS, tierKey) ? BAG_TIERS[tierKey] : null;
   if (!tier) throw fail('Geçersiz çanta türü.');
+  // Süper çantada kişi sayısı seçilebilir (50, 100, 150, 200); gönderilmezse kademenin varsayılanı.
+  let slots = tier.slots;
+  if (tier.kind === 'super' && req.body?.slots != null) {
+    slots = Number(req.body.slots);
+    if (!SUPER_BAG_SLOTS.includes(slots)) throw fail(`Kişi sayısı ${SUPER_BAG_SLOTS.join(', ')} olabilir.`);
+  }
   let note = null;
   if (tier.kind === 'super') {
     note = cleanLine(req.body?.note, 100);
@@ -75,11 +84,11 @@ router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), 
     const bag = (await c.query(
       `INSERT INTO lucky_bags(room_id, sender_id, kind, tier, total_coins, slots, amounts, note, opens_at, expires_at)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8, NOW() + make_interval(secs => $9::int), NOW() + make_interval(secs => $10::int)) RETURNING *`,
-      [roomId, userId, tier.kind, req.body.tier, String(tier.total), tier.slots, splitBag(tier.total, tier.slots).map(String), note, tier.countdown, tier.countdown + tier.window],
+      [roomId, userId, tier.kind, req.body.tier, String(tier.total), slots, splitBag(tier.total, slots).map(String), note, tier.countdown, tier.countdown + tier.window],
     )).rows[0];
     await c.query(
       `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'lucky_bag_sent',$2,$3,$4)`,
-      [userId, String(-tier.total), bag.id, `${tier.kind === 'super' ? 'Süper ' : ''}Şanslı çanta (${tier.slots} kişilik)`],
+      [userId, String(-tier.total), bag.id, `${tier.kind === 'super' ? 'Süper ' : ''}Şanslı çanta (${slots} kişilik)`],
     );
     return { bag, roomName: room.name, hidden: room.is_hidden === true };
   });

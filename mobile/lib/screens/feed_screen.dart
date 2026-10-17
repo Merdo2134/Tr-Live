@@ -4,6 +4,7 @@ import '../services/session.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/image_pick.dart';
+import '../widgets/level_badge.dart';
 import 'user_screens.dart';
 
 String timeAgo(dynamic iso) {
@@ -226,6 +227,22 @@ class _PostCardState extends State<PostCard> {
     if (added != null && mounted) setState(() => _comments += added);
   }
 
+  /// Görsele dokununca tam ekran (yakınlaştırılabilir) açılır.
+  void _viewImage(String url) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black,
+      builder: (c) => GestureDetector(
+        onTap: () => Navigator.pop(c),
+        child: InteractiveViewer(
+          minScale: 1,
+          maxScale: 4,
+          child: Center(child: NetImg(url, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54))),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final u = _user;
@@ -233,58 +250,104 @@ class _PostCardState extends State<PostCard> {
     final text = (widget.post['text'] ?? '').toString();
     final mine = widget.post['mine'] == true;
     final staff = Session.isStaff;
+    final gift = (u?['giftLevel'] as num?)?.toInt() ?? 1;
+    void openProfile() {
+      if (u == null) return;
+      Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: u['id'] as String)));
+    }
+
+    // Düzen: solda fotoğraf; sağda ad + rozetler, yazı, küçük görsel (ekranı kaplamaz), zaman ve düğmeler.
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
       decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Pal.outline, width: 0.5))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          GestureDetector(
-            onTap: u == null ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: u['id'] as String))),
-            child: UserAvatar(user: u, radius: 20),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              UserName(user: u, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-              Text(timeAgo(widget.post['createdAt']), style: const TextStyle(color: Pal.textDim, fontSize: 12)),
-            ]),
-          ),
-          if (!mine && !_following)
-            FilledButton(
-              onPressed: _follow,
-              style: FilledButton.styleFrom(minimumSize: const Size(0, 34), padding: const EdgeInsets.symmetric(horizontal: 14), backgroundColor: Pal.amber, foregroundColor: const Color(0xFF2A1D00)),
-              child: const Text('Takip et +', style: TextStyle(fontWeight: FontWeight.w800)),
-            ),
-          if (mine || staff) IconButton(tooltip: 'Sil', icon: const Icon(Icons.delete_outline, color: Pal.textDim), onPressed: _delete),
-        ]),
-        if (img != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 480),
-                child: NetImg(img, width: double.infinity, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox(height: 120, child: Center(child: Icon(Icons.broken_image, color: Pal.textDim)))),
-              ),
-            ),
-          ),
-        if (text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 10), child: Text(text, style: const TextStyle(fontSize: 14.5, height: 1.35))),
-        const SizedBox(height: 6),
-        Row(children: [
-          TextButton.icon(
-            onPressed: _like,
-            style: TextButton.styleFrom(foregroundColor: _liked ? Pal.pink : Pal.textDim, padding: const EdgeInsets.symmetric(horizontal: 8)),
-            icon: Icon(_liked ? Icons.favorite : Icons.favorite_border, size: 20),
-            label: Text('$_likes'),
-          ),
-          TextButton.icon(
-            onPressed: _openComments,
-            style: TextButton.styleFrom(foregroundColor: Pal.textDim, padding: const EdgeInsets.symmetric(horizontal: 8)),
-            icon: const Icon(Icons.mode_comment_outlined, size: 20),
-            label: Text('$_comments'),
-          ),
-        ]),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        GestureDetector(onTap: openProfile, child: UserAvatar(user: u, radius: 21)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: LayoutBuilder(builder: (context, box) {
+            final imgW = (box.maxWidth * 0.62).clamp(120.0, 260.0).toDouble();
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: openProfile,
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      WipNameText(
+                        (u?['displayName'] ?? '').toString(),
+                        level: (u?['wipLevel'] as num?)?.toInt(),
+                        color: parseColor(u?['nameColor'] as String?),
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                      ),
+                      const SizedBox(height: 3),
+                      Wrap(spacing: 4, runSpacing: 3, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                        if (wipLevelOf(u?['wipBadge'] ?? u?['wipLevel']) != null)
+                          Transform.translate(offset: const Offset(-6, 0), child: WipChip(level: u?['wipBadge'] ?? u?['wipLevel'], colorHex: u?['nameColor'] as String?)),
+                        LevelPill(level: u?['coinLevel'] ?? 1, send: true, height: 16),
+                        if (gift > 1) LevelPill(level: gift, send: false, height: 16),
+                      ]),
+                    ]),
+                  ),
+                ),
+                if (!mine && !_following)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6, right: 4),
+                    child: Material(
+                      color: const Color(0x2622C55E),
+                      borderRadius: BorderRadius.circular(18),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: _follow,
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.add, size: 16, color: Color(0xFF22C55E)),
+                            SizedBox(width: 2),
+                            Text('Takip et', style: TextStyle(color: Color(0xFF22C55E), fontWeight: FontWeight.w700, fontSize: 13.5)),
+                          ]),
+                        ),
+                      ),
+                    ),
+                  ),
+              ]),
+              if (text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(text, style: const TextStyle(fontSize: 14.5, height: 1.35))),
+              if (img != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: GestureDetector(
+                    onTap: () => _viewImage(img),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: NetImg(
+                        img,
+                        width: imgW,
+                        height: imgW * 4 / 3,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => SizedBox(width: imgW, height: 100, child: const Center(child: Icon(Icons.broken_image, color: Pal.textDim))),
+                      ),
+                    ),
+                  ),
+                ),
+              Padding(padding: const EdgeInsets.only(top: 8), child: Text(timeAgo(widget.post['createdAt']), style: const TextStyle(color: Pal.textDim, fontSize: 12))),
+              Row(children: [
+                TextButton.icon(
+                  onPressed: _like,
+                  style: TextButton.styleFrom(foregroundColor: _liked ? Pal.pink : Pal.textDim, padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: const Size(0, 36)),
+                  icon: Icon(_liked ? Icons.favorite : Icons.favorite_border, size: 19),
+                  label: Text('$_likes'),
+                ),
+                const SizedBox(width: 10),
+                TextButton.icon(
+                  onPressed: _openComments,
+                  style: TextButton.styleFrom(foregroundColor: Pal.textDim, padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: const Size(0, 36)),
+                  icon: const Icon(Icons.mode_comment_outlined, size: 19),
+                  label: Text('$_comments'),
+                ),
+                const Spacer(),
+                if (mine || staff) IconButton(tooltip: 'Sil', visualDensity: VisualDensity.compact, icon: const Icon(Icons.delete_outline, color: Pal.textDim, size: 20), onPressed: _delete),
+              ]),
+            ]);
+          }),
+        ),
       ]),
     );
   }

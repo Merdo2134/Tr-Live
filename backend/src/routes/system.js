@@ -9,7 +9,10 @@ export const router = Router();
 // Uygulama açılışında okunur: zorunlu/isteğe bağlı güncelleme bilgisi. Giriş gerektirmez.
 router.get('/app/config', async (_req, res) => {
   const c = await getConfig();
-  res.json({ minAppVersion: c.minAppVersion, latestAppVersion: c.latestAppVersion, updateUrl: c.updateUrl || null, updateMessage: c.updateMessage });
+  res.json({
+    minAppVersion: c.minAppVersion, latestAppVersion: c.latestAppVersion, updateUrl: c.updateUrl || null, updateMessage: c.updateMessage,
+    roomNotice: c.roomNotice || '', flyTextCoins: c.flyTextCoins,
+  });
 });
 
 // Telefon bildirimleri (yönetimden herkese): uygulama açılınca / öne gelince buradan kaçırdıklarını sorar.

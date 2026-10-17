@@ -17,6 +17,7 @@ const _tiers = [
 Future<void> showBagSend(BuildContext context, String roomId) async {
   final noteCtl = TextEditingController();
   var picked = 'n3';
+  var slots = 50; // süper çantada kişi sayısı
   var sending = false;
   await showModalBottomSheet<void>(
     context: context,
@@ -62,7 +63,7 @@ Future<void> showBagSend(BuildContext context, String roomId) async {
                   const SizedBox(width: 3),
                   Text(fmtNumber(x.$3), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.white)),
                 ]),
-                Text('${x.$4} kişi', style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                Text(x.$2 ? '50+ kişi' : '${x.$4} kişi', style: const TextStyle(fontSize: 11, color: Colors.white70)),
               ]),
             ),
           );
@@ -100,6 +101,30 @@ Future<void> showBagSend(BuildContext context, String roomId) async {
                 ),
                 if (t.$2) ...[
                   const SizedBox(height: 12),
+                  const Text('Kaç kişi açabilsin?', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    for (final n in const [50, 100, 150, 200])
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setS(() => slots = n),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            margin: const EdgeInsets.symmetric(horizontal: 3),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              color: slots == n ? null : Colors.white10,
+                              gradient: slots == n ? const LinearGradient(colors: [Color(0xFFFF5CA8), Color(0xFFB0127A)]) : null,
+                              border: Border.all(color: slots == n ? const Color(0xFFFFE082) : Colors.white12),
+                            ),
+                            child: Text('$n kişi', style: TextStyle(color: Colors.white, fontWeight: slots == n ? FontWeight.w900 : FontWeight.w600, fontSize: 13)),
+                          ),
+                        ),
+                      ),
+                  ]),
+                  const SizedBox(height: 10),
                   const Text('Süper çanta tüm odalarda duyurulur; 60 sn geri sayım sonunda açılır. Açmak isteyenler bu notu sohbete bir kez yazar.',
                       style: TextStyle(color: Colors.amberAccent, fontSize: 12)),
                   const SizedBox(height: 6),
@@ -122,7 +147,7 @@ Future<void> showBagSend(BuildContext context, String roomId) async {
                       ? null
                       : () async {
                           setS(() => sending = true);
-                          final r = await guard(c, () => Api.postOnce('/api/rooms/$roomId/lucky-bags', {'tier': picked, if (t.$2) 'note': noteCtl.text.trim()}));
+                          final r = await guard(c, () => Api.postOnce('/api/rooms/$roomId/lucky-bags', {'tier': picked, if (t.$2) 'note': noteCtl.text.trim(), if (t.$2) 'slots': slots}));
                           if (!c.mounted) return;
                           setS(() => sending = false);
                           if (r != null) Navigator.pop(c);
@@ -215,7 +240,21 @@ class _ClaimDialogState extends State<_ClaimDialog> {
   Future<void> _open() async {
     setState(() => _busy = true);
     final r = await guard(context, () => Api.post('/api/lucky-bags/${_b['id']}/claim'));
-    if (mounted) setState(() { _busy = false; if (r != null) { _won = r['amount'].toString(); _b['mine'] = _won; } });
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (r != null) {
+        _won = r['amount'].toString();
+        _b['mine'] = _won;
+      }
+    });
+    // Açılınca "Açıldı" yazar ve pencere kendiliğinden kapanır.
+    if (r != null) {
+      _t?.cancel();
+      Future.delayed(const Duration(milliseconds: 1700), () {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    }
   }
 
   String _mmss(int s) => '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
@@ -228,67 +267,65 @@ class _ClaimDialogState extends State<_ClaimDialog> {
     final needNote = _super && !_noteSent && _won == null && !expired;
     final canOpen = _won == null && !expired && !counting && !needNote && !_busy;
     final big = _won != null ? '🎉' : (expired ? 'Bitti' : (counting ? _mmss(_toOpen) : (needNote ? 'AÇ' : 'AÇ')));
+    // Sade, küçük pencere.
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 56),
       child: Stack(clipBehavior: Clip.none, children: [
         Container(
-          padding: const EdgeInsets.fromLTRB(20, 28, 20, 26),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: Colors.white70, width: 2),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white54, width: 1.2),
             gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFF4D6D), Color(0xFFE8258A)]),
-            boxShadow: const [BoxShadow(color: Color(0x88FF2D75), blurRadius: 24)],
+            boxShadow: const [BoxShadow(color: Color(0x66FF2D75), blurRadius: 18)],
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              padding: const EdgeInsets.all(3),
-              decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white70),
-              child: UserAvatar(user: sender, radius: 42),
-            ),
-            const SizedBox(height: 10),
-            const Divider(color: Colors.white38, height: 1),
-            const SizedBox(height: 8),
-            UserName(user: sender),
-            const SizedBox(height: 6),
-            Text(_super ? 'Süper şanslı çanta gönderdi' : 'Şanslı çanta gönderdi', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white)),
-            const SizedBox(height: 4),
-            const Divider(color: Colors.white38, height: 1),
-            const SizedBox(height: 18),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Image.asset('assets/images/lucky_coin.png', width: 40, height: 40),
-              const SizedBox(width: 8),
-              Text(fmtNumber(_b['totalCoins']), style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w800, color: Colors.white)),
-            ]),
-            Text('${_b['claimed']}/${_b['slots']} kişi açtı', style: const TextStyle(color: Colors.white70)),
-            if (_super && !expired && _won == null) ...[
-              const SizedBox(height: 10),
+            Row(mainAxisSize: MainAxisSize.min, children: [
               Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(12)),
-                child: Column(children: [
-                  Text('"${_b['note']}"', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 6),
-                  if (!_noteSent)
-                    FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFFE8258A)),
-                      onPressed: _busy ? null : _sendNote,
-                      child: const Text('Notu sohbete gönder'),
-                    )
-                  else
-                    const Text('✓ Not gönderildi', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                padding: const EdgeInsets.all(1.5),
+                decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white70),
+                child: UserAvatar(user: sender, radius: 17),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                  Text('${sender?['displayName'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Colors.white)),
+                  Text(_super ? 'Süper şanslı çanta' : 'Şanslı çanta', style: const TextStyle(fontSize: 11.5, color: Colors.white70)),
                 ]),
               ),
+            ]),
+            const SizedBox(height: 10),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Image.asset('assets/images/lucky_coin.png', width: 24, height: 24),
+              const SizedBox(width: 5),
+              Text(fmtNumber(_b['totalCoins']), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white)),
+            ]),
+            Text('${_b['claimed']}/${_b['slots']} kişi açtı', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            if (_super && !expired && _won == null) ...[
+              const SizedBox(height: 8),
+              Text('"${_b['note']}"', textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 4),
+              if (!_noteSent)
+                SizedBox(
+                  height: 30,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFFE8258A), padding: const EdgeInsets.symmetric(horizontal: 12), textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    onPressed: _busy ? null : _sendNote,
+                    child: const Text('Notu sohbete gönder'),
+                  ),
+                )
+              else
+                const Text('✓ Not gönderildi', style: TextStyle(color: Colors.white70, fontSize: 11.5)),
             ],
-            const SizedBox(height: 18),
+            const SizedBox(height: 12),
             GestureDetector(
               onTap: canOpen ? _open : null,
               child: Container(
-                width: 132,
-                height: 132,
-                padding: const EdgeInsets.all(9),
-                decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x66FFFFFF)),
+                width: 92,
+                height: 92,
+                padding: const EdgeInsets.all(6),
+                decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x55FFFFFF)),
                 child: Container(
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
@@ -296,39 +333,34 @@ class _ClaimDialogState extends State<_ClaimDialog> {
                     gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: canOpen ? const [Color(0xFFFFF59D), Color(0xFFFFF176)] : const [Color(0xFFFFF9C4), Color(0xFFFFECB3)]),
                   ),
                   child: _won != null
-                      // Açılınca kesenin içinden çıkan coin (iç tasarım).
                       ? TweenAnimationBuilder<double>(
                           tween: Tween(begin: 0.4, end: 1),
                           duration: const Duration(milliseconds: 520),
                           curve: Curves.elasticOut,
                           builder: (_, k, child) => Transform.scale(scale: k, child: child),
-                          child: Image.asset('assets/images/lucky_coin.png', width: 78, height: 78),
+                          child: Image.asset('assets/images/lucky_coin.png', width: 52, height: 52),
                         )
                       : (canOpen || counting)
                           ? Stack(alignment: Alignment.center, children: [
-                              Opacity(opacity: counting ? 0.35 : 1, child: Image.asset('assets/images/lucky_pouch.webp', width: 92, height: 92)),
-                              if (counting) Text(big, style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: Color(0xFF8A1560))),
+                              Opacity(opacity: counting ? 0.35 : 1, child: Image.asset('assets/images/lucky_pouch.webp', width: 62, height: 62)),
+                              if (counting) Text(big, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF8A1560))),
                             ])
-                          : Padding(padding: const EdgeInsets.all(10), child: FittedBox(fit: BoxFit.scaleDown, child: Text(big, style: const TextStyle(fontSize: 38, fontWeight: FontWeight.w900, color: Color(0xFF8A1560))))),
+                          : Padding(padding: const EdgeInsets.all(8), child: FittedBox(fit: BoxFit.scaleDown, child: Text(big, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Color(0xFF8A1560))))),
                 ),
               ),
             ),
-            if (_won != null) ...[
-              const SizedBox(height: 10),
-              Text('${fmtNumber(_won)} Coin kazandın!', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
-            ] else if (canOpen) ...[
-              const SizedBox(height: 8),
-              const Text('Keseye dokun ve aç', style: TextStyle(color: Colors.white70)),
-            ] else if (counting) ...[
-              const SizedBox(height: 8),
-              const Text('Süre bitince açılır', style: TextStyle(color: Colors.white70)),
-            ] else if (expired) ...[
-              const SizedBox(height: 8),
-              const Text('Çantanın süresi doldu', style: TextStyle(color: Colors.white70)),
-            ],
+            const SizedBox(height: 8),
+            if (_won != null)
+              Text('Açıldı! +${fmtNumber(_won)} Coin', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Colors.white))
+            else if (canOpen)
+              const Text('Keseye dokun ve aç', style: TextStyle(color: Colors.white70, fontSize: 12))
+            else if (counting)
+              const Text('Süre bitince açılır', style: TextStyle(color: Colors.white70, fontSize: 12))
+            else if (expired)
+              const Text('Çantanın süresi doldu', style: TextStyle(color: Colors.white70, fontSize: 12)),
           ]),
         ),
-        Positioned(right: -6, top: -6, child: InkWell(customBorder: const CircleBorder(), onTap: () => Navigator.pop(context), child: const CircleAvatar(radius: 16, backgroundColor: Colors.black54, child: Icon(Icons.close, size: 18, color: Colors.white)))),
+        Positioned(right: -6, top: -6, child: InkWell(customBorder: const CircleBorder(), onTap: () => Navigator.pop(context), child: const CircleAvatar(radius: 13, backgroundColor: Colors.black54, child: Icon(Icons.close, size: 15, color: Colors.white)))),
       ]),
     );
   }

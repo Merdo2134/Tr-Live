@@ -21,3 +21,6 @@ export const BAG_TIERS = {
   s60: { kind: 'super', total: 60000, slots: 50, countdown: 60, window: 120 },
   s90: { kind: 'super', total: 90000, slots: 50, countdown: 60, window: 120 },
 };
+
+// Süper çantada gönderen kişi sayısını seçebilir (50 ve üzeri). Normal çantalar sabit.
+export const SUPER_BAG_SLOTS = [50, 100, 150, 200];

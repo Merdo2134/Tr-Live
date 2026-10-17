@@ -23,6 +23,12 @@ export const CONFIG_DEFAULTS = Object.freeze({
   luckyReceiverBps: 1000,
   luckyMaxWin: 5000000,
   luckyAnnounceMultiplier: 100,
+  // Odaya girince sohbetin başında görünen uygulama uyarı duyurusu (boş = gösterilmez).
+  roomNotice: 'TR Live\'a hoş geldiniz! Odalarda hakaret, küfür, siyaset, +18 içerik, reklam ve dolandırıcılık yasaktır. '
+    + 'Coin alım-satımını yalnızca uygulama içinden ve yetkili bayilerden yapın; şifrenizi kimseyle paylaşmayın. '
+    + 'Kurallara uymayan hesaplar uyarı yapılmadan kapatılır.',
+  // Uçan yazı (odada ekranın üstünden geçen mesaj) ücreti, Coin. 0 = ücretsiz.
+  flyTextCoins: 99,
 });
 
 const VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
@@ -60,12 +66,15 @@ export function validateConfigPatch(body) {
       if (typeof v !== 'string' || (v && !/^https:\/\/[^\s]{4,300}$/.test(v))) throw fail('İndirme bağlantısı https ile başlamalı.');
     } else if (k === 'updateMessage') {
       if (typeof v !== 'string' || v.length > 300) throw fail('Mesaj en fazla 300 karakter olmalı.');
+    } else if (k === 'roomNotice') {
+      if (typeof v !== 'string' || v.length > 500) throw fail('Oda uyarı duyurusu en fazla 500 karakter olmalı.');
     } else if (typeof def === 'boolean') {
       if (typeof v !== 'boolean') throw fail(`${k} true/false olmalı.`);
     } else if (typeof def === 'number') {
       const limits = {
         strikeLimit: [1, 20], strikeWindowMin: [1, 1440], muteMinutes: [1, 1440], maxMuteMinutes: [1, 10080],
         luckyRtpBps: [0, 9000], luckyReceiverBps: [0, 5000], luckyMaxWin: [1, 1000000000], luckyAnnounceMultiplier: [10, 500],
+        flyTextCoins: [0, 1000000],
       }[k];
       if (!Number.isInteger(v) || v < limits[0] || v > limits[1]) throw fail(`${k} ${limits[0]}-${limits[1]} arasında tam sayı olmalı.`);
     }
