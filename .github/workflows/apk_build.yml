@@ -116,6 +116,21 @@ jobs:
               gradle.write_text(new)
               print(f"{gradle}: minSdk 24 yapıldı")
 
+          # 1a) Telefon bildirimi eklentisi (flutter_local_notifications) "core library desugaring" ister.
+          g = gradle.read_text()
+          if "desugar_jdk_libs" not in g:
+              kts_app = gradle.suffix == ".kts"
+              flag = "        isCoreLibraryDesugaringEnabled = true\n" if kts_app else "        coreLibraryDesugaringEnabled true\n"
+              if "compileOptions {" in g:
+                  g = g.replace("compileOptions {", "compileOptions {\n" + flag, 1)
+              else:
+                  g = g.replace("android {", "android {\n    compileOptions {\n" + flag + "    }\n", 1)
+              dep = ('    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n' if kts_app
+                     else "    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n")
+              g = g.rstrip() + "\n\ndependencies {\n" + dep + "}\n"
+              gradle.write_text(g)
+              print(f"{gradle}: desugaring açıldı")
+
           # 1b) Tüm eklentileri (file_picker vb.) compileSdk 36 ile derle.
           # Eski eklentiler android-34 ile derlenir; flutter_plugin_android_lifecycle ise 36 ister ve "checkReleaseAarMetadata" hatası verir.
           marker_txt = "// TRLIVE_COMPILE_SDK"
