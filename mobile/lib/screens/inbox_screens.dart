@@ -86,7 +86,7 @@ class _MessagesHomeState extends State<MessagesHome> {
         });
         return;
       }
-      if (e['type'] == 'support_message') {
+      if (e['type'] == 'support_message' || e['type'] == 'agency_invite' || e['type'] == 'cp_request') {
         _loadBadges();
         return;
       }
@@ -171,6 +171,9 @@ class _MessagesHomeState extends State<MessagesHome> {
     final gap = (w * 0.016).clamp(5.0, 9.0).toDouble();
     final icon = cw * 0.44;
     final items = <_InboxCard>[
+      // Ajans daveti: yalnızca bekleyen davet varken görünür (yanıt buradan verilir).
+      if (_n('agency') > 0)
+        _InboxCard('Ajans\ndaveti', const Color(0xFF3A1F55), _icon(Icons.business_center_rounded, const Color(0xFFB794F4), icon), _n('agency'), () => _push(const AgencyInvitesScreen())),
       _InboxCard('Arkadaşlık\nisteği', const Color(0xFF2B2650), _icon(Icons.waving_hand_rounded, const Color(0xFFFFC43D), icon), Inbox.badges.value['friends'] ?? 0, () => _push(const FriendRequestsScreen())),
       _InboxCard('TR Live Ekibi', const Color(0xFF173D2E), TeamAvatar(size: icon), _n('team'), () => _push(const OfficialChannelScreen(kind: 'team'))),
       _InboxCard('Etkinlik\nPromosyonu', const Color(0xFF3D321A), _icon(Icons.campaign_rounded, const Color(0xFFFF9F0A), icon), _n('event'), () => _push(const OfficialChannelScreen(kind: 'event'))),
@@ -386,14 +389,21 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
   int _v = 0;
   final Set<String> _busy = {};
 
-  Future<void> _respond(String userId, bool accept) async {
-    if (_busy.contains(userId)) return;
-    setState(() => _busy.add(userId));
-    final r = await guard(context, () => Api.post('/api/friends/${accept ? 'accept' : 'decline'}/$userId'));
+  /// [rel]: null = arkadaşlık isteği; 'friend' / 'cp' = yakınlık ilişki isteği (CP sistemi).
+  Future<void> _respond(String userId, bool accept, [String? rel]) async {
+    final key = '${rel ?? 'f'}:$userId';
+    if (_busy.contains(key)) return;
+    setState(() => _busy.add(key));
+    final r = await guard(
+      context,
+      () => rel == null
+          ? Api.post('/api/friends/${accept ? 'accept' : 'decline'}/$userId')
+          : Api.post('/api/cp/with/$userId/${accept ? 'accept' : 'decline'}'),
+    );
     if (!mounted) return;
-    setState(() => _busy.remove(userId));
+    setState(() => _busy.remove(key));
     if (r != null) {
-      if (accept) toast(context, 'Artık arkadaşsınız.');
+      if (accept) toast(context, rel == 'cp' ? 'Artık CP\'siniz! ❤' : 'Artık arkadaşsınız.');
       setState(() => _v++);
       Inbox.refreshBadges();
     }
@@ -417,7 +427,19 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
         Expanded(
           child: AsyncBody<List<Map<String, dynamic>>>(
             key: ValueKey(_v),
-            load: () async => listOf((await Api.get('/api/friends/requests'))['requests']),
+            // Arkadaşlık istekleri + CP sisteminden gelen ilişki istekleri (Arkadaş / CP) tek listede.
+            load: () async {
+              final res = await Future.wait([
+                Api.get('/api/friends/requests'),
+                Api.get('/api/cp/requests').catchError((_) => <String, dynamic>{}),
+              ]);
+              final list = [
+                ...listOf(res[1]['requests']).map((x) => {...x, 'rel': x['kind']}),
+                ...listOf(res[0]['requests']),
+              ];
+              list.sort((a, b) => '${b['createdAt']}'.compareTo('${a['createdAt']}'));
+              return list;
+            },
             builder: (context, reqs, reload) => reqs.isEmpty
                 ? const Center(
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -433,24 +455,28 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
                         Builder(builder: (context) {
                           final u = mapOf(r['user']);
                           final id = u?['id']?.toString() ?? '';
-                          final busy = _busy.contains(id);
+                          final rel = r['rel'] as String?;
+                          final busy = _busy.contains('${rel ?? 'f'}:$id');
                           return ListTile(
                             leading: GestureDetector(
                               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: id))),
                               child: UserAvatar(user: u, radius: 24),
                             ),
                             title: UserName(user: u, style: const TextStyle(fontWeight: FontWeight.w700)),
-                            subtitle: Text(yohoTime(r['createdAt'], withClock: true), style: const TextStyle(color: Pal.textDim, fontSize: 12)),
+                            subtitle: rel == null
+                                ? Text(yohoTime(r['createdAt'], withClock: true), style: const TextStyle(color: Pal.textDim, fontSize: 12))
+                                : Text('${rel == 'cp' ? '❤ CP' : '🤝 Arkadaş'} olarak seçti · ${yohoTime(r['createdAt'], withClock: true)}',
+                                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFFF7EB3), fontSize: 12)),
                             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                               FilledButton(
                                 style: FilledButton.styleFrom(backgroundColor: Pal.green, foregroundColor: Colors.white, minimumSize: const Size(0, 34), padding: const EdgeInsets.symmetric(horizontal: 12), shape: const StadiumBorder()),
-                                onPressed: busy ? null : () => _respond(id, true),
+                                onPressed: busy ? null : () => _respond(id, true, rel),
                                 child: const Text('Kabul et'),
                               ),
                               const SizedBox(width: 6),
                               OutlinedButton(
                                 style: OutlinedButton.styleFrom(foregroundColor: Pal.textDim, minimumSize: const Size(0, 34), padding: const EdgeInsets.symmetric(horizontal: 12), shape: const StadiumBorder()),
-                                onPressed: busy ? null : () => _respond(id, false),
+                                onPressed: busy ? null : () => _respond(id, false, rel),
                                 child: const Text('Reddet'),
                               ),
                             ]),
@@ -461,6 +487,102 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
           ),
         ),
       ]),
+    );
+  }
+}
+
+/// Ajans davetleri: ajans sahibinin gönderdiği yayıncılık davetleri. Kabul edilince ajansın yayıncısı olunur.
+class AgencyInvitesScreen extends StatefulWidget {
+  const AgencyInvitesScreen({super.key});
+
+  @override
+  State<AgencyInvitesScreen> createState() => _AgencyInvitesScreenState();
+}
+
+class _AgencyInvitesScreenState extends State<AgencyInvitesScreen> {
+  int _v = 0;
+  final Set<String> _busy = {};
+
+  Future<void> _respond(String id, bool accept) async {
+    if (_busy.contains(id)) return;
+    setState(() => _busy.add(id));
+    final r = await guard(context, () => Api.post('/api/agency-requests/$id/respond', {'accept': accept}));
+    if (!mounted) return;
+    setState(() => _busy.remove(id));
+    if (r != null) {
+      toast(context, accept ? 'Ajansa katıldın, artık yayıncısın! 🎉' : 'Davet reddedildi.');
+      setState(() => _v++);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(titleSpacing: 0, title: const Text('Ajans daveti', style: TextStyle(fontWeight: FontWeight.w800))),
+      body: AsyncBody<List<Map<String, dynamic>>>(
+        key: ValueKey(_v),
+        load: () async => listOf((await Api.get('/api/broadcaster/requests'))['requests']).where((x) => x['direction'] == 'invite').toList(),
+        builder: (context, list, reload) => list.isEmpty
+            ? const Center(child: Text('Bekleyen ajans daveti yok.', style: TextStyle(color: Pal.textDim, fontSize: 15)))
+            : RefreshIndicator(
+                onRefresh: reload,
+                child: ListView(padding: const EdgeInsets.all(12), children: [
+                  for (final r in list)
+                    Builder(builder: (context) {
+                      final a = mapOf(r['agency']);
+                      final id = r['id'].toString();
+                      final busy = _busy.contains(id);
+                      final logo = Api.absoluteUrl(a?['logoUrl'] as String?);
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: const LinearGradient(colors: [Color(0xFF3A1F55), Color(0xFF1E1236)]),
+                          border: Border.all(color: const Color(0x55B794F4)),
+                        ),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            CircleAvatar(
+                              radius: 22,
+                              backgroundColor: const Color(0xFF6D28D9),
+                              backgroundImage: logo == null ? null : NetImage(logo, targetW: 132, targetH: 132),
+                              child: logo == null ? const Icon(Icons.business_center_rounded, color: Colors.white) : null,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text((a?['name'] ?? 'Ajans').toString(), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                                Text(yohoTime(r['createdAt'], withClock: true), style: const TextStyle(color: Pal.textDim, fontSize: 12)),
+                              ]),
+                            ),
+                          ]),
+                          const SizedBox(height: 10),
+                          const Text('Seni yayıncı olarak ajansına davet ediyor. Kabul edersen bu ajansın yayıncısı olursun.', style: TextStyle(color: Colors.white70)),
+                          const SizedBox(height: 12),
+                          Row(children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(foregroundColor: Pal.textDim, shape: const StadiumBorder()),
+                                onPressed: busy ? null : () => _respond(id, false),
+                                child: const Text('Reddet'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton(
+                                style: FilledButton.styleFrom(backgroundColor: Pal.green, foregroundColor: Colors.white, shape: const StadiumBorder()),
+                                onPressed: busy ? null : () => _respond(id, true),
+                                child: const Text('Kabul et'),
+                              ),
+                            ),
+                          ]),
+                        ]),
+                      );
+                    }),
+                ]),
+              ),
+      ),
     );
   }
 }

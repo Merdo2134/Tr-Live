@@ -15,7 +15,7 @@ class Inbox {
     _sub?.cancel();
     _sub = SocketService.instance.events.listen((e) {
       if (e['type'] == 'dm' || e['type'] == 'connected') refresh();
-      if (e['type'] == 'friend_update' || e['type'] == 'connected') refreshBadges();
+      if (e['type'] == 'friend_update' || e['type'] == 'cp_request' || e['type'] == 'cp_update' || e['type'] == 'connected') refreshBadges();
     });
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 60), (_) => refreshBadges());

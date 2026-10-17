@@ -1,5 +1,6 @@
 import { cleanPublic } from '../safe_text.js';
 import { Router } from 'express';
+import { hub } from '../realtime.js';
 import { query, tx } from '../database.js';
 import { requireAuth } from '../auth.js';
 import { fail, uuid, text, httpsUrl } from '../http.js';
@@ -210,11 +211,17 @@ router.post('/agencies/:agencyId/invite', async (req, res) => {
   if (a.owner_id !== req.user.id) throw fail('Davet yalnızca ajans sahibi tarafından gönderilir.', 403);
   if (a.status !== 'active') throw fail('Ajans henüz aktif değil.', 409);
   const userId = uuid(req.body?.userId, 'Kullanıcı');
+  if (userId === req.user.id) throw fail('Kendinizi davet edemezsiniz.');
+  const target = (await query(`SELECT account_status FROM users WHERE id = $1`, [userId])).rows[0];
+  if (!target || target.account_status !== 'active') throw fail('Kullanıcı bulunamadı.', 404);
+  // Davet, henüz yayıncı olmayan kullanıcıya da gönderilebilir: kabul ederse ajansın yayıncısı olur.
   const b = (await query(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1`, [userId])).rows[0];
-  if (!b || b.status === 'rejected' || b.status === 'suspended') throw fail('Kullanıcı onaylı veya bekleyen bir yayıncı değil.', 409);
-  if (b.agency_id) throw fail('Yayıncı zaten bir ajansa bağlı.', 409);
+  if (b && (b.status === 'rejected' || b.status === 'suspended')) throw fail('Bu kullanıcı yayıncı olarak davet edilemez.', 409);
+  if (b?.agency_id) throw fail('Yayıncı zaten bir ajansa bağlı.', 409);
   try {
     const r = await query(`INSERT INTO agency_requests(agency_id, user_id, direction) VALUES($1,$2,'invite') RETURNING id`, [a.id, userId]);
+    // Davet, kullanıcının Mesajlar sayfasına bildirim olarak düşer.
+    hub.sendToUser(userId, { type: 'agency_invite', requestId: r.rows[0].id, agency: { id: a.id, name: a.name, logoUrl: a.logo_url } });
     res.status(201).json({ ok: true, requestId: r.rows[0].id });
   } catch (error) {
     if (error.code === '23505') throw fail('Bu kullanıcı için bekleyen bir istek zaten var.', 409);
@@ -251,9 +258,17 @@ router.post('/agency-requests/:requestId/respond', async (req, res) => {
     if (accept) {
       if (agency.status !== 'active') throw fail('Ajans aktif değil.', 409);
       const b = (await c.query(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1 FOR UPDATE`, [q.user_id])).rows[0];
-      if (!b || b.status === 'rejected' || b.status === 'suspended') throw fail('Kullanıcı yayıncı olarak uygun değil.', 409);
-      if (b.agency_id) throw fail('Yayıncı zaten bir ajansa bağlı.', 409);
-      await c.query(`UPDATE broadcasters SET agency_id = $1, joined_agency_at = NOW() WHERE user_id = $2`, [agency.id, q.user_id]);
+      if (!b && q.direction === 'invite') {
+        // Ajans davetini kabul eden kullanıcı (yayıncı değilse) ajansın onaylı yayıncısı olur.
+        await c.query(
+          `INSERT INTO broadcasters(user_id, agency_id, status, approved_at, joined_agency_at) VALUES($1,$2,'approved',NOW(),NOW())`,
+          [q.user_id, agency.id],
+        );
+      } else {
+        if (!b || b.status === 'rejected' || b.status === 'suspended') throw fail('Kullanıcı yayıncı olarak uygun değil.', 409);
+        if (b.agency_id) throw fail('Yayıncı zaten bir ajansa bağlı.', 409);
+        await c.query(`UPDATE broadcasters SET agency_id = $1, joined_agency_at = NOW() WHERE user_id = $2`, [agency.id, q.user_id]);
+      }
       await c.query(`UPDATE agency_requests SET status = 'cancelled', responded_at = NOW() WHERE user_id = $1 AND status = 'pending' AND id <> $2`, [q.user_id, q.id]);
     }
     await c.query(`UPDATE agency_requests SET status = $2, responded_at = NOW() WHERE id = $1`, [q.id, accept ? 'accepted' : 'rejected']);

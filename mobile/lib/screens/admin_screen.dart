@@ -755,6 +755,7 @@ class _CatalogTab extends StatelessWidget {
                   DropdownMenuItem(value: 'private', child: Text('Kişiye Özel')),
                   DropdownMenuItem(value: 'vip', child: Text('Vip (WIP 3+)')),
                   DropdownMenuItem(value: 'lucky', child: Text('Şanslı')),
+                  DropdownMenuItem(value: 'cp', child: Text('CP (yakınlık 1,5 kat)')),
                 ],
                 onChanged: (v) => setS(() => category = v ?? 'popular'),
               ),
@@ -943,6 +944,7 @@ class _CatalogTab extends StatelessWidget {
                     DropdownMenuItem(value: 'private', child: Text('Kişiye Özel')),
                     DropdownMenuItem(value: 'vip', child: Text('Vip (WIP 3+)')),
                     DropdownMenuItem(value: 'lucky', child: Text('Şanslı')),
+                    DropdownMenuItem(value: 'cp', child: Text('CP (yakınlık 1,5 kat)')),
                   ],
                   onChanged: (v) => setS(() => category = v ?? 'popular'),
                 ),
@@ -1257,6 +1259,33 @@ class _GrantItemPageState extends State<GrantItemPage> {
     if (r != null) toast(context, '"${item['name']}" ${widget.user['displayName']} kullanıcısına verildi.');
   }
 
+  /// WIP öğelerinin önizlemesi (kodla çizilir): çerçeve, rozet, sohbet balonu, giriş efekti rengi.
+  Widget _wipPreview(int level, double size) {
+    final s = WipStyle.of(level);
+    switch (_cat) {
+      case 'frame':
+        final r = size * 0.28;
+        return SizedBox(
+          width: size * 0.8,
+          height: size * 0.8,
+          child: Stack(alignment: Alignment.center, clipBehavior: Clip.none, children: [
+            CircleAvatar(radius: r, backgroundColor: Colors.white12, child: Icon(Icons.person, size: r, color: Colors.white54)),
+            WipFrame.around(level, r),
+          ]),
+        );
+      case 'badge':
+        return WipChip(level: level);
+      case 'chat_bubble':
+        return WipBubble(level: level, fallback: const Color(0x8C13285A), child: const Text('Merhaba', style: TextStyle(fontSize: 12)));
+      default:
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(gradient: LinearGradient(colors: s?.gradient ?? const [Colors.purple, Colors.pink]), borderRadius: BorderRadius.circular(10)),
+          child: Text(wipLabel(level), style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white)),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1296,7 +1325,15 @@ class _GrantItemPageState extends State<GrantItemPage> {
                               padding: const EdgeInsets.all(6),
                               decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), border: Border.all(color: sel ? Colors.greenAccent : Colors.white24, width: sel ? 2.5 : 1)),
                               child: Column(children: [
-                                Expanded(child: LayoutBuilder(builder: (c, box) => Center(child: mediaPreview(it['imageUrl'] as String?, frame: _cat == 'frame', size: box.biggest.shortestSide)))),
+                                Expanded(
+                                  child: LayoutBuilder(
+                                    builder: (c, box) => Center(
+                                      child: it['wip'] == true
+                                          ? _wipPreview(int.tryParse(it['key'].toString().split(':').last) ?? 1, box.biggest.shortestSide)
+                                          : mediaPreview(it['imageUrl'] as String?, frame: _cat == 'frame', size: box.biggest.shortestSide),
+                                    ),
+                                  ),
+                                ),
                                 Text(it['name'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                               ]),
                             ),

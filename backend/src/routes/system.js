@@ -12,6 +12,19 @@ router.get('/app/config', async (_req, res) => {
   res.json({ minAppVersion: c.minAppVersion, latestAppVersion: c.latestAppVersion, updateUrl: c.updateUrl || null, updateMessage: c.updateMessage });
 });
 
+// Telefon bildirimleri (yönetimden herkese): uygulama arka planda ~15 dk'da bir buradan yenilerini sorar.
+// Herkese açık duyuru olduğu için giriş gerektirmez. [after]: telefonda gösterilen son bildirimin numarası.
+router.get('/push/latest', ipLimit('push_poll', 2000, 3600e3), async (req, res) => {
+  const after = Number.parseInt(String(req.query.after ?? '0'), 10);
+  const r = await query(
+    `SELECT id, title, body, created_at FROM push_messages
+     WHERE id > $1 AND created_at > NOW() - INTERVAL '3 days' ORDER BY id DESC LIMIT 5`,
+    [Number.isFinite(after) && after > 0 ? after : 0],
+  );
+  const last = (await query(`SELECT COALESCE(MAX(id), 0)::bigint AS id FROM push_messages`)).rows[0].id;
+  res.json({ lastId: String(last), messages: r.rows.reverse().map((x) => ({ id: String(x.id), title: x.title, body: x.body, createdAt: x.created_at })) });
+});
+
 const clip = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').slice(0, max) : null);
 let inserts = 0;
 

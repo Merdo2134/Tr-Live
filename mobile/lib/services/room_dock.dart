@@ -16,6 +16,9 @@ class RoomDock {
   static final request = ValueNotifier<RoomRequest?>(null);
   static final minimized = ValueNotifier<bool>(false);
 
+  /// Açık odanın fotoğrafı (küçültülmüş oda balonunda döner). Oda ekranı yükleyince/değişince yazar.
+  static final cover = ValueNotifier<String?>(null);
+
   /// Açık odadaki rolüm (oda sahibi başka odaya geçerken uyarmak için).
   static String myRole = 'user';
 
@@ -48,6 +51,7 @@ class RoomDock {
 
   static void close() {
     request.value = null;
+    cover.value = null;
     minimized.value = false;
     myRole = 'user';
     BackgroundService.instance.roomClosed();

@@ -204,7 +204,7 @@ test('hediye: çoklu alıcı (her birine tam adet), Tüm Koltuk / Tüm Oda, sekm
   const list = await api('GET', '/api/gifts', { token: U.a.token });
   ok(list);
   assert.ok(list.body.globalMinCoins);
-  assert.ok(list.body.gifts.every((g) => ['event', 'popular', 'private', 'vip', 'lucky'].includes(g.category)));
+  assert.ok(list.body.gifts.every((g) => ['event', 'popular', 'private', 'vip', 'lucky', 'cp'].includes(g.category)));
   const a0 = await coins(U.a);
   const each = await api('POST', `/api/rooms/${roomId}/gifts/send`, { token: U.a.token, body: { giftId: rose.id, quantity: 2, distribution: 'each', recipientIds: [U.b.id, U.c.id] } });
   ok(each, 'each');
@@ -1004,7 +1004,8 @@ test('şanslı çanta ve günlük görev', { skip, timeout: 60000 }, async () =>
   ok(bag, 'çanta');
   assert.equal(await coins(s), 97000n);
   status(await api('POST', `/api/rooms/${room}/lucky-bags`, { token: s.token, body: { tier: 'n3' } }), 409, 'ikinci açık çanta');
-  status(await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: s.token }), 403, 'kendi çantası');
+  ok(await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: s.token }), 'gönderen de kendi çantasından alabilir');
+  status(await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: s.token }), 409, 'gönderen ikinci kez alamaz');
   const cl = await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: c1.token });
   ok(cl, 'aç');
   assert.ok(BigInt(cl.body.amount) > 0n);
@@ -1374,4 +1375,46 @@ test('oda listesi: kart avatarları (gizli/hayalet hariç) ve "Yeni yayıncı" s
   await sql(`UPDATE users SET created_at = NOW() - INTERVAL '90 days' WHERE id = $1`, [o.id]);
   assert.equal(await find('&fresh=1'), undefined, 'eski hesap "Yeni yayıncı"da değil');
   assert.ok(await find(), 'normal listede duruyor');
+});
+
+test('CP: mesaj/hediye puanı, kademe, ilişki isteği, tek CP, bitirme', { skip, timeout: 60000 }, async () => {
+  const p = await register('cpP'); const q = await register('cpQ'); const r = await register('cpR');
+  ok(await api('POST', `/api/friends/request/${q.id}`, { token: p.token }));
+  ok(await api('POST', `/api/friends/accept/${p.id}`, { token: q.token }));
+  status(await api('POST', `/api/messages/with/${q.id}`, { token: p.token, body: { text: 'merhaba' } }), 201);
+  status(await api('POST', `/api/messages/with/${p.id}`, { token: q.token, body: { text: 'selam' } }), 201);
+  await sleep(300); // mesaj puanı yanıttan sonra yazılır
+  let st = (await api('GET', `/api/cp/with/${q.id}`, { token: p.token })).body;
+  assert.equal(st.exp, '20', 'iki mesaj = 20 exp');
+  assert.equal(st.level, 0);
+  status(await api('POST', `/api/cp/with/${q.id}/request`, { token: p.token, body: { kind: 'cp' } }), 400, 'seviye 3 olmadan seçilemez');
+  // Günlük sınır: 10 mesajdan sonrası puan getirmez
+  await sql(`UPDATE cp_pairs SET msg_count = 10 WHERE user_a = LEAST($1::uuid, $2::uuid) AND user_b = GREATEST($1::uuid, $2::uuid)`, [p.id, q.id]);
+  status(await api('POST', `/api/messages/with/${q.id}`, { token: p.token, body: { text: 'bir daha' } }), 201);
+  await sleep(300);
+  assert.equal((await api('GET', `/api/cp/with/${q.id}`, { token: p.token })).body.exp, '20', 'günlük 10 mesaj sınırı');
+  await sql(`UPDATE cp_pairs SET exp = 1500000 WHERE user_a = LEAST($1::uuid, $2::uuid) AND user_b = GREATEST($1::uuid, $2::uuid)`, [p.id, q.id]);
+  st = (await api('GET', `/api/cp/with/${p.id}`, { token: q.token })).body;
+  assert.equal(st.level, 5); assert.equal(st.canChoose, true);
+  ok(await api('POST', `/api/cp/with/${q.id}/request`, { token: p.token, body: { kind: 'cp' } }));
+  const inc = (await api('GET', '/api/cp/requests', { token: q.token })).body.requests;
+  assert.equal(inc.length, 1); assert.equal(inc[0].kind, 'cp'); assert.equal(inc[0].user.id, p.id);
+  assert.equal((await api('GET', '/api/me/badges', { token: q.token })).body.friends, 1, 'rozet CP isteğini sayar');
+  st = (await api('POST', `/api/cp/with/${p.id}/accept`, { token: q.token })).body;
+  assert.equal(st.relation, 'cp');
+  const prof = (await api('GET', `/api/users/${p.id}`, { token: r.token })).body.profile;
+  assert.equal(prof.cp.partner.id, q.id); assert.equal(prof.cp.level, 5);
+  // Tek CP: başka biriyle CP olunamaz
+  await sql(`INSERT INTO cp_pairs(user_a, user_b, exp) VALUES(LEAST($1::uuid, $2::uuid), GREATEST($1::uuid, $2::uuid), 300000)`, [p.id, r.id]);
+  status(await api('POST', `/api/cp/with/${p.id}/request`, { token: r.token, body: { kind: 'cp' } }), 400, 'zaten CP var');
+  ok(await api('POST', `/api/cp/with/${p.id}/request`, { token: r.token, body: { kind: 'friend' } }), 'arkadaş ilişkisi olur');
+  ok(await api('POST', `/api/cp/with/${r.id}/accept`, { token: p.token }));
+  assert.equal((await api('GET', `/api/cp/with/${p.id}`, { token: r.token })).body.relation, 'friend');
+  // CP sıralaması (onaylı çiftler, exp)
+  const lb = (await api('GET', '/api/leaderboards?type=cp', { token: p.token })).body.entries;
+  assert.ok(lb.some((e) => [e.user.id, e.partner.id].includes(p.id) && e.level === 5), 'CP sıralaması');
+  ok(await api('POST', `/api/cp/with/${q.id}/end`, { token: p.token }));
+  const ids = (await sql(`SELECT cp_partner_id FROM users WHERE id = ANY($1::uuid[])`, [[p.id, q.id]])).rows;
+  assert.ok(ids.every((x) => x.cp_partner_id === null), 'bitince CP bağı kalkar');
+  assert.equal((await api('GET', `/api/cp/with/${q.id}`, { token: p.token })).body.exp, '1500000', 'puan korunur');
 });

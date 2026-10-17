@@ -27,6 +27,7 @@ import { router as musicRouter } from './routes/music.js';
 import { router as chatRouter } from './routes/chat.js';
 import { router as messagesRouter } from './routes/messages.js';
 import { router as friendsRouter } from './routes/friends.js';
+import { router as cpRouter } from './routes/cp.js';
 import { router as storeRouter } from './routes/store.js';
 import { router as supportRouter } from './routes/support.js';
 import { router as safetyRouter } from './routes/safety.js';
@@ -99,7 +100,7 @@ app.use('/uploads', express.static(config.uploadDir, {
 // kullanıcıyı aynı IP'den çıkarır, saatlik yenilemeler sınırı doldurup herkesi oturumdan atardı.
 // Zorunlu güncelleme: yönetim panelindeki "en düşük sürüm"ün altındaki uygulamalar (X-App-Version başlığı
 // göndermeyen eski sürümler dahil) 426 alır ve uygulama "Güncelleme gerekli" ekranını gösterir.
-const UPDATE_EXEMPT = new Set(['/health', '/app/config', '/client-errors', '/auth/logout']);
+const UPDATE_EXEMPT = new Set(['/health', '/app/config', '/client-errors', '/auth/logout', '/push/latest']);
 app.use('/api', async (req, res, next) => {
   if (UPDATE_EXEMPT.has(req.path)) return next();
   const c = await getConfig();
@@ -118,6 +119,7 @@ app.use('/api/rooms', roomsRouter);
 app.use('/api/rooms', chatRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/friends', friendsRouter);
+app.use('/api/cp', cpRouter);
 app.use('/api/store', storeRouter);
 app.use('/api/support', supportRouter);
 app.use('/api/leaderboards', leaderboardsRouter);

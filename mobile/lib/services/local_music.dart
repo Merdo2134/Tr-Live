@@ -89,23 +89,74 @@ class LocalMusic {
   }
 
   /// Dosya seçiciyi açar; seçilen ses dosyalarını listeye ekler. Eklenen sayısını döndürür.
-  Future<int> pickAndAdd() async {
+  Future<int> pickAndAdd() async => (await pickToLibrary()).length;
+
+  /// Kalıcı müzik klasörü (uygulamanın kendi alanı). Dosya seçicinin verdiği kopya geçici önbellektedir ve
+  /// telefon temizleyince siliniyordu; seçilen şarkı buraya kopyalanır, "Müziklerim"de kalıcı durur.
+  static Future<Directory> _libraryDir() async {
+    final d = Directory('${Directory.systemTemp.parent.path}/files/trlive_music');
+    if (!await d.exists()) await d.create(recursive: true);
+    return d;
+  }
+
+  /// Telefondan şarkı seçtirir, kalıcı klasöre kopyalar ve "Müziklerim"e ekler. Yeni eklenenleri döndürür.
+  Future<List<LocalTrack>> pickToLibrary() async {
+    await load();
     final r = await FilePicker.platform.pickFiles(type: FileType.audio, allowMultiple: true);
-    if (r == null) return 0;
+    if (r == null) return const [];
     final list = [...tracks.value];
-    var added = 0;
+    final added = <LocalTrack>[];
+    final dir = await _libraryDir();
     for (final f in r.files) {
-      final path = f.path;
-      if (path == null || list.any((t) => t.path == path)) continue;
-      final dur = await _durationOf(path);
-      if (dur == null) continue; // çalınamayan dosya
+      final src = f.path;
+      if (src == null) continue;
       final meta = parseName(f.name);
-      list.add(LocalTrack(path: path, title: meta.title, artist: meta.artist, durationMs: dur, sizeBytes: f.size));
-      added++;
+      // Aynı şarkı (ad + boyut) zaten kitaplıktaysa yeniden kopyalanmaz.
+      final dup = list.where((t) => t.title == meta.title && t.artist == meta.artist && t.sizeBytes == f.size);
+      if (dup.isNotEmpty) {
+        added.add(dup.first);
+        continue;
+      }
+      try {
+        if (f.size > maxBytes) continue;
+        final safe = f.name.replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_');
+        final dest = '${dir.path}/${DateTime.now().microsecondsSinceEpoch}_$safe';
+        await File(src).copy(dest);
+        final dur = await _durationOf(dest);
+        if (dur == null) {
+          await File(dest).delete().catchError((_) => File(dest));
+          continue; // çalınamayan dosya
+        }
+        final t = LocalTrack(path: dest, title: meta.title, artist: meta.artist, durationMs: dur, sizeBytes: f.size);
+        list.add(t);
+        added.add(t);
+      } catch (_) {/* kopyalanamayan dosya atlanır */}
     }
     tracks.value = list;
     await _save();
     return added;
+  }
+
+  /// Kitaplıktaki şarkıları (sırasıyla) odaya yükleyip çalma listesine ekler.
+  Future<({int added, int skipped, String? error})> addTracksToRoom(String roomId, List<LocalTrack> list, {void Function(int done, int total)? onProgress}) async {
+    var added = 0, skipped = 0;
+    String? error;
+    for (var i = 0; i < list.length; i++) {
+      onProgress?.call(i, list.length);
+      try {
+        await sendToRoom(roomId, list[i], playNow: false);
+        added++;
+      } on ApiException catch (e) {
+        skipped++;
+        error ??= e.message;
+        if (e.message.contains('en fazla') || e.message.contains('Sıra dolu')) break;
+      } catch (_) {
+        skipped++;
+        error ??= 'Bir şarkı eklenemedi.';
+      }
+    }
+    onProgress?.call(list.length, list.length);
+    return (added: added, skipped: skipped, error: error);
   }
 
 
@@ -164,6 +215,11 @@ class LocalMusic {
     if (previewing.value == t.path) await stopPreview();
     tracks.value = tracks.value.where((x) => x.path != t.path).toList();
     await _save();
+    // Kalıcı klasördeki kopya da silinir (kullanıcının kendi dosyasına dokunulmaz).
+    try {
+      final dir = await _libraryDir();
+      if (t.path.startsWith(dir.path)) await File(t.path).delete();
+    } catch (_) {}
   }
 
   /// Telefonda (yalnızca kendiniz için) dinle / durdur.

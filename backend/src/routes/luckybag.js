@@ -99,7 +99,7 @@ router.post('/lucky-bags/:id/claim', userLimit('lucky_claim', 30, 60e3), async (
     if (!b) throw fail('Çanta bulunamadı.', 404);
     if (b.status !== 'open' || new Date(b.expires_at) <= new Date()) throw fail('Bu çantanın süresi doldu.', 410);
     if (b.claimed_count >= b.slots) throw fail('Çanta tükendi.', 410);
-    if (b.sender_id === userId) throw fail('Kendi çantanızı açamazsınız.', 403);
+    // Çantayı gönderen de kendi çantasından bir pay alabilir (herkes gibi bir kez).
     if (b.opens_at && new Date(b.opens_at) > new Date()) throw fail('Geri sayım bitince açılır.', 425);
     if (!(await c.query(`SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2`, [b.room_id, userId])).rowCount) throw fail('Çantayı açmak için odada olmalısınız.', 403);
     if ((await c.query(`SELECT 1 FROM lucky_bag_claims WHERE bag_id = $1 AND user_id = $2`, [id, userId])).rowCount) throw fail('Bu çantayı zaten açtınız.', 409);
@@ -121,7 +121,13 @@ router.post('/lucky-bags/:id/claim', userLimit('lucky_claim', 30, 60e3), async (
     );
     return { amount, claimed, slots: b.slots, roomId: b.room_id, done: claimed >= b.slots };
   });
-  hub.broadcastRoom(result.roomId, { type: 'lucky_bag_claimed', roomId: result.roomId, bagId: id, claimed: result.claimed, slots: result.slots, done: result.done });
+  // Kim ne kadar aldı: odanın ortasından geçen şeritte gösterilir.
+  let who = null;
+  try { who = publicUser(await loadPublicRow(userId), null); } catch (_) { /* şerit isimsiz gösterilir */ }
+  hub.broadcastRoom(result.roomId, {
+    type: 'lucky_bag_claimed', roomId: result.roomId, bagId: id, claimed: result.claimed, slots: result.slots, done: result.done,
+    user: who, amount: result.amount.toString(),
+  });
   res.json({ ok: true, amount: result.amount.toString(), claimed: result.claimed, slots: result.slots });
 });
 

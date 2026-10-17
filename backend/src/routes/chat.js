@@ -10,6 +10,7 @@ import { canManage } from '../room_permissions.js';
 import { featuresFor } from '../services/wip.js';
 import { noteTask } from '../services/daily.js';
 import { loadPublicRow } from '../services/users.js';
+import { roomStaffShield } from '../staff_logic.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 
 export const router = Router();
@@ -95,6 +96,8 @@ router.post('/:roomId/members/:userId/chat-mute', userLimit('moderate', 60, 60e3
   const target = (await query(`SELECT role FROM room_members WHERE room_id = $1 AND user_id = $2`, [roomId, targetId])).rows[0];
   if (!target) throw fail('Kullanıcı odada değil.', 404);
   if (!canManage(member.role, target.role, 'moderate')) throw fail('Bu işlem için yetkiniz yok.', 403);
+  const shield = roomStaffShield(req.user.system_role, (await query(`SELECT system_role FROM users WHERE id = $1`, [targetId])).rows[0]?.system_role);
+  if (shield) throw fail(shield, 403);
   if (member.role !== 'owner') {
     const f = await featuresFor(targetId);
     if (f.muteImmunity || f.kickImmunity) throw fail('Bu kullanıcı susturulamaz (WIP ayrıcalığı).', 403);

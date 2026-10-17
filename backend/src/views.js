@@ -1,3 +1,5 @@
+import { cpLevelFor } from './levels.js';
+
 // Kullanıcıyı dışarıya nasıl göstereceğimizi tek yerde toplar.
 // Diğer kullanıcılara ASLA bakiye (coin/diamond) verilmez.
 export const HIDDEN_NAME = 'Gizli Kullanıcı';
@@ -9,7 +11,13 @@ export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.public_id, u.display_nam
      LEFT JOIN frames fr ON fr.id::text = fi.item_key
     WHERE fi.user_id = u.id AND fi.item_type = 'frame' AND fi.is_active = TRUE
       AND (fi.expires_at IS NULL OR fi.expires_at > NOW()) AND COALESCE(fi.metadata->>'equipped' = 'true', FALSE)
-    ORDER BY fi.created_at DESC LIMIT 1) AS frame_url`;
+    ORDER BY fi.created_at DESC LIMIT 1) AS frame_url,
+  u.cp_partner_id,
+  (SELECT jsonb_object_agg(wi.item_type, (wi.metadata->>'wipLevel')::int) FROM inventory_items wi
+    WHERE wi.user_id = u.id AND wi.item_key LIKE 'wip:%' AND wi.is_active = TRUE
+      AND (wi.expires_at IS NULL OR wi.expires_at > NOW()) AND COALESCE(wi.metadata->>'equipped' = 'true', FALSE)) AS wip_items,
+  CASE WHEN u.cp_partner_id IS NULL THEN NULL ELSE (SELECT cp.exp FROM cp_pairs cp
+    WHERE cp.user_a = LEAST(u.id, u.cp_partner_id) AND cp.user_b = GREATEST(u.id, u.cp_partner_id) AND cp.relation = 'cp') END AS cp_exp`;
 export const USER_PUBLIC_JOINS = `LEFT JOIN user_wip uw ON uw.user_id = u.id AND uw.is_active = TRUE AND uw.expires_at > NOW()
   LEFT JOIN wip_tiers wt ON wt.level = uw.level`;
 
@@ -34,6 +42,14 @@ export function publicUser(row, viewerId = null) {
     nameColor: row.wip_features?.nameColor ?? null,
     frameUrl: row.frame_url ?? null,
     isHidden: Boolean(row.is_hidden),
+    // Yönetimden ayrı verilen ve takılı WIP öğeleri (WIP üyeliğinden bağımsız): çerçeve, sohbet balonu, rozet, giriş efekti.
+    wipFrame: row.wip_items?.frame ?? null,
+    wipBubble: row.wip_items?.chat_bubble ?? null,
+    wipBadge: row.wip_items?.badge ?? null,
+    wipEntrance: row.wip_items?.entrance_effect ?? null,
+    // CP: odada yan yana oturunca kalp efekti için (yalnızca onaylı CP ilişkisi).
+    cpPartnerId: row.cp_exp != null ? row.cp_partner_id : null,
+    cpLevel: row.cp_exp != null ? cpLevelFor(row.cp_exp) : null,
   };
 }
 

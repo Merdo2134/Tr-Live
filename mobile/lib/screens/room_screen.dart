@@ -8,6 +8,7 @@ import '../widgets/lucky_bag.dart';
 import '../widgets/room_sheets.dart';
 import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api.dart';
 import '../widgets/music_bubble.dart';
 import '../services/background_service.dart';
@@ -19,6 +20,7 @@ import '../services/session.dart';
 import '../services/socket_service.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/cp_widgets.dart';
 import '../widgets/crown_icon.dart';
 import '../widgets/gift_ribbon.dart';
 import '../widgets/safety_actions.dart';
@@ -31,6 +33,7 @@ import 'ludo_screen.dart';
 import 'pk_sheet.dart';
 import 'music_sheet.dart';
 import 'inbox_screens.dart';
+import '../widgets/level_badge.dart';
 import 'user_screens.dart';
 
 const _roleLabels = {'owner': 'Oda sahibi', 'cohost': 'Yardımcı sahip', 'moderator': 'Moderatör', 'user': 'Üye'};
@@ -161,6 +164,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   void dispose() {
     _beat?.cancel();
     _lkTick?.cancel();
+    for (final t in _micEmojiTimers.values) {
+      t.cancel();
+    }
     _entrance.dispose();
     WidgetsBinding.instance.removeObserver(this);
     if (RoomDock.exitHandler == _onBack) RoomDock.exitHandler = null;
@@ -519,6 +525,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         }
         // Hayalet (SWIP) üye mikrofona çıkınca "sessiz" gelir: giriş şeridi gösterilmez.
         if (u != null && e['silent'] != true && u['id']?.toString() != Session.id && GiftRibbonOverlay.effectsOn) _entrance.add(u);
+        // Sohbete "odaya girdi" satırı.
+        if (u != null && e['silent'] != true) {
+          setState(() {
+            _messages.add({'id': 'join-${DateTime.now().microsecondsSinceEpoch}', 'join': true, 'user': u});
+            if (_messages.length > 200) _messages.removeAt(0);
+          });
+          _scrollChatToEnd();
+        }
         break;
       case 'room_member_left':
         // Hayalet mod: kendi mikrofondan inişimiz başkaları için "ayrıldı" gibi duyurulur; kendi listemizden düşmeyiz.
@@ -559,7 +573,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         setState(() => _chatMuted = (e['minutes'] as num? ?? 0) > 0);
         toast(context, _chatMuted ? 'Bu odada sohbette susturuldunuz.' : 'Sohbet yasağınız kaldırıldı.');
         break;
+      case 'room_mic_emoji':
+        final emUser = e['userId']?.toString();
+        final emNo = (e['emoji'] as num?)?.toInt();
+        if (emUser != null && emNo != null && emNo >= 1 && emNo <= 3 && emUser != Session.id) _showMicEmoji(emUser, emNo);
+        break;
       case 'room_gift':
+        if (e['roomTotal'] != null) setState(() => _room = {...?_room, 'totalDiamonds': e['roomTotal']});
         _flyGift(e);
         break;
       case 'room_settings':
@@ -573,6 +593,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               if (e['seatCount'] != null) 'seatCount': e['seatCount'],
               if (e['micRequest'] != null) 'micRequest': e['micRequest'],
               if (e['lockedSeats'] != null) 'lockedSeats': e['lockedSeats'],
+              if (e['announcement'] != null) 'announcement': e['announcement'],
+              if (e.containsKey('coverUrl')) 'coverUrl': e['coverUrl'],
             });
         break;
       case 'room_music_state':
@@ -667,7 +689,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       final url = t['url'] as String?;
       final token = t['token'] as String?;
       if (url == null || url.isEmpty || token == null) throw ApiException('Ses sunucusu yapılandırılmamış.');
-      room = lk.Room(roomOptions: lk.RoomOptions(adaptiveStream: true, dynacast: true));
+      await _loadNoisePref();
+      room = lk.Room(roomOptions: lk.RoomOptions(adaptiveStream: true, dynacast: true, defaultAudioCaptureOptions: _audioOptions));
       room.addListener(_onLkChanged);
       await room.connect(url, token);
       if (!mounted || _closing) {
@@ -768,9 +791,24 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       }
       return;
     }
+    // Mikten mike geçiş: yeni koltuk hemen gösterilir (sunucu yanıtı beklenmez); olmazsa eski koltuğa döner.
+    final prevSeat = _mySeatIndex;
+    final switching = _onSeat && seat != null && prevSeat != null && seat != prevSeat;
+    if (switching) setState(() => _applySeat(Session.id, seat, true));
     final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/mic/take', {if (seat != null) 'seatIndex': seat}));
-    if (r == null || !mounted) return;
+    if (!mounted) return;
+    if (r == null) {
+      if (switching) setState(() => _applySeat(Session.id, prevSeat, true));
+      return;
+    }
     setState(() => _applySeat(Session.id, (r['seatIndex'] as num?)?.toInt(), true));
+  }
+
+  int? get _mySeatIndex {
+    for (final m in _members) {
+      if (m['userId']?.toString() == Session.id) return (m['seatIndex'] as num?)?.toInt();
+    }
+    return null;
   }
 
   Future<void> _leaveMic() async {
@@ -946,8 +984,44 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (mounted) toast(context, 'Oda daveti kopyalandı. İstediğin yere yapıştırıp paylaş.');
   }
 
+  // ---------- Gürültü engelleme ----------
+  /// Açıkken mikrofon sesinde çevre gürültüsü bastırılır (gürültü engelleme + düşük frekans süzgeci + yankı giderme).
+  static bool noiseCancel = true;
+  static bool _noiseLoaded = false;
+
+  static lk.AudioCaptureOptions get _audioOptions => lk.AudioCaptureOptions(
+        noiseSuppression: noiseCancel,
+        echoCancellation: true,
+        autoGainControl: true,
+        highPassFilter: noiseCancel,
+      );
+
+  static Future<void> _loadNoisePref() async {
+    if (_noiseLoaded) return;
+    _noiseLoaded = true;
+    try {
+      noiseCancel = (await SharedPreferences.getInstance()).getBool('noise_cancel') ?? true;
+    } catch (_) {}
+  }
+
+  Future<void> _setNoiseCancel(bool v) async {
+    noiseCancel = v;
+    try {
+      await (await SharedPreferences.getInstance()).setBool('noise_cancel', v);
+    } catch (_) {}
+    // Mikrofon izi yeni ayarla yeniden başlatılır (ses kısa bir an kesilir).
+    final track = _lk?.localParticipant?.getTrackPublicationBySource(lk.TrackSource.microphone)?.track;
+    if (track is lk.LocalAudioTrack) {
+      try {
+        await track.restartTrack(_audioOptions);
+        if (track.muted) await track.disable(); // kapalı mikrofon yeniden başlatınca açılmasın
+      } catch (_) {/* sonraki açılışta yeni ayar geçerli olur */}
+    }
+  }
+
   Future<void> _effectsAndSound() async {
     var on = GiftRibbonOverlay.effectsOn;
+    var noise = noiseCancel;
     await showDialog<void>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -961,6 +1035,15 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               onChanged: (v) {
                 setS(() => on = v);
                 GiftRibbonOverlay.effectsOn = v;
+              },
+            ),
+            SwitchListTile(
+              title: const Text('Gürültü engelleme'),
+              subtitle: const Text('Mikrofondayken çevre sesini (uğultu, fan, sokak sesi) azaltır.'),
+              value: noise,
+              onChanged: (v) {
+                setS(() => noise = v);
+                _setNoiseCancel(v);
               },
             ),
           ]),
@@ -1235,14 +1318,58 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   /// Sohbet akışı (Yoho): koltukların altından alt bara kadar, saydam renkli balonlar.
   /// [overlay]: klavye açıkken karartının üstünde balonsuz düz yazı.
   Widget _chatPanel(double w, {bool overlay = false, double? rightPad}) {
-    if (_messages.isEmpty) return const SizedBox.shrink();
+    // Oda duyurusu sohbetin en başında sabit durur.
+    final ann = (_room?['announcement'] ?? '').toString().trim();
+    final head = ann.isEmpty ? 0 : 1;
+    if (_messages.isEmpty && head == 0) return const SizedBox.shrink();
     final maxW = w * 0.78;
     return ListView.builder(
       controller: _chatScroll,
       padding: EdgeInsets.fromLTRB(8, overlay ? 10 : 2, rightPad ?? w * 0.2, 8),
-      itemCount: _messages.length,
-      itemBuilder: (_, i) {
+      itemCount: _messages.length + head,
+      itemBuilder: (_, idx) {
+        if (head == 1 && idx == 0) {
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              constraints: BoxConstraints(maxWidth: maxW),
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xB37C3AED), Color(0xB3DB2777)]),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Text.rich(
+                TextSpan(children: [
+                  const WidgetSpan(alignment: PlaceholderAlignment.middle, child: Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.campaign_rounded, size: 16, color: Colors.amberAccent))),
+                  const TextSpan(text: 'Oda duyurusu: ', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.amberAccent)),
+                  TextSpan(text: ann),
+                ]),
+                style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.white),
+              ),
+            ),
+          );
+        }
+        final i = idx - head;
         final m = _messages[i];
+        if (m['join'] == true) {
+          final ju = mapOf(m['user']);
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: const Color(0x5913285A), borderRadius: BorderRadius.circular(12)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(
+                  child: WipNameText('${ju?['displayName'] ?? ''}', level: (ju?['wipLevel'] as num?)?.toInt(), color: parseColor(ju?['nameColor'] as String?) ?? const Color(0xFF7DD3FC), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                ),
+                const Text(' odaya girdi', style: TextStyle(fontSize: 13.5, color: Colors.white70)),
+              ]),
+            ),
+          );
+        }
         if (m['system'] == true) {
           return Align(
             alignment: Alignment.centerLeft,
@@ -1275,7 +1402,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                   Row(mainAxisSize: MainAxisSize.min, children: [
                     Flexible(child: WipNameText('${u?['displayName'] ?? ''}', level: (u?['wipLevel'] as num?)?.toInt(), color: color, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                     const SizedBox(width: 6),
-                    _pill('${u?['coinLevel'] ?? 1}', Pal.pink, icon: Icons.star),
+                    LevelPill(level: u?['coinLevel'] ?? 1, send: true, height: 16),
                   ]),
                   const SizedBox(height: 4),
                   if (overlay)
@@ -1286,7 +1413,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                   else
                     // WIP sohbet balonu (kademeye göre renk, ışık ve köşe süsü); WIP yoksa seviye rengi.
                     WipBubble(
-                      level: wipLevelOf(u?['wipLevel']),
+                      level: wipLevelOf(u?['wipBubble'] ?? u?['wipLevel']),
                       fallback: _bubbleColor(u),
                       constraints: BoxConstraints(maxWidth: maxW - 42),
                       child: Text((m['text'] ?? '').toString(), style: const TextStyle(fontSize: 15, height: 1.25, shadows: [Shadow(color: Colors.black38, blurRadius: 2)])),
@@ -1520,12 +1647,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                           Text((user?['displayName'] ?? '').toString(), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
                           const SizedBox(height: 6),
                           Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                            _pill('LV${user?['coinLevel'] ?? 1}', Pal.pink, icon: Icons.star),
-                            _pill('Hediye ${user?['giftLevel'] ?? 1}', Pal.purple, icon: Icons.diamond),
+                            LevelPill(level: user?['coinLevel'] ?? 1, send: true, height: 20),
+                            LevelPill(level: user?['giftLevel'] ?? 1, send: false, height: 20),
                             if (user?['wipLevel'] != null) _pill(wipLabel(wipLevelOf(user?['wipLevel'])), WipStyle.of(wipLevelOf(user?['wipLevel']))?.color ?? Pal.amber),
                             if (role != 'user') _pill(_roleLabels[role] ?? role, Pal.cyan),
                             if (family != null) _pill('${family['name']}', Pal.red),
                             if (seat != null) _pill('${seat + 1}. koltuk', Colors.white24),
+                            if (mapOf(profile?['cp'])?['partner'] != null)
+                              _pill('CP: ${mapOf(mapOf(profile?['cp'])?['partner'])?['displayName'] ?? ''}', kCpPink, icon: Icons.favorite),
                           ]),
                           const SizedBox(height: 8),
                           if (username.isNotEmpty)
@@ -1559,7 +1688,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                                       child: UserAvatar(user: mapOf(s['user']), radius: 24),
                                     ),
                                     const SizedBox(height: 3),
-                                    _pill('LV${mapOf(s['user'])?['coinLevel'] ?? 1}', Pal.purple),
+                                    LevelPill(level: mapOf(s['user'])?['coinLevel'] ?? 1, send: true, height: 16),
                                   ]),
                                 ),
                             ]),
@@ -1589,6 +1718,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                               ),
                             ]),
                           ),
+                          // CP / yakınlık: iki kişi arasındaki seviye ve ilişki seçimi (3. kademeden itibaren).
+                          if (!isSelf) CpPanel(userId: userId, displayName: (user?['displayName'] ?? '').toString()),
                           // Yönetim düğmeleri: yalnızca yetkili olana görünür.
                           if (canMod || canRole) ...[
                             const SizedBox(height: 10),
@@ -1847,7 +1978,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           ),
         ),
         // Takılı çerçeve yoksa WIP kademesinin çerçevesi (kodla çizilir, düzeni değiştirmez).
-        if (frameUrl == null && video == null) WipFrame.around(wipLevelOf(user?['wipLevel']), seatR),
+        if (frameUrl == null && video == null) WipFrame.around(wipLevelOf(user?['wipFrame'] ?? user?['wipLevel']), seatR),
         // Takılı avatar çerçevesi: avatar çapının ×kFrameScale'i (profil ile aynı oran), avatarla aynı merkezde ve koltuk
         // kutusunun DIŞINA taşar. Kutuya sığdırılmaz: sığdırılınca çerçevenin içi avatarı örtüp oturan kişi küçük görünüyordu.
         if (frameUrl != null && video == null)
@@ -1857,6 +1988,18 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             width: seatR * 2 * kFrameScale,
             height: seatR * 2 * kFrameScale,
             child: IgnorePointer(child: AnimAsset(key: ValueKey(frameUrl), url: frameUrl, repeat: true, cache: false)),
+          ),
+        // Mikrofon emojisi: avatarın üstünde birkaç saniye oynar.
+        if (_micEmoji[userId] != null)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Image.asset(
+                'assets/images/mic_emoji_${_micEmoji[userId]}.webp',
+                key: ValueKey('emo-$userId-${_micEmojiSeq[userId]}'),
+                fit: BoxFit.contain,
+                gaplessPlayback: false,
+              ),
+            ),
           ),
         ]),
       ),
@@ -2223,6 +2366,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     };
     final spec = seatLayoutFor(_seatCount);
     final tiles = <Widget>[];
+    final centers = <int, (Offset, double, int)>{}; // koltuk → (avatar merkezi, yarıçap, satır)
     var i = 0;
     // topGap: başlığın altından ilk satırdaki DAİRENİN üst kenarına (Yoho ölçümü); +8 dp dokunma payı merkeze katılmaz.
     var cy = spec.topGap * w * sc + (spec.rows.first.dia * w * sc) / 2;
@@ -2241,6 +2385,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       for (final x in row.xs) {
         if (i >= _seatCount) break;
         final idx = i++;
+        centers[idx] = (Offset(x * w, cy), (slot - 8) / 2, r);
         tiles.add(Positioned(
           left: x * w - tileW / 2,
           top: cy - slot / 2,
@@ -2249,6 +2394,22 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         ));
       }
       if (r < spec.pitch.length) cy += spec.pitch[r] * w * sc;
+    }
+    // CP (5. kademe): yan yana oturan CP'ler arasında kalp atışı ve avatarların çevresinden çıkan kalpler.
+    for (final e in centers.entries) {
+      final next = centers[e.key + 1];
+      if (next == null || next.$3 != e.value.$3) continue;
+      final ua = mapOf(bySeat[e.key]?['user']);
+      final ub = mapOf(bySeat[e.key + 1]?['user']);
+      if (ua == null || ub == null) continue;
+      final ida = ua['id']?.toString();
+      final idb = ub['id']?.toString();
+      final la = (ua['cpLevel'] as num?)?.toInt() ?? 0;
+      if (ida == null || idb == null || ua['cpPartnerId']?.toString() != idb || ub['cpPartnerId']?.toString() != ida || la < kCpEffectLevel) continue;
+      final a = e.value.$1, b = next.$1, rr = e.value.$2;
+      final pad = rr * 1.0;
+      final box = Rect.fromLTRB(math.min(a.dx, b.dx) - rr - pad, math.min(a.dy, b.dy) - rr - pad, math.max(a.dx, b.dx) + rr + pad, math.max(a.dy, b.dy) + rr + pad);
+      tiles.add(Positioned.fromRect(rect: box, child: CpSeatHearts(a: a - box.topLeft, b: b - box.topLeft, r: rr)));
     }
     return Stack(clipBehavior: Clip.none, children: tiles);
   }
@@ -2279,12 +2440,21 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Küçültülmüş oda balonunda dönen fotoğraf (oda fotoğrafı, yoksa sahibin fotoğrafı). Çizim bittikten sonra yazılır.
+  void _syncDockCover(String? url) {
+    if (RoomDock.cover.value == url) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) RoomDock.cover.value = url;
+    });
+  }
+
   Widget _headerRow1(RoomGeom g) {
     final h = g.row1H;
     final owner = _members.where((m) => m['role'] == 'owner');
     final ownerUser = owner.isEmpty ? null : mapOf(owner.first['user']);
     final name = (_room?['name'] ?? widget.initialName).toString();
     final cover = Api.absoluteUrl(_room?['coverUrl'] as String?);
+    _syncDockCover(cover ?? Api.absoluteUrl(ownerUser?['avatarUrl'] as String?));
     final pic = h - 6;
     final pillH = (g.w * 0.0553).clamp(20.0, 26.0).toDouble();
     return Row(children: [
@@ -2367,9 +2537,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   Widget _headerRow2(RoomGeom g) {
     final h = g.row2H;
-    var total = BigInt.zero;
-    for (final v in _scores.values) {
-      total += BigInt.tryParse(v) ?? BigInt.zero;
+    // Oda elması: odaya gelen tüm hediyeler (oda kapatılıp açılınca sıfırlanmaz). Eski sunucuda koltuk sayaçlarının toplamı.
+    var total = BigInt.tryParse('${_room?['totalDiamonds'] ?? ''}') ?? BigInt.zero;
+    if (_room?['totalDiamonds'] == null) {
+      for (final v in _scores.values) {
+        total += BigInt.tryParse(v) ?? BigInt.zero;
+      }
     }
     final isOwnerHere = _room?['ownerId']?.toString() == Session.id;
     final fs = h * 0.6;
@@ -2555,6 +2728,69 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     }
   }
 
+  // ---------- Mikrofon emojileri ----------
+  final Map<String, int> _micEmoji = {}; // kullanıcı → oynayan emoji (1–3)
+  final Map<String, int> _micEmojiSeq = {};
+  final Map<String, Timer> _micEmojiTimers = {};
+
+  void _showMicEmoji(String userId, int emoji) {
+    _micEmojiTimers[userId]?.cancel();
+    setState(() {
+      _micEmoji[userId] = emoji;
+      _micEmojiSeq[userId] = (_micEmojiSeq[userId] ?? 0) + 1;
+    });
+    _micEmojiTimers[userId] = Timer(const Duration(milliseconds: 3200), () {
+      _micEmojiTimers.remove(userId);
+      if (mounted) setState(() => _micEmoji.remove(userId));
+    });
+  }
+
+  /// Koltuktayken alt bardaki emoji: 3 hareketli emoji (koltuğunda oynar). Altta sohbete yazı emojisi seçeneği.
+  void _micEmojiSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: const Color(0xFF1E1B2E),
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Mikrofon emojisi', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            const SizedBox(height: 12),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+              for (var i = 1; i <= 3; i++)
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () async {
+                    Navigator.pop(c);
+                    _showMicEmoji(Session.id, i);
+                    await guard(context, () => Api.post('/api/rooms/${widget.roomId}/mic-emoji', {'emoji': i}));
+                  },
+                  child: Container(
+                    width: 84,
+                    height: 84,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(16)),
+                    child: Image.asset('assets/images/mic_emoji_$i.webp', fit: BoxFit.contain),
+                  ),
+                ),
+            ]),
+            const SizedBox(height: 10),
+            if (_chatOpen)
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(c);
+                  _emojiSheet();
+                },
+                icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                label: const Text('Sohbete emoji yaz'),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   void _emojiSheet() {
     const emojis = ['😀', '😂', '🥰', '😍', '😎', '🤩', '😘', '😭', '😡', '👍', '👏', '🙏', '🔥', '💯', '🎉', '❤️', '💎', '🌹', '🎁', '👑', '🎤', '🎶', '😴', '🤔', '😅', '🥳', '😇', '🤗', '😜', '🙌', '💪', '✨'];
     showModalBottomSheet<void>(
@@ -2666,7 +2902,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               _syncPublish();
             }, color: _micOn ? Colors.white : Colors.redAccent),
           )),
-          at(0.5 - step, circle(Icons.sentiment_satisfied_alt, 'Emoji', _chatOpen ? _emojiSheet : null)),
+          at(0.5 - step, circle(Icons.sentiment_satisfied_alt, 'Emoji', _micEmojiSheet)),
         ];
       } else {
         final pillH = (w * 0.087).clamp(32.0, 42.0).toDouble();
@@ -2804,7 +3040,7 @@ class _GiftFlight extends StatefulWidget {
 }
 
 class _GiftFlightState extends State<_GiftFlight> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1300))
     ..forward().whenComplete(widget.onDone);
 
   @override

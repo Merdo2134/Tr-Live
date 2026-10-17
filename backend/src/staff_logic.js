@@ -19,6 +19,17 @@ export function supportMayCall(method, path) {
   return SUPPORT_ROUTES.some(([m, re]) => m === method.toUpperCase() && re.test(p));
 }
 
+/**
+ * Oda içi komutlar (mikten alma, atma, engelleme, susturma, rol, koltuk kilidi ile indirme):
+ * yönetici hesabına kimse (oda sahibi dahil) uygulayamaz; yardımcı admine yalnızca yönetici uygulayabilir.
+ * Dönüş: engel varsa kullanıcıya gösterilecek mesaj, yoksa null.
+ */
+export function roomStaffShield(actorSystemRole, targetSystemRole) {
+  if (targetSystemRole === 'admin') return 'Yönetim hesabına komut uygulanamaz.';
+  if (targetSystemRole === 'support' && actorSystemRole !== 'admin') return 'Yardımcı admine yalnızca yönetim komut uygulayabilir.';
+  return null;
+}
+
 export const MAX_BAN_HOURS = 24 * 365;
 
 // hours: sayı (saat) veya null/0 = süresiz. Dönüş: bitiş zamanı (Date) veya null (süresiz).
@@ -41,8 +52,13 @@ export function banMessage(user) {
   return `Hesabınız askıya alındı.${user.ban_reason ? ` Neden: ${user.ban_reason}` : ''}`;
 }
 
-// Hedef üzerinde işlem yetkisi: admin herkesi yönetir (kendi hariç), yardımcı admin yalnızca normal kullanıcıları.
-export function mayActOnUser(actorRole, targetRole) {
+// Hedef üzerinde işlem yetkisi:
+//  - Yönetici (admin) hesabına HİÇBİR komut uygulanamaz (başka bir yönetici dahil).
+//  - Yardımcı admine yalnızca yönetici işlem yapabilir.
+//  - Yardımcı admin yalnızca normal kullanıcıları yönetir.
+export function mayActOnUser(actorRole, targetRole, self = false) {
+  if (self && actorRole === 'admin') return true; // yönetici kendi hesabını düzenleyebilir (ad, fotoğraf)
+  if (targetRole === 'admin') return false;
   if (actorRole === 'admin') return true;
   if (actorRole === 'support') return targetRole === 'user';
   return false;

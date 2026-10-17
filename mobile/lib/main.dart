@@ -9,6 +9,7 @@ import 'services/auth_service.dart';
 import 'services/background_service.dart';
 import 'services/error_log.dart';
 import 'services/presence_service.dart';
+import 'services/push_service.dart';
 import 'services/session.dart';
 import 'services/socket_service.dart';
 import 'widgets/app_theme.dart';
@@ -71,6 +72,8 @@ Future<void> _boot() async {
   };
   PresenceService.init();
   runApp(const TRLiveApp());
+  // Yönetimden "herkese telefon bildirimi": izin + arka plan kontrolü (uygulama kapalıyken de ~15 dk'da bir).
+  unawaited(PushService.start());
 }
 
 class TRLiveApp extends StatelessWidget {

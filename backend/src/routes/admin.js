@@ -9,10 +9,11 @@ import { loadConfig, configJson, closePeriod, hostStatementJson, agencyStatement
 import { parsePeriodKey, previousPeriod } from '../settlement.js';
 import { ensureAgencyCode } from './agencies.js';
 import { WIP_MIN_LEVEL, WIP_MAX_LEVEL } from '../levels.js';
+import { wipLabel } from '../services/wip.js';
 import { dealerSell } from '../services/dealers.js';
 import { hub } from '../realtime.js';
 import { leaveRoom } from '../services/rooms.js';
-import { banIpPersist, unbanIp, listBans, securityStats } from '../firewall.js';
+import { banIpPersist, unbanIp, listBans, securityStats, userLimit } from '../firewall.js';
 import net from 'node:net';
 import { saveUpload, removeUpload, removeAnimatedAvatar, IMAGE_TYPES, OWN_IMAGE_RE } from '../services/images.js';
 import { revokeAllSessions } from '../services/sessions.js';
@@ -124,7 +125,7 @@ router.post('/users/:userId/display-name', async (req, res) => {
   const name = text(req.body?.displayName, 'Görünen ad', { min: 2, max: 40, required: true });
   const target = await assertUser(userId);
   if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
-  if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  if (!mayActOnUser(req.user.system_role, target.system_role, userId === req.user.id)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
   await tx(async (c) => {
     const before = (await c.query(`SELECT display_name FROM users WHERE id = $1`, [userId])).rows[0]?.display_name;
     await c.query(`UPDATE users SET display_name = $2, updated_at = NOW() WHERE id = $1`, [userId, name]);
@@ -139,7 +140,7 @@ router.post('/users/:userId/avatar', async (req, res) => {
   const url = httpsUrl(req.body?.avatarUrl, 'Fotoğraf adresi');
   const target = await assertUser(userId);
   if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
-  if (!mayActOnUser(req.user.system_role, target.system_role)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  if (!mayActOnUser(req.user.system_role, target.system_role, userId === req.user.id)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
   const before = (await query(`SELECT avatar_url, static_avatar_url, avatar_animated FROM users WHERE id = $1`, [userId])).rows[0];
   await tx(async (c) => {
     await c.query(`UPDATE users SET avatar_url = $2, avatar_animated = FALSE, static_avatar_url = NULL, updated_at = NOW() WHERE id = $1`, [userId, url]);
@@ -363,7 +364,11 @@ router.get('/grantables', requireSuperAdmin, async (req, res) => {
   } else {
     items = (await query(`SELECT id::text AS key, name, image_url FROM store_items WHERE category = $1 AND is_active = TRUE ORDER BY name`, [category])).rows;
   }
-  res.json({ items: items.map((x) => ({ key: x.key, name: x.name, imageUrl: x.image_url })) });
+  // WIP kademelerinin çerçeve / sohbet balonu / rozet / giriş efekti ayrı ayrı verilebilir (WIP üyeliği olmadan da görünür).
+  const wipItems = WIP_GRANT_KIND[category]
+    ? Array.from({ length: WIP_MAX_LEVEL }, (_, i) => ({ key: `wip:${i + 1}`, name: `${wipLabel(i + 1)} ${WIP_GRANT_KIND[category]}`, image_url: null }))
+    : [];
+  res.json({ items: [...wipItems, ...items].map((x) => ({ key: x.key, name: x.name, imageUrl: x.image_url, wip: x.key.startsWith('wip:') })) });
 });
 
 // Seçilen katalog öğesini kullanıcıya ver. days boş/0 = süresiz.
@@ -374,6 +379,21 @@ router.post('/users/:userId/grant', requireSuperAdmin, async (req, res) => {
   const days = req.body?.days ? positiveInt(req.body.days, 'Gün', 3650) : null;
   await assertUser(userId);
   let name; let asset;
+  const wipMatch = /^wip:(\d{1,2})$/.exec(key);
+  if (wipMatch) {
+    const lvl = Number(wipMatch[1]);
+    if (!WIP_GRANT_KIND[category] || lvl < 1 || lvl > WIP_MAX_LEVEL) throw fail('Geçersiz WIP öğesi.');
+    const r = await query(
+      `INSERT INTO inventory_items(user_id, item_type, item_key, item_name, expires_at, metadata)
+       VALUES($1,$2,$3,$4, CASE WHEN $5::int IS NULL THEN NULL ELSE NOW() + ($5::int * INTERVAL '1 day') END, $6) RETURNING id`,
+      [userId, category, key, `${wipLabel(lvl)} ${WIP_GRANT_KIND[category]}`, days, JSON.stringify({ wipLevel: lvl, grantedBy: req.user.id })],
+    );
+    await query(
+      `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, reference_id, metadata) VALUES($1,$2,'admin_inventory_grant','inventory',$3,$4)`,
+      [req.user.id, userId, r.rows[0].id, JSON.stringify({ category, key, days })],
+    );
+    return res.status(201).json({ id: r.rows[0].id, name: `${wipLabel(lvl)} ${WIP_GRANT_KIND[category]}` });
+  }
   if (category === 'frame') {
     const f = (await query(`SELECT name, image_url FROM frames WHERE id::text = $1`, [key])).rows[0];
     if (!f) throw fail('Çerçeve bulunamadı.', 404);
@@ -423,7 +443,7 @@ router.post('/gifts', requireSuperAdmin, async (req, res) => {
     [text(req.body?.name, 'Ad', { min: 2, max: 80, required: true }), bigAmount(req.body?.coinPrice, 'Fiyat').toString(),
       assetUrl(req.body?.iconUrl, 'İkon adresi'), assetUrl(req.body?.animationUrl, 'Animasyon adresi'),
       oneOf(req.body?.animationFormat ?? guessFormat(req.body?.animationUrl), ['lottie', 'svga', 'mp4', 'webp', 'gif', 'png'], 'Animasyon biçimi'), req.body?.hasAlpha !== false,
-      oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip', 'lucky'], 'Hediye sekmesi')],
+      oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip', 'lucky', 'cp'], 'Hediye sekmesi')],
   );
   res.status(201).json({ id: r.rows[0].id });
 });
@@ -440,6 +460,8 @@ router.post('/entrance-effects', requireSuperAdmin, async (req, res) => {
   res.status(201).json({ id: r.rows[0].id });
 });
 const STORE_CATS = ['frame', 'chat_bubble', 'entrance_effect', 'mini_card', 'mic_wave', 'vehicle', 'badge'];
+// Yönetimden ayrı ayrı verilebilen WIP öğeleri (kategori → ad eki).
+const WIP_GRANT_KIND = { frame: 'çerçevesi', chat_bubble: 'sohbet balonu', badge: 'rozeti', entrance_effect: 'giriş efekti' };
 router.get('/store/items', requireSuperAdmin, async (_req, res) => {
   const r = await query(`SELECT * FROM store_items ORDER BY is_active DESC, category, sort_order, created_at DESC LIMIT 500`);
   res.json({ items: r.rows.map((x) => ({ id: x.id, category: x.category, name: x.name, imageUrl: x.image_url, priceCoins: String(x.price_coins), durationDays: x.duration_days, isActive: x.is_active, forSale: x.for_sale })) });
@@ -919,6 +941,21 @@ router.delete('/banners/:id', async (req, res) => {
 // Duyuru kartı görseli (Mesajlar > Ekip / Etkinlik / Ödül).
 router.put('/announcements/image', express.raw({ type: Object.keys(IMAGE_TYPES), limit: '3mb' }), async (req, res) => {
   res.json({ url: await saveUpload(req, 'announcement') });
+});
+
+// Telefon bildirimi: uygulaması yüklü herkese. Açık uygulamalara anında (soket), kapalı/arka plandakilere
+// uygulamanın ~15 dk'lık kontrolünde telefon bildirimi olarak düşer.
+router.get('/push', requireSuperAdmin, async (_req, res) => {
+  const r = await query(`SELECT id, title, body, created_at FROM push_messages ORDER BY id DESC LIMIT 30`);
+  res.json({ messages: r.rows.map((x) => ({ id: String(x.id), title: x.title, body: x.body, createdAt: x.created_at })) });
+});
+
+router.post('/push', requireSuperAdmin, userLimit('admin_push', 20, 3600e3), async (req, res) => {
+  const title = text(req.body?.title, 'Başlık', { min: 2, max: 80, required: true });
+  const body = text(req.body?.body, 'Mesaj', { min: 2, max: 300, required: true });
+  const r = (await query(`INSERT INTO push_messages(title, body, created_by) VALUES($1,$2,$3) RETURNING id, created_at`, [title, body, req.user.id])).rows[0];
+  hub.broadcastGlobal({ type: 'push', id: String(r.id), title, body });
+  res.status(201).json({ ok: true, id: String(r.id) });
 });
 
 router.post('/announcements', async (req, res) => {

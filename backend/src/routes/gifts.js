@@ -17,6 +17,7 @@ import { nextCombo } from '../combo.js';
 import { drawLucky, LUCKY_BASE } from '../lucky.js';
 import { getConfig } from '../services/app_config.js';
 import { featuresFor, minLevelFor, wipLabel } from '../services/wip.js';
+import { addGiftExp } from '../services/cp.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -83,7 +84,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
   const luckyMaxWin = BigInt(Math.max(Math.trunc(Number(cfg.luckyMaxWin)) || 1, 1));
 
   const result = await tx(async (c) => {
-    const room = (await c.query(`SELECT id, is_hidden FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
+    const room = (await c.query(`SELECT id, is_hidden, owner_id, room_type FROM rooms WHERE id = $1 AND is_active = TRUE`, [roomId])).rows[0];
     if (!room) throw fail('Oda bulunamadı.', 404);
     const gift = (await c.query(`SELECT * FROM gifts WHERE id = $1 AND is_active = TRUE`, [giftId])).rows[0];
     if (!gift) throw fail('Hediye bulunamadı.', 404);
@@ -165,6 +166,8 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
            total_count = room_gift_totals.total_count + EXCLUDED.total_count, updated_at = NOW()`,
         [roomId, item.userId, credit.toString(), item.quantity],
       );
+      // CP yakınlığı: iki kişi arasındaki hediye Coin değeri kadar exp (CP hediyesi 1,5 kat).
+      await addGiftExp((t, p) => c.query(t, p), senderId, item.userId, coinAmount, gift.category === 'cp');
       const pkId = await scorePk(c, roomId, item.userId, senderId, credit, coinAmount);
       if (pkId) pkIds.add(pkId);
       await c.query(
@@ -200,6 +203,14 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
       });
     }
 
+    // Oda elması: odaya gelen toplam (kalıcı oda kaydında; oda kapanıp açılınca sıfırlanmaz). Kendine hediye de sayılır
+    // (koltuk sayaçlarıyla aynı).
+    const roomCredit = transactions.reduce((s, t) => s + BigInt(t.diamondAmount), 0n);
+    const roomTotal = (await c.query(
+      `UPDATE room_profiles SET total_diamonds = total_diamonds + $3 WHERE owner_id = $1 AND room_type = $2 RETURNING total_diamonds`,
+      [room.owner_id, room.room_type, roomCredit.toString()],
+    )).rows[0]?.total_diamonds ?? null;
+
     // Şanslı hediye çekilişi: her adet ayrı çekiliş; kazanç = toplam çarpan × hediye fiyatı (tek gönderimde üst sınırlı).
     let luckyResult = null;
     let balance = sent.coins;
@@ -221,6 +232,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
     }
     return {
       gift, quantity, totalCoins, balance, transactions, qualifying, allocation, pkIds: [...pkIds], lucky: luckyResult,
+      roomTotal: roomTotal === null ? null : String(roomTotal),
       // Duyuru: hem çarpan yüksek hem tek isabetin değeri global hediye eşiğinin üstünde olmalı (10 Coin'lik çanla toplu
       // gönderimde her seferinde x100 çıkıp tüm uygulamaya şerit düşmesin).
       announce: lucky && !room.is_hidden && luckyResult.best >= cfg.luckyAnnounceMultiplier
@@ -250,7 +262,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
   const combo = nextCombo(`${roomId}|${senderId}|${giftId}|${distribution}|${result.allocation.map((a) => a.userId).sort().join(',')}`);
   hub.broadcastRoom(roomId, {
     type: 'room_gift', roomId, gift: giftInfo, quantity: result.quantity, totalCoins: result.totalCoins.toString(), sender, receivers, combo,
-    lucky: result.lucky,
+    lucky: result.lucky, roomTotal: result.roomTotal,
   });
   // Büyük şanslı kazanç tüm uygulamaya duyurulur (Yoho "çan" şeridi).
   if (result.announce) {

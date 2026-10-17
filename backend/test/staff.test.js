@@ -38,6 +38,7 @@ test('yardımcı admin yöneticiyi ve diğer yardımcıyı yönetemez', () => {
   assert.equal(mayActOnUser('support', 'support'), false);
   assert.equal(mayActOnUser('support', 'admin'), false);
   assert.equal(mayActOnUser('admin', 'support'), true);
+  assert.equal(mayActOnUser('admin', 'admin'), false, 'yönetici hesabına kimse dokunamaz');
   assert.equal(mayActOnUser('user', 'user'), false);
 });
 
@@ -62,4 +63,14 @@ test('boş koltuk hesabı (0. koltuk sahibin, kilitliler sayılmaz)', () => {
   assert.equal(hasFreeSeat(4, [3], [0, 1, 2]), false);
   assert.equal(hasFreeSeat(4, [], [0, 1, 2]), true);
   assert.equal(hasFreeSeat(2, [], [0]), true);
+});
+
+test('oda komutları: yönetim ve yardımcı admin dokunulmazlığı', async () => {
+  const { roomStaffShield } = await import('../src/staff_logic.js');
+  assert.ok(roomStaffShield('user', 'admin'));
+  assert.ok(roomStaffShield('admin', 'admin'));
+  assert.ok(roomStaffShield('support', 'support'));
+  assert.ok(roomStaffShield('user', 'support'));
+  assert.equal(roomStaffShield('admin', 'support'), null);
+  assert.equal(roomStaffShield('user', 'user'), null);
 });

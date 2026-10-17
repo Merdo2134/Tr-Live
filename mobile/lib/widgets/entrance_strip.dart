@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'level_badge.dart';
 import 'common.dart';
 
 /// Gelen girişleri sıraya alır; aynı anda yalnızca bir şerit gösterilir.
@@ -17,7 +18,7 @@ class EntranceQueue extends ChangeNotifier {
   }
 
   void add(Map<String, dynamic> user) {
-    if (_dead || WipStyle.of(wipLevelOf(user['wipLevel'])) == null || _q.length >= 6) return;
+    if (_dead || WipStyle.of(wipLevelOf(user['wipEntrance'] ?? user['wipLevel'])) == null || _q.length >= 6) return;
     _q.add(user);
     _next();
   }
@@ -27,7 +28,7 @@ class EntranceQueue extends ChangeNotifier {
     _busy = true;
     current = _q.removeAt(0);
     notifyListeners();
-    final s = WipStyle.of(wipLevelOf(current!['wipLevel']))!;
+    final s = WipStyle.of(wipLevelOf(current!['wipEntrance'] ?? current!['wipLevel']))!;
     Timer(Duration(milliseconds: 700 + s.entranceMs + 700), () {
       if (_dead) return;
       current = null;
@@ -77,7 +78,7 @@ class _EntranceBannerState extends State<EntranceBanner> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _s = WipStyle.of(wipLevelOf(widget.user['wipLevel'])) ?? WipStyle.of(1)!;
+    _s = WipStyle.of(wipLevelOf(widget.user['wipEntrance'] ?? widget.user['wipLevel'])) ?? WipStyle.of(1)!;
     _c = AnimationController(vsync: this, duration: Duration(milliseconds: _total));
     if (widget.loop) {
       _c.repeat();
@@ -89,7 +90,7 @@ class _EntranceBannerState extends State<EntranceBanner> with SingleTickerProvid
   @override
   void didUpdateWidget(EntranceBanner old) {
     super.didUpdateWidget(old);
-    final s = WipStyle.of(wipLevelOf(widget.user['wipLevel'])) ?? WipStyle.of(1)!;
+    final s = WipStyle.of(wipLevelOf(widget.user['wipEntrance'] ?? widget.user['wipLevel'])) ?? WipStyle.of(1)!;
     if (s.level != _s.level) {
       _s = s;
       _c.duration = Duration(milliseconds: _total);
@@ -160,7 +161,7 @@ class _EntranceBannerState extends State<EntranceBanner> with SingleTickerProvid
                 Text('odaya girdi', style: TextStyle(color: textColor, fontSize: 12.5, fontWeight: FontWeight.w600)),
                 const SizedBox(width: 8),
                 _chip(s.label, Colors.black38),
-                if (level != null) ...[const SizedBox(width: 4), _chip('Lv $level', const Color(0xCCFF4F9A), icon: Icons.star_rounded)],
+                if (level != null) ...[const SizedBox(width: 4), LevelPill(level: level, send: true, height: 17)],
               ]),
             ),
           );
@@ -169,12 +170,9 @@ class _EntranceBannerState extends State<EntranceBanner> with SingleTickerProvid
     });
   }
 
-  Widget _chip(String text, Color bg, {IconData? icon}) => Container(
+  Widget _chip(String text, Color bg) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (icon != null) Icon(icon, size: 12, color: Colors.white),
-          Text(text, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900)),
-        ]),
+        child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900)),
       );
 }

@@ -21,7 +21,7 @@ export async function activeEntranceEffect(userId, run = query) {
     `SELECT i.item_type, i.item_key, i.item_name, COALESCE(e.animation_url, i.metadata->>'assetUrl') AS animation_url, e.duration_ms
      FROM inventory_items i
      LEFT JOIN entrance_effects e ON i.item_type = 'entrance_effect' AND e.id::text = i.item_key AND e.is_active = TRUE
-     WHERE i.user_id = $1 AND i.item_type IN ('entrance_effect', 'vehicle') AND i.is_active = TRUE
+     WHERE i.user_id = $1 AND i.item_type IN ('entrance_effect', 'vehicle') AND i.is_active = TRUE AND i.item_key NOT LIKE 'wip:%'
        AND (i.expires_at IS NULL OR i.expires_at > NOW())
      ORDER BY COALESCE(i.metadata->>'equipped' = 'true', FALSE) DESC, (i.item_type = 'vehicle') DESC, i.created_at DESC LIMIT 1`,
     [userId],

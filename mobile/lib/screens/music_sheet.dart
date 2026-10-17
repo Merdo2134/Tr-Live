@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/local_music.dart';
@@ -17,10 +16,13 @@ Future<void> showMusicSheet(BuildContext context, {required String roomId, requi
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: const Color(0xFF16112B),
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-    builder: (c) => SizedBox(
-      height: MediaQuery.of(context).size.height * 0.8,
+    backgroundColor: Colors.transparent,
+    builder: (c) => Container(
+      height: MediaQuery.of(context).size.height * 0.82,
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B1650), Color(0xFF120B24), Color(0xFF0B0816)]),
+      ),
       child: _MusicPanel(roomId: roomId, canManage: canManage, canQueue: canQueue),
     ),
   );
@@ -42,10 +44,12 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
     double? _dragging; // ilerleme çubuğu sürüklenirken
 
   String? _progress; // "2/5 yükleniyor"
+  int _tab = 0; // 0: çalma listesi, 1: Müziklerim (telefondan seçilen, kalıcı)
 
   @override
   void initState() {
     super.initState();
+    LocalMusic.instance.load();
     _tick = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (mounted && _dragging == null) setState(() {});
     });
@@ -67,19 +71,56 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
 
   @override
   Widget build(BuildContext context) {
+    Widget tab(String label, int i) => Expanded(
+          child: GestureDetector(
+            onTap: () => setState(() => _tab = i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(17),
+                gradient: _tab == i ? const LinearGradient(colors: [Color(0xFFB146F5), Color(0xFFFF4F9A)]) : null,
+              ),
+              child: Text(label, style: TextStyle(fontWeight: _tab == i ? FontWeight.w800 : FontWeight.w600, color: _tab == i ? Colors.white : Colors.white60)),
+            ),
+          ),
+        );
     return Column(children: [
+      const SizedBox(height: 8),
+      Container(width: 38, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
       _player(),
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 2, 12, 4),
+        padding: const EdgeInsets.fromLTRB(14, 2, 14, 6),
         child: Row(children: [
-          const Expanded(child: Text('Çalma listesi', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(20)),
+              child: Row(children: [tab('Çalma listesi', 0), tab('Müziklerim', 1)]),
+            ),
+          ),
+          const SizedBox(width: 10),
           if (_progress != null)
-            Padding(padding: const EdgeInsets.only(right: 10), child: Text(_progress!, style: const TextStyle(color: Colors.white70, fontSize: 12)))
+            Text(_progress!, style: const TextStyle(color: Colors.white70, fontSize: 12))
           else if (widget.canManage || widget.canQueue)
-            FilledButton.icon(onPressed: _addFiles, icon: const Icon(Icons.add), label: const Text('Müzik ekle')),
+            InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: _addFiles,
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), gradient: const LinearGradient(colors: [Color(0xFF40E3F2), Color(0xFF7F7BFF)])),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.add_rounded, size: 20, color: Colors.white),
+                  SizedBox(width: 2),
+                  Text('Ekle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                ]),
+              ),
+            ),
         ]),
       ),
-      Expanded(child: _playlist()),
+      Expanded(child: _tab == 0 ? _playlist() : _library()),
     ]);
   }
 
@@ -99,22 +140,35 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
         final duration = ((track?['durationMs'] as num?) ?? 0).toDouble();
         final position = (_dragging ?? MusicService.instance.currentPositionMs().toDouble()).clamp(0, duration > 0 ? duration : 1).toDouble();
         final cover = Api.absoluteUrl(track?['coverUrl'] as String?);
-        Widget disc = Container(
-          width: 76,
-          height: 76,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.black, border: Border.all(color: Colors.white24, width: 4)),
-          child: ClipOval(
-            child: cover != null
-                ? NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, color: Colors.pinkAccent, size: 32))
-                : const Icon(Icons.music_note, color: Colors.pinkAccent, size: 32),
-          ),
+        // Plak: siyah plak görseli, ortasında şarkının kapağı (yeni tasarım).
+        Widget disc = SizedBox(
+          width: 92,
+          height: 92,
+          child: Stack(alignment: Alignment.center, children: [
+            Container(
+              decoration: const BoxDecoration(shape: BoxShape.circle, boxShadow: [BoxShadow(color: Color(0x99000000), blurRadius: 14, offset: Offset(0, 4))]),
+              child: ClipOval(child: Image.asset('assets/images/music_disc.png', width: 92, height: 92, fit: BoxFit.cover)),
+            ),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white70, width: 1.5), color: const Color(0xFF2A1F45)),
+              child: ClipOval(
+                child: cover != null
+                    ? NetImg(cover, box: const Size.square(36), fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, color: Colors.pinkAccent, size: 18))
+                    : const Icon(Icons.music_note, color: Colors.pinkAccent, size: 18),
+              ),
+            ),
+          ]),
         );
         return Container(
           margin: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-          padding: const EdgeInsets.fromLTRB(14, 10, 6, 6),
+          padding: const EdgeInsets.fromLTRB(14, 12, 6, 8),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            gradient: const LinearGradient(colors: [Color(0xFF3A1C71), Color(0xFFD76D77)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            borderRadius: BorderRadius.circular(22),
+            gradient: const LinearGradient(colors: [Color(0xFF5B2A9C), Color(0xFFB0306E)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            border: Border.all(color: Colors.white12),
+            boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 16, offset: Offset(0, 6))],
           ),
           child: Column(children: [
             Row(children: [
@@ -165,13 +219,22 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
                 ),
               ),
               if (widget.canManage) ...[
-                IconButton(
-                  iconSize: 36,
-                  onPressed: track == null ? null : () => _call(() => playing ? Api.post('$_base/pause') : Api.post('$_base/play')),
-                  icon: Icon(playing ? Icons.pause_circle_filled : Icons.play_circle_filled),
+                IconButton(tooltip: 'Durdur', onPressed: track == null ? null : () => _call(() => Api.post('$_base/stop')), icon: const Icon(Icons.stop_rounded, size: 26)),
+                // Büyük oynat / duraklat düğmesi.
+                GestureDetector(
+                  onTap: track == null ? null : () => _call(() => playing ? Api.post('$_base/pause') : Api.post('$_base/play')),
+                  child: Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white,
+                      boxShadow: [BoxShadow(color: Colors.white.withValues(alpha: 0.35), blurRadius: 12)],
+                    ),
+                    child: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 32, color: const Color(0xFF7B2CBF)),
+                  ),
                 ),
-                IconButton(tooltip: 'Sonraki', onPressed: () => _call(() => Api.post('$_base/next')), icon: const Icon(Icons.skip_next, size: 28)),
-                IconButton(tooltip: 'Durdur', onPressed: track == null ? null : () => _call(() => Api.post('$_base/stop')), icon: const Icon(Icons.stop_circle_outlined, size: 26)),
+                IconButton(tooltip: 'Sonraki', onPressed: () => _call(() => Api.post('$_base/next')), icon: const Icon(Icons.skip_next_rounded, size: 30)),
               ],
             ]),
             if (!widget.canManage)
@@ -230,21 +293,89 @@ class _MusicPanelState extends State<_MusicPanel> with SingleTickerProviderState
     );
   }
 
+  /// Telefondan şarkı seç: önce "Müziklerim"e kalıcı eklenir (bir kez seçmen yeter), sonra odanın listesine.
   Future<void> _addFiles() async {
-    final r = await FilePicker.platform.pickFiles(type: FileType.audio, allowMultiple: true);
-    if (r == null || r.files.isEmpty || !mounted) return;
-    setState(() => _progress = '1/${r.files.length} yükleniyor…');
-    final res = await LocalMusic.instance.addPickedToRoom(widget.roomId, r.files, onProgress: (d, t) {
+    final picked = await LocalMusic.instance.pickToLibrary();
+    if (picked.isEmpty || !mounted) return;
+    setState(() => _progress = '1/${picked.length} yükleniyor…');
+    final res = await LocalMusic.instance.addTracksToRoom(widget.roomId, picked, onProgress: (d, t) {
       if (mounted) setState(() => _progress = d >= t ? null : '${d + 1}/$t yükleniyor…');
     });
     if (!mounted) return;
     setState(() => _progress = null);
     if (res.added > 0 && res.skipped == 0) {
-      toast(context, '${res.added} şarkı listeye eklendi.');
+      toast(context, '${res.added} şarkı listeye eklendi ve Müziklerim\'e kaydedildi.');
     } else if (res.added > 0) {
       toast(context, '${res.added} şarkı eklendi, ${res.skipped} eklenemedi: ${res.error ?? ''}', error: true);
     } else {
       toast(context, res.error ?? 'Şarkı eklenemedi.', error: true);
     }
+  }
+
+  /// Müziklerim: telefondan bir kez seçilen şarkılar burada kalır; dokununca odanın listesine eklenir.
+  Widget _library() {
+    return ValueListenableBuilder<List<LocalTrack>>(
+      valueListenable: LocalMusic.instance.tracks,
+      builder: (context, list, _) {
+        if (list.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text('Henüz şarkın yok.\n"Ekle" ile telefonundan seç; bir kez seçtiğin şarkılar burada kalır.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+            ),
+          );
+        }
+        final canAdd = widget.canManage || widget.canQueue;
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+          itemCount: list.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 6),
+          itemBuilder: (_, i) {
+            final t = list[i];
+            return Container(
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(14)),
+              child: ListTile(
+                dense: true,
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: const LinearGradient(colors: [Color(0xFFB146F5), Color(0xFFFF4F9A)])),
+                  child: const Icon(Icons.music_note_rounded, color: Colors.white, size: 20),
+                ),
+                title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('${t.artist.isEmpty ? 'Bilinmeyen sanatçı' : t.artist} · ${_mmss(t.durationMs)}', style: const TextStyle(color: Colors.white54)),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (canAdd)
+                    IconButton(
+                      tooltip: 'Listeye ekle',
+                      icon: const Icon(Icons.playlist_add_rounded, color: Color(0xFF40E3F2)),
+                      onPressed: _progress != null
+                          ? null
+                          : () async {
+                              setState(() => _progress = 'Yükleniyor…');
+                              final r = await guard(context, () async {
+                                await LocalMusic.instance.sendToRoom(widget.roomId, t, playNow: false);
+                                return true;
+                              });
+                              if (!mounted) return;
+                              setState(() => _progress = null);
+                              if (r == true) toast(context, '"${t.title}" listeye eklendi.');
+                            },
+                    ),
+                  IconButton(
+                    tooltip: 'Müziklerim\'den kaldır',
+                    icon: const Icon(Icons.delete_outline_rounded, color: Colors.white38),
+                    onPressed: () async {
+                      final ok = await confirm(context, '"${t.title}" Müziklerim\'den kaldırılsın mı?', action: 'Kaldır', destructive: true);
+                      if (ok) await LocalMusic.instance.remove(t);
+                    },
+                  ),
+                ]),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }

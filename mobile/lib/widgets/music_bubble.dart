@@ -38,34 +38,44 @@ class _MusicBubbleState extends State<MusicBubble> with SingleTickerProviderStat
           _spin.stop();
         }
         final cover = Api.absoluteUrl(track['coverUrl'] as String?);
+        // Plak (yeni tasarım): siyah plak döner, ortasında şarkının kapağı. Duraklatılınca durur, üstünde ⏸.
         return DragBubble(
           pos: musicBubblePos,
-          size: 56,
-          initial: const Offset(-1, -260),
+          size: 58,
+          initial: const Offset(-1, -230),
           onTap: widget.onOpen,
-          child: Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF1B1530),
-              border: Border.all(color: Colors.pinkAccent, width: 2),
-              boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 8)],
-            ),
-            child: ClipOval(
-              child: Stack(alignment: Alignment.center, fit: StackFit.expand, children: [
-                RepaintBoundary(
-                  child: RotationTransition(
-                    turns: _spin,
-                    child: RepaintBoundary(
-                      child: cover != null
-                          ? NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, color: Colors.pinkAccent))
-                          : const Icon(Icons.music_note, color: Colors.pinkAccent),
+          child: Stack(alignment: Alignment.center, children: [
+            RepaintBoundary(
+              child: RotationTransition(
+                turns: _spin,
+                child: RepaintBoundary(
+                  child: Stack(alignment: Alignment.center, children: [
+                    Container(
+                      decoration: const BoxDecoration(shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 8)]),
+                      child: ClipOval(child: Image.asset('assets/images/music_disc.png', width: 58, height: 58, fit: BoxFit.cover)),
                     ),
-                  ),
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white70, width: 1.2), color: const Color(0xFF2A1F45)),
+                      child: ClipOval(
+                        child: cover != null
+                            ? NetImg(cover, box: const Size.square(24), fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.music_note, size: 14, color: Colors.pinkAccent))
+                            : const Icon(Icons.music_note, size: 14, color: Colors.pinkAccent),
+                      ),
+                    ),
+                  ]),
                 ),
-                if (!playing) const ColoredBox(color: Colors.black54, child: Icon(Icons.pause, color: Colors.white)),
-              ]),
+              ),
             ),
-          ),
+            if (!playing)
+              Container(
+                width: 26,
+                height: 26,
+                decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                child: const Icon(Icons.pause_rounded, size: 18, color: Colors.white),
+              ),
+          ]),
         );
       },
     );

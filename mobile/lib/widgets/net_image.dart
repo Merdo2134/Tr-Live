@@ -144,8 +144,8 @@ class NetImage extends ImageProvider<NetImage> {
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       final tw = key.targetW;
       final th = key.targetH;
-      if (tw == null && th == null) return decode(buffer);
-      return decode(buffer, getTargetSize: (int iw, int ih) {
+      if (tw == null && th == null) return await decode(buffer);
+      return await decode(buffer, getTargetSize: (int iw, int ih) {
         if (iw <= 0 || ih <= 0) return const ui.TargetImageSize();
         final double s;
         if (tw != null && th != null) {

@@ -62,11 +62,13 @@ router.get('/inbox-summary', requireAuth, async (req, res) => {
        (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'team' AND a.created_at > ${seen('team')}) AS team,
        (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'event' AND a.created_at > ${seen('event')}) AS event,
        (SELECT COUNT(*)::int FROM announcements a WHERE a.kind = 'reward' AND a.created_at > ${seen('reward')}) AS reward,
-       (SELECT COUNT(*)::int FROM follows f WHERE f.followed_id = u.id AND f.created_at > u.announcements_seen_at) AS followers
+       (SELECT COUNT(*)::int FROM follows f WHERE f.followed_id = u.id AND f.created_at > u.announcements_seen_at) AS followers,
+       (SELECT COUNT(*)::int FROM agency_requests q JOIN agencies ag ON ag.id = q.agency_id AND ag.status = 'active'
+          WHERE q.user_id = u.id AND q.direction = 'invite' AND q.status = 'pending') AS agency
      FROM users u WHERE u.id = $1`,
     [req.user.id],
   );
-  res.json(r.rows[0] ?? { team: 0, event: 0, reward: 0, followers: 0 });
+  res.json(r.rows[0] ?? { team: 0, event: 0, reward: 0, followers: 0, agency: 0 });
 });
 
 // Kart açılınca o türün rozeti sıfırlanır; tür verilmezse (eski sürüm) hepsi.

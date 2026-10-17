@@ -8,6 +8,7 @@ import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js'
 import { hub } from '../realtime.js';
 import { token as livekitToken, setCanPublish, removeParticipant } from '../livekit.js';
 import { canManage } from '../room_permissions.js';
+import { roomStaffShield } from '../staff_logic.js';
 import { featuresFor, requireFeature } from '../services/wip.js';
 import { loadPublicRow, loadPublicRows, activeEntranceEffect } from '../services/users.js';
 import { leaveRoom, closeRoom, SUPPORTED_SEATS } from '../services/rooms.js';
@@ -49,6 +50,23 @@ async function uniqueCode(run) {
 async function assertRoomVisible(room, userId) {
   if (!room.is_hidden || room.owner_id === userId) return;
   if (!(await memberOf(room.id, userId))) throw fail('Oda bulunamadı.', 404);
+}
+
+/** Odanın güncel ayarlarını kalıcı oda kaydına yazar (oda kapatılıp açılınca aynı kalsın). */
+async function syncProfile(r, run = query) {
+  await run(
+    `UPDATE room_profiles SET name = $3, tags = $4, theme = $5, seat_count = $6, announcement = $7, chat_enabled = $8, theme_image_url = $9,
+       scoreboard_enabled = $10, mic_request = $11, locked_seats = $12, password_hash = $13, is_hidden = $14, updated_at = NOW()
+     WHERE owner_id = $1 AND room_type = $2`,
+    [r.owner_id, r.room_type, r.name, r.tags ?? [], r.theme, r.seat_count, r.announcement, r.chat_enabled !== false, r.theme_image_url ?? null,
+      r.scoreboard_enabled !== false, r.mic_request === true, r.locked_seats ?? [], r.password_hash ?? null, r.is_hidden === true],
+  );
+}
+
+/** Oda elması: bu sahibin bu türdeki odasına gelen tüm hediyeler (oda kapanınca sıfırlanmaz). */
+async function roomDiamonds(room) {
+  const r = await query(`SELECT total_diamonds FROM room_profiles WHERE owner_id = $1 AND room_type = $2`, [room.owner_id, room.room_type]);
+  return String(r.rows[0]?.total_diamonds ?? 0);
 }
 
 async function activeRoom(roomId) {
@@ -130,10 +148,18 @@ async function openFromProfile(userId, profile, hidden) {
     await c.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [userId]); // eşzamanlı açmayı sıraya sokar
     const existing = (await c.query(`SELECT * FROM rooms WHERE owner_id = $1 AND room_type = $2 AND is_active = TRUE ORDER BY created_at DESC LIMIT 1`, [userId, profile.room_type])).rows[0];
     if (existing) return { room: existing, created: false };
+    // Oda içinde yapılan son ayarlar (sohbet, tema görseli, sayı tahtası, mikrofon isteği, kilitli koltuklar, şifre, gizlilik)
+    // kayıtlı odadan gelir: oda kapatılıp açılınca aynen kalır.
+    // Gizlilik: bu açılışta istenirse ya da oda içinde gizli yapılmışsa (sahibi gizliliği kaldırana dek gizli kalır).
+    const isHidden = hidden || profile.is_hidden === true;
+    const lockedSeats = (profile.locked_seats ?? []).filter((i) => i > 0 && i < profile.seat_count);
     const r = (await c.query(
-      `INSERT INTO rooms(name, room_type, seat_count, owner_id, tags, is_hidden, join_code, theme, room_number, announcement, cover_url, layout) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [profile.name, profile.room_type, profile.seat_count, userId, profile.tags, hidden, hidden ? await uniqueCode((t, p) => c.query(t, p)) : null, profile.theme, profile.room_number ?? await newRoomNumber((t, p) => c.query(t, p)), profile.announcement ?? null, profile.cover_url ?? null,
-        profile.room_type === 'video' && profile.layout === 'live' ? 'live' : 'grid'],
+      `INSERT INTO rooms(name, room_type, seat_count, owner_id, tags, is_hidden, join_code, theme, room_number, announcement, cover_url, layout,
+                         chat_enabled, theme_image_url, scoreboard_enabled, mic_request, locked_seats, password_hash)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+      [profile.name, profile.room_type, profile.seat_count, userId, profile.tags, isHidden, isHidden ? await uniqueCode((t, p) => c.query(t, p)) : null, profile.theme, profile.room_number ?? await newRoomNumber((t, p) => c.query(t, p)), profile.announcement ?? null, profile.cover_url ?? null,
+        profile.room_type === 'video' && profile.layout === 'live' ? 'live' : 'grid',
+        profile.chat_enabled !== false, profile.theme_image_url ?? null, profile.scoreboard_enabled !== false, profile.mic_request === true, lockedSeats, profile.password_hash ?? null],
     )).rows[0];
     await c.query(`INSERT INTO room_members(room_id, user_id, role, microphone, seat_index) VALUES($1,$2,'owner',TRUE,0)`, [r.id, userId]);
     // Onaylı yayıncı ise yayın oturumu başlar (süre istatistikleri için).
@@ -346,7 +372,7 @@ router.post('/:roomId/join', requireAuth, userLimit('room_join', 40, 60e3), asyn
   const me = await memberOf(roomId, userId);
   noteTask(userId, 'join_room');
   res.json({
-    room: roomJson(room, { showCode: ['owner', 'cohost'].includes(me.role) }),
+    room: { ...roomJson(room, { showCode: ['owner', 'cohost'].includes(me.role) }), totalDiamonds: await roomDiamonds(room) },
     me: { role: me.role, microphone: me.microphone, seatIndex: me.seat_index },
     joined: ins.rowCount > 0,
   });
@@ -404,13 +430,8 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
   if (!sets.length) throw fail('Değiştirilecek alan yok.');
   values.push(roomId);
   const r = (await query(`UPDATE rooms SET ${sets.join(', ')} WHERE id = $${values.length} RETURNING *`, values)).rows[0];
-  // Kalıcı oda bilgisi (ad, etiket, tema) bir sonraki açılış için saklanır.
-  if (b.name !== undefined || b.tags !== undefined || b.theme !== undefined || b.announcement !== undefined || newSeats !== null) {
-    await query(
-      `UPDATE room_profiles SET name = $3, tags = $4, theme = $5, seat_count = $6, announcement = $7, updated_at = NOW() WHERE owner_id = $1 AND room_type = $2`,
-      [r.owner_id, r.room_type, r.name, r.tags ?? [], r.theme, r.seat_count, r.announcement],
-    );
-  }
+  // Kalıcı oda bilgisi: oda içindeki tüm ayarlar bir sonraki açılış için saklanır.
+  await syncProfile(r);
   // Koltuk sayısı azaldıysa taşan koltuklardakiler dinleyiciye iner (mikrofonları kapanır).
   if (newSeats !== null && newSeats < before.seat_count) {
     const gone = (await query(
@@ -535,6 +556,7 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
     throw fail('Bu odada mikrofona çıkmak için istek göndermelisiniz.', 409);
   }
 
+  const wasSeated = member.seat_index !== null;
   const seatIndex = await tx(async (c) => {
     await c.query(`SELECT id FROM rooms WHERE id = $1 FOR UPDATE`, [roomId]); // koltuk atamalarını sıraya sokar
     const others = (await c.query(
@@ -557,20 +579,37 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
       if ((room.locked_seats ?? []).includes(target) && !SEAT_MANAGERS.includes(member.role)) throw fail('Bu koltuk kilitli.', 403);
     }
     await c.query(`UPDATE room_members SET seat_index = $3, microphone = TRUE WHERE room_id = $1 AND user_id = $2`, [roomId, userId, target]);
-    await openMicSession(userId, roomId, (t, p) => c.query(t, p));
+    if (!wasSeated) await openMicSession(userId, roomId, (t, p) => c.query(t, p));
     return target;
   });
-  await setCanPublish(roomId, userId, true);
-  consumeMicInvite(roomId, userId);
-  await removeFromQueue(roomId, userId);
+  // Mikten mike geçiş hızlı: kişi zaten mikrofondaysa yayın izni ve mikrofon süresi zaten açık; yalnızca koltuk değişir
+  // ve herkese hemen duyurulur.
+  if (wasSeated) {
+    hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId, seatIndex, microphone: true });
+    return res.json({ ok: true, seatIndex });
+  }
   // Hayalet kullanıcı mikrofona çıkınca görünür olur: önce odaya "girmiş" gibi duyurulur (giriş efekti olmadan).
   if (await isGhost(userId)) {
     const row = await loadPublicRow(userId);
     hub.broadcastRoom(roomId, { type: 'room_member_joined', roomId, user: publicUser(row, null), entranceEffect: null, silent: true });
   }
   hub.broadcastRoom(roomId, { type: 'room_seat_changed', roomId, userId, seatIndex, microphone: true });
+  await setCanPublish(roomId, userId, true);
+  consumeMicInvite(roomId, userId);
+  await removeFromQueue(roomId, userId);
   noteTask(userId, 'mic');
   res.json({ ok: true, seatIndex });
+});
+
+// Mikrofon emojisi: koltuktaki kişi 3 hareketli emojiden birini gönderir, koltuğunda birkaç saniye oynar.
+router.post('/:roomId/mic-emoji', requireAuth, userLimit('mic_emoji', 20, 60e3), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const emoji = Number(req.body?.emoji);
+  if (!Number.isInteger(emoji) || emoji < 1 || emoji > 3) throw fail('Geçersiz emoji.');
+  const me = await memberOf(roomId, req.user.id);
+  if (!me || me.seat_index === null) throw fail('Emoji göndermek için mikrofonda olmalısınız.', 403);
+  hub.broadcastRoom(roomId, { type: 'room_mic_emoji', roomId, userId: req.user.id, emoji });
+  res.json({ ok: true });
 });
 
 async function releaseSeat(roomId, userId) {
@@ -641,7 +680,15 @@ async function moderationContext(roomId, actorId, targetId) {
   return { actor, target };
 }
 
-async function assertNotImmune(actor, targetId) {
+async function assertStaffShield(actorUser, targetId) {
+  const t = (await query(`SELECT system_role FROM users WHERE id = $1`, [targetId])).rows[0];
+  const msg = roomStaffShield(actorUser.system_role, t?.system_role);
+  if (msg) throw fail(msg, 403);
+}
+
+async function assertNotImmune(actor, targetId, actorUser) {
+  // Yönetim / yardımcı admin dokunulmazlığı: oda sahibi de aşamaz.
+  if (actorUser) await assertStaffShield(actorUser, targetId);
   if (actor.role === 'owner') return; // oda sahibi her zaman işlem yapabilir
   const f = await featuresFor(targetId);
   if (f.kickImmunity) throw fail('Bu kullanıcı yetkililer tarafından uzaklaştırılamaz (WIP ayrıcalığı).', 403);
@@ -654,7 +701,7 @@ router.post('/:roomId/members/:userId/mic-off', requireAuth, userLimit('moderate
   const { actor, target } = await moderationContext(roomId, req.user.id, targetId);
   if (!target) throw fail('Kullanıcı odada değil.', 404);
   if (!canManage(actor.role, target.role, 'moderate')) throw fail('Bu işlem için yetkiniz yok.', 403);
-  await assertNotImmune(actor, targetId);
+  await assertNotImmune(actor, targetId, req.user);
   await releaseSeat(roomId, targetId);
   res.json({ ok: true });
 });
@@ -672,7 +719,7 @@ router.post('/:roomId/members/:userId/kick', requireAuth, userLimit('moderate', 
   const { actor, target } = await moderationContext(roomId, req.user.id, targetId);
   if (!target) throw fail('Kullanıcı odada değil.', 404);
   if (!canManage(actor.role, target.role, 'moderate')) throw fail('Bu işlem için yetkiniz yok.', 403);
-  await assertNotImmune(actor, targetId);
+  await assertNotImmune(actor, targetId, req.user);
   await removeFromRoom(roomId, targetId, 'room_kicked');
   res.json({ ok: true });
 });
@@ -689,7 +736,7 @@ router.post('/:roomId/members/:userId/block', requireAuth, userLimit('moderate',
     else targetRole = (await query(`SELECT role FROM room_staff WHERE owner_id = $1 AND room_type = $2 AND user_id = $3`, [room.owner_id, room.room_type, targetId])).rows[0]?.role ?? 'user';
   }
   if (!canManage(actor.role, targetRole, 'moderate')) throw fail('Bu işlem için yetkiniz yok.', 403);
-  await assertNotImmune(actor, targetId);
+  await assertNotImmune(actor, targetId, req.user);
   await query(
     `INSERT INTO room_blocks(room_id, blocked_user_id, blocked_by_user_id) VALUES($1,$2,$3) ON CONFLICT (room_id, blocked_user_id) DO NOTHING`,
     [roomId, targetId, req.user.id],
@@ -723,6 +770,7 @@ router.post('/:roomId/seats/:index/lock', requireAuth, userLimit('moderate', 60,
   const locked = req.body?.locked !== false;
   const occupant = (await query(`SELECT user_id, role FROM room_members WHERE room_id = $1 AND seat_index = $2`, [roomId, idx])).rows[0];
   if (locked && occupant && occupant.user_id !== req.user.id && !canManage(me.role, occupant.role, 'moderate')) throw fail('Koltuktaki kişiyi indirme yetkiniz yok.', 403);
+  if (locked && occupant && occupant.user_id !== req.user.id) await assertStaffShield(req.user, occupant.user_id);
   const r = await query(
     locked
       ? `UPDATE rooms SET locked_seats = (SELECT ARRAY(SELECT DISTINCT x FROM unnest(locked_seats || $2::int) x ORDER BY x)) WHERE id = $1 RETURNING locked_seats`
@@ -730,6 +778,7 @@ router.post('/:roomId/seats/:index/lock', requireAuth, userLimit('moderate', 60,
     [roomId, idx],
   );
   if (locked && occupant && occupant.user_id !== req.user.id) await releaseSeat(roomId, occupant.user_id);
+  await syncProfile(await activeRoom(roomId));
   hub.broadcastRoom(roomId, { type: 'room_seats_locked', roomId, lockedSeats: r.rows[0].locked_seats });
   res.json({ ok: true, lockedSeats: r.rows[0].locked_seats });
 });
@@ -764,6 +813,7 @@ router.post('/:roomId/members/:userId/role', requireAuth, userLimit('moderate', 
   const { actor, target } = await moderationContext(roomId, req.user.id, targetId);
   if (!target) throw fail('Kullanıcı odada değil.', 404);
   if (!canManage(actor.role, target.role, 'role', role)) throw fail('Bu işlem için yetkiniz yok.', 403);
+  await assertStaffShield(req.user, targetId);
   await query(`UPDATE room_members SET role = $3 WHERE room_id = $1 AND user_id = $2`, [roomId, targetId, role]);
   // Yöneticiler oda kapanıp yeniden açılsa da korunur.
   const roomRow = await activeRoom(roomId);

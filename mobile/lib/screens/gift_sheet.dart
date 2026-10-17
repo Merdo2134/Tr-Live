@@ -37,7 +37,7 @@ class _GiftSheet extends StatefulWidget {
 }
 
 class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMixin {
-  static const _tabs = [('event', 'Etkinlik'), ('popular', 'Popüler'), ('lucky', 'Şanslı'), ('private', 'Kişiye Özel'), ('vip', 'Vip')];
+  static const _tabs = [('event', 'Etkinlik'), ('popular', 'Popüler'), ('lucky', 'Şanslı'), ('cp', 'CP'), ('private', 'Kişiye Özel'), ('vip', 'Vip')];
   static const _quantities = [1, 5, 10, 20, 50, 100, 500, 1000];
   static const _perPage = 8;
 
@@ -57,6 +57,8 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
   // Combo (Yoho): gönderimden sonra 5 sn boyunca "Combo" düğmesi aynı hediyeyi tek dokunuşla tekrar gönderir.
   late final AnimationController _comboCtl;
   int _combo = 0;
+  // Combo sırasında hızlı dokunuşlar kaybolmaz: gönderim sürerken gelen dokunuşlar sıraya alınır ve art arda gönderilir.
+  int _queued = 0;
   // Ağ hatasında aynı işlem tekrar denenirse aynı anahtar kullanılır: sunucu ilk istek işlendiyse tekrar ödetmez.
   String? _pendingKey;
   String? _pendingSig;
@@ -148,7 +150,14 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
 
   Future<void> _send() async {
     final gift = _gift;
-    if (gift == null || _sending) return;
+    if (gift == null) return;
+    if (_sending) {
+      if (_combo > 0 && _queued < 50) {
+        setState(() => _queued++);
+        _comboCtl.forward(from: 0);
+      }
+      return;
+    }
     final targets = _targets;
     if (targets.isEmpty) return toast(context, _scope == null ? 'Alıcı seçin.' : 'Bu seçimde başka kimse yok.', error: true);
     setState(() => _sending = true);
@@ -175,7 +184,10 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
     }
     if (!mounted) return;
     setState(() => _sending = false);
-    if (r == null) return;
+    if (r == null) {
+      setState(() => _queued = 0);
+      return;
+    }
     Session.setCoins((r['balance'] ?? Session.coins).toString());
     // Pencere açık kalır (Yoho): combo düğmesi 5 sn görünür, her dokunuşta süre yeniden başlar.
     final combo = (r['combo'] as num?)?.toInt() ?? 1;
@@ -183,6 +195,11 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
     _comboCtl.forward(from: 0);
     final lucky = mapOf(r['lucky']);
     if (lucky != null) _showLucky(lucky);
+    // Sıradaki combo dokunuşu.
+    if (_queued > 0) {
+      _queued--;
+      scheduleMicrotask(_send);
+    }
   }
 
   /// Şanslı hediye sonucu: kazanç varsa pencerede kısa bir kutlama, yoksa "Bu sefer çıkmadı".
@@ -198,31 +215,61 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
     });
   }
 
+  /// Şanslı hediye sonucu: kazançta büyük çarpan, coin ve kazanılan miktar (kutlama); boşta kısa not.
   Widget _luckyBanner() {
     final l = _luckyWin;
     if (l == null) return const SizedBox.shrink(key: ValueKey('none'));
     final win = BigInt.tryParse('${l['win'] ?? 0}') ?? BigInt.zero;
     final best = (l['best'] as num?)?.toInt() ?? 0;
     final won = win > BigInt.zero;
-    return Container(
-      key: ValueKey(_luckySeq),
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: won ? const [Color(0xFF00C853), Color(0xFFFFB300)] : const [Color(0xFF263238), Color(0xFF37474F)]),
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: won ? const [BoxShadow(color: Color(0x8800E676), blurRadius: 12)] : null,
-      ),
-      child: Row(children: [
-        Text(won ? '🎉' : '🔔', style: const TextStyle(fontSize: 22)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            won ? 'x$best vurdun! +${fmtNumber(win.toString())} Coin kazandın' : 'Bu sefer çıkmadı, şansını tekrar dene!',
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14),
-          ),
+    if (!won) {
+      return Center(
+        key: ValueKey(_luckySeq),
+        child: Container(
+          margin: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(color: const Color(0xE6263238), borderRadius: BorderRadius.circular(20)),
+          child: const Text('🔔 Bu sefer çıkmadı, şansını tekrar dene!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
         ),
-      ]),
+      );
+    }
+    final big = best >= 100;
+    return Center(
+      key: ValueKey(_luckySeq),
+      child: Container(
+        margin: const EdgeInsets.only(top: 4),
+        padding: const EdgeInsets.fromLTRB(14, 10, 18, 10),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: big ? const [Color(0xFFFF6D00), Color(0xFFFFC400), Color(0xFFFF3D8B)] : const [Color(0xFF00C853), Color(0xFFFFB300)]),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white70, width: 1.5),
+          boxShadow: [BoxShadow(color: (big ? const Color(0xFFFFC400) : const Color(0xFF00E676)).withValues(alpha: 0.6), blurRadius: 18)],
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.3, end: 1),
+            duration: const Duration(milliseconds: 600),
+            curve: Curves.elasticOut,
+            builder: (_, k, child) => Transform.scale(scale: k, child: child),
+            child: Image.asset('assets/images/lucky_coin.png', width: 44, height: 44),
+          ),
+          const SizedBox(width: 10),
+          Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              'x$best',
+              style: TextStyle(
+                fontSize: big ? 30 : 24,
+                height: 1.0,
+                fontWeight: FontWeight.w900,
+                fontStyle: FontStyle.italic,
+                color: Colors.white,
+                shadows: const [Shadow(color: Color(0xAA000000), blurRadius: 4)],
+              ),
+            ),
+            Text('+${fmtNumber(win.toString())} Coin kazandın!', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13.5)),
+          ]),
+        ]),
+      ),
     );
   }
 
@@ -233,6 +280,7 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
 
   /// Hediye, adet veya alıcı değişince combo biter (combo yalnızca aynı gönderimin tekrarıdır).
   void _stopCombo() {
+    _queued = 0;
     if (_combo == 0) return;
     _comboCtl.stop();
     _combo = 0;
@@ -277,21 +325,33 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
         const SizedBox(height: 10),
         _tabRow(),
         const SizedBox(height: 8),
-        if (_tab == 'lucky')
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(
-              'Her adet bir şans: x${_luckyMultipliers.reversed.join(', x')} kat Coin geri kazanabilirsin. '
-              'Alıcıya hediye değerinin %$_luckyShare kadarı Elmas olarak geçer.',
-              style: const TextStyle(fontSize: 11.5, color: Colors.white60),
+        // Sabit yükseklikte bilgi satırı: sekme değişince pencere büyüyüp küçülmez.
+        SizedBox(
+          height: 30,
+          child: _tab == 'lucky'
+              ? Text(
+                  'Her adet bir şans: x${_luckyMultipliers.reversed.join(', x')} kat Coin geri kazanabilirsin. '
+                  'Alıcıya hediye değerinin %$_luckyShare kadarı Elmas olarak geçer.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: Colors.white60, height: 1.25),
+                )
+              : null,
+        ),
+        // Şanslı hediye sonucu ızgaranın üstünde belirir (pencereyi büyütmez).
+        Stack(children: [
+          _giftPages(),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: FadeTransition(opacity: anim, child: child)),
+              child: _luckyBanner(),
             ),
           ),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: FadeTransition(opacity: anim, child: child)),
-          child: _luckyBanner(),
-        ),
-        _giftPages(),
+        ]),
         const SizedBox(height: 6),
         _bottomRow(),
       ]),
@@ -411,14 +471,15 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
   // ---------- Hediye ızgarası ----------
   Widget _giftPages() {
     final gifts = _tabGifts;
-    if (gifts.isEmpty) {
-      return const SizedBox(height: 120, child: Center(child: Text('Bu sekmede hediye yok.', style: TextStyle(color: Colors.white54))));
-    }
     final pageCount = (gifts.length / _perPage).ceil();
     return LayoutBuilder(builder: (context, box) {
       const gap = 8.0;
       final tileW = (box.maxWidth - gap * 3) / 4;
       final tileH = tileW * 1.05;
+      // Her sayfa ve sekme 2 satırlık yer kaplar (hediye az da olsa yok da olsa yükseklik aynı); sayfa noktaları için de yer ayrılır.
+      if (gifts.isEmpty) {
+        return SizedBox(height: tileH * 2 + gap + 14, child: const Center(child: Text('Bu sekmede hediye yok.', style: TextStyle(color: Colors.white54))));
+      }
       return Column(children: [
         SizedBox(
           height: tileH * 2 + gap,
@@ -432,14 +493,15 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
             },
           ),
         ),
-        if (pageCount > 1)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              for (var i = 0; i < pageCount; i++)
-                Container(margin: const EdgeInsets.symmetric(horizontal: 2.5), width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: i == _page ? Colors.white : Colors.white30)),
-            ]),
-          ),
+        SizedBox(
+          height: 14,
+          child: pageCount > 1
+              ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  for (var i = 0; i < pageCount; i++)
+                    Container(margin: const EdgeInsets.symmetric(horizontal: 2.5), width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: i == _page ? Colors.white : Colors.white30)),
+                ])
+              : null,
+        ),
       ]);
     });
   }
@@ -532,7 +594,11 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
       const SizedBox(width: 8),
       Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('COMBO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 12, height: 1.0)),
-        Text('x$_combo', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15, height: 1.1)),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          transitionBuilder: (child, anim) => ScaleTransition(scale: Tween<double>(begin: 1.6, end: 1).animate(anim), child: child),
+          child: Text('x${_combo + _queued}', key: ValueKey(_combo + _queued), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15, height: 1.1)),
+        ),
       ]),
     ]);
   }
@@ -541,11 +607,12 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
   Widget _bottomRow() {
     final n = _targets.length;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (n > 1 || _quantity > 1)
-        Padding(
-          padding: const EdgeInsets.only(top: 4, bottom: 2),
-          child: Text('Toplam ${fmtNumber(_total.toString())} Coin · $n kişi × $_quantity adet', style: const TextStyle(fontSize: 12, color: Colors.white54)),
-        ),
+      SizedBox(
+        height: 20,
+        child: (n > 1 || _quantity > 1)
+            ? Text('Toplam ${fmtNumber(_total.toString())} Coin · $n kişi × $_quantity adet', style: const TextStyle(fontSize: 12, color: Colors.white54))
+            : null,
+      ),
       Row(children: [
         Expanded(
           child: InkWell(
@@ -578,7 +645,8 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
               ),
             ),
             InkWell(
-              onTap: (_sending || _gift == null) ? null : _send,
+              // Combo sürerken gönderim devam ederken de dokunulabilir (dokunuş sıraya alınır).
+              onTap: (_gift == null || (_sending && _combo == 0)) ? null : _send,
               child: Container(
                 height: 40,
                 padding: EdgeInsets.symmetric(horizontal: _combo > 0 ? 12 : 22),

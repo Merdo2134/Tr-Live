@@ -15,6 +15,7 @@ class ContentTab extends StatefulWidget {
 class _ContentTabState extends State<ContentTab> {
   List<Map<String, dynamic>> _banners = [];
   List<Map<String, dynamic>> _news = [];
+  List<Map<String, dynamic>> _push = [];
   bool _loading = true;
 
   static const _kinds = {'team': 'Ekip', 'event': 'Etkinlik', 'reward': 'Ödül'};
@@ -35,6 +36,11 @@ class _ContentTabState extends State<ContentTab> {
         _news = listOf(a['announcements']);
         _loading = false;
       });
+      // Telefon bildirimleri geçmişi (yalnızca yönetici görür; yardımcı adminde boş kalır).
+      try {
+        final p = await Api.get('/api/admin/push');
+        if (mounted) setState(() => _push = listOf(p['messages']));
+      } catch (_) {}
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -53,6 +59,22 @@ class _ContentTabState extends State<ContentTab> {
       return true;
     });
     if (ok == true) _load();
+  }
+
+  /// Uygulaması yüklü herkese telefon bildirimi.
+  Future<void> _sendPush() async {
+    final f = await formDialog(context, 'Telefon bildirimi (herkese)', ['Başlık', 'Mesaj']);
+    if (f == null || !mounted) return;
+    final title = (f['Başlık'] ?? '').trim();
+    final body = (f['Mesaj'] ?? '').trim();
+    if (title.length < 2 || body.length < 2) return toast(context, 'Başlık ve mesaj en az 2 karakter olmalı.', error: true);
+    if (!await confirm(context, '"$title" bildirimi uygulaması yüklü HERKESE gönderilsin mi?', action: 'Gönder')) return;
+    if (!mounted) return;
+    final r = await guard(context, () => Api.post('/api/admin/push', {'title': title, 'body': body}));
+    if (r != null && mounted) {
+      toast(context, 'Bildirim gönderildi. Açık uygulamalara hemen, kapalı olanlara en geç ~15 dakika içinde düşer.');
+      _load();
+    }
   }
 
   Future<void> _toggleBanner(Map<String, dynamic> b) async {
@@ -164,6 +186,20 @@ class _ContentTabState extends State<ContentTab> {
               IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => _deleteBanner(b)),
             ]),
           ),
+        ),
+      const Divider(height: 32),
+      Row(children: [
+        const Expanded(child: Text('Telefon bildirimi', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+        FilledButton.icon(onPressed: _sendPush, icon: const Icon(Icons.notifications_active), label: const Text('Herkese gönder')),
+      ]),
+      const SizedBox(height: 4),
+      const Text('Uygulaması yüklü herkesin telefonuna bildirim olarak düşer (uygulama kapalıysa en geç ~15 dk).', style: TextStyle(color: Pal.textDim, fontSize: 12)),
+      for (final p in _push.take(5))
+        ListTile(
+          dense: true,
+          leading: const Icon(Icons.notifications_none),
+          title: Text('${p['title']}'),
+          subtitle: Text('${p['body']}', maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
       const Divider(height: 32),
       Row(children: [

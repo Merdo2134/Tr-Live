@@ -1,3 +1,52 @@
+## v2.42.0 — Büyük güncelleme: yönetim dokunulmazlığı, kalıcı oda, müzik, şanslı çanta, hediye, seviye görünümleri
+1. **Yönetim dokunulmazlığı:** yönetim (admin) hesabına hiçbir komut uygulanamaz (başka admin dahil: ban, isim/foto,
+   odada mikten alma, atma, engelleme, susturma, rol, koltuk kilidiyle indirme). Yardımcı admine yalnızca yönetim
+   komut uygulayabilir.
+2. **Oda kalıcı:** oda kapatılıp açılınca sohbet açık/kapalı, tema görseli, sayı tahtası, mikrofon isteği, kilitli
+   koltuklar, şifre ve gizlilik aynı kalır. **Oda elması** artık sıfırlanmaz (odaya gelen tüm hediyeler; koltuk
+   sayaçlarını sıfırlamak oda elmasını silmez).
+3. **Müzik:** yeni çalar (plak görseli, büyük oynat düğmesi), "Çalma listesi / Müziklerim" sekmeleri. Telefondan bir
+   kez seçilen şarkı uygulamanın kalıcı klasörüne kopyalanır, **Müziklerim**'de kalır; dokununca listeye eklenir.
+   Oda içi müzik balonu dönen plak. **Gürültü engelleme** (Efekt ve Ses): mikrofonda çevre sesini azaltır.
+   **Şanslı çanta:** yeni gönderim penceresi (kese kartları), odada ve oda kartında kese simgesi, açınca coin;
+   gönderen de kendi çantasından alabilir; kim ne kadar aldıysa odanın ortasından geçen şeritte görünür.
+4. **Ajans daveti:** ajans sahibinin daveti kullanıcının Mesajlar sayfasında "Ajans daveti" kartı olarak çıkar
+   (bildirim gelir); oradan kabul/ret. Yayıncı olmayan kullanıcı da davet edilebilir, kabul edince ajansın yayıncısı olur.
+5. **Yönetim → Öğe ver:** her WIP kademesinin çerçevesi, rozeti, sohbet balonu ve giriş efekti ayrı ayrı listede;
+   verilen ve takılan öğe WIP üyeliği olmadan da görünür.
+6–7. **Sohbet:** oda duyurusu sohbetin en başında sabit; odaya girenler "… odaya girdi" satırıyla görünür.
+8. **Banner** artık dokunmadan da kendiliğinden döner.
+9. **Mikrofon emojileri:** koltuktayken alt bardaki emoji → 3 hareketli emoji; koltuğunun üstünde birkaç saniye oynar.
+10. **Hediye:** combo'da hızlı dokunuşlar kaybolmaz (sıraya alınır); sayfa/sekme değişince pencere boyu değişmez
+   (her zaman 2 satır); şanslı hediye kazancı büyük çarpan ve coin ile gösterilir; mikten mike giden hediye ikonu daha
+   yavaş; oda içi hediye şeridi odanın ortasında; global hediye şeridi kırmızı-altın bant tasarımında.
+11. **Mikten mike geçiş hızlandı:** yeni koltuk hemen gösterilir; sunucu geçişte gereksiz işlemleri yapmaz.
+12. **Herkese telefon bildirimi:** Yönetim → İçerik → "Telefon bildirimi · Herkese gönder". Uygulaması yüklü herkese
+   bildirim olarak düşer: açık uygulamalara hemen, kapalı olanlara Android'in arka plan kontrolüyle en geç ~15 dk
+   içinde (Firebase gerekmez). İlk açılışta bildirim izni istenir. **APK iş akışı güncellendi** (bildirim eklentisi
+   için gerekli Android ayarı): `.github/workflows/apk_build.yml` elle yüklenmeli.
+13. **Küçültülmüş oda** balonunda oda fotoğrafı döner.
+14. **Seviye görünümleri:** taçlı etiketler = atış (gönderme) seviyesi, kalpli etiketler = alış seviyesi; seviye
+   sayfasında büyük rozetler; CP seviye etiketleri (LV3–LV5).
+- Düzeltmeler: kod analizindeki 2 uyarı (net_image.dart) giderildi; zip artık doğrudan proje kökünü içerir ("Zip ile
+  güncelle" iş akışının beklediği yapı; v2.41.0 zip'i bu yüzden açılamamıştı). v2.41.0'daki CP sistemi bu sürüme dahildir.
+
+## v2.41.0 — CP (yakınlık) sistemi
+- **Yakınlık puanı (exp)** her iki kişi arasında birikir:
+  - Özel mesaj: çift başına günde ilk 10 mesaj 10'ar exp (günde en fazla 100 exp; iki yönün toplamı).
+  - Hediye: aralarında gönderilen hediyeler Coin değeri kadar exp. **CP hediyesi 1,5 kat** (hediye panelinde yeni
+    "CP" sekmesi; yönetimde hediye eklerken sekme "CP" seçilir). Kendine hediye sayılmaz.
+- **5 kademe:** 10.000 · 50.000 · 200.000 · 600.000 · 1.500.000 exp.
+- **3. kademede ilişki seçimi:** profil kartında (odada kişiye dokununca ve profil sayfasında) "Yakınlık" bölümü:
+  kalpler, ilerleme çubuğu, "Arkadaş olarak seç" / "CP olarak seç". Karşı taraf kabul eder (profil kartından ya da
+  Mesajlar → Arkadaşlık isteği listesinden; bildirim ve rozet gelir). Herkesin tek CP'si olur; ilişki bitirilince
+  puan korunur.
+- **CP profilde:** CP eşi profil sayfasında ve odadaki profil kartında görünür. CP sıralaması artık onaylı çiftleri
+  yakınlık puanına göre gösterir.
+- **5. kademe oda efekti:** CP'ler sesli odada mikrofonda yan yana oturunca aralarında kalp atışı gibi büyüyüp küçülen
+  bir kalp, ikisinin avatar dairesinin çevresinden de küçük kalpler çıkar. Koltuk düzeni değişmez, dokunmalar geçer.
+- Sunucu: `cp_pairs` tablosu, `users.cp_partner_id`, `/api/cp/...` uçları, hediye sekmesi `cp`.
+
 ## v2.40.3 — Hızlandırma
 - **Görseller telefonda saklanır:** avatarlar, oda kapakları, bannerlar, tema görselleri, hediye simgeleri ve mesaj
   fotoğrafları bir kez indirilir; uygulama her açıldığında yeniden indirilmez (sunucu ve internet yükü azalır, listeler

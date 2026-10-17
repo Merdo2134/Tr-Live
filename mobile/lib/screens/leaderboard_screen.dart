@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/cp_widgets.dart';
 import '../widgets/crown_icon.dart';
 import 'user_screens.dart';
 
@@ -30,7 +31,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   static const _gold = [Color(0xFFFFC43D), Color(0xFFD7DEE6), Color(0xFFCD8B5A)];
   Color _medal(int rank) => rank <= 3 ? _gold[rank - 1] : Pal.surfaceHi;
 
-  String _unit() => _type == 'receivers' ? '💎' : 'Coin';
+  String _unit() => _type == 'receivers' ? '💎' : _type == 'cp' ? 'exp' : 'Coin';
 
   Widget _row(Map<String, dynamic> e) {
     final rank = (e['rank'] as num).toInt();
@@ -66,6 +67,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           Positioned(left: 20, child: UserAvatar(user: p, radius: 18)),
         ]);
         leading = SizedBox(width: 56, height: 36, child: leading);
+        subtitle = Align(alignment: Alignment.centerLeft, child: CpHearts(level: (e['level'] as num?)?.toInt() ?? 0, size: 13));
       default:
         final u = mapOf(e['user']);
         title = UserName(user: u, style: const TextStyle(fontWeight: FontWeight.w700));

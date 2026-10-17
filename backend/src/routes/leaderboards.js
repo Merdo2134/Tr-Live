@@ -5,6 +5,7 @@ import { oneOf } from '../http.js';
 import { periodStartIso } from '../periods.js';
 import { loadPublicRows } from '../services/users.js';
 import { publicUser } from '../views.js';
+import { cpLevelFor } from '../levels.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -43,13 +44,9 @@ router.get('/', async (req, res) => {
         [start],
       )).rows;
     } else if (type === 'cp') {
-      // CP: birbirine en çok hediye gönderen çiftler (iki yönün toplamı).
+      // CP: onaylı CP çiftleri, toplam yakınlık puanına (exp) göre. Puan birikimli olduğu için dönemden bağımsızdır.
       rows = (await query(
-        `SELECT LEAST(gt.sender_id, gt.receiver_id) AS user_a, GREATEST(gt.sender_id, gt.receiver_id) AS user_b, SUM(gt.coin_amount) AS total
-         FROM gift_transactions gt
-         WHERE gt.sender_id <> gt.receiver_id AND ($1::timestamptz IS NULL OR gt.created_at >= $1::timestamptz)
-         GROUP BY 1, 2 ORDER BY total DESC LIMIT 50`,
-        [start],
+        `SELECT user_a, user_b, exp AS total FROM cp_pairs WHERE relation = 'cp' ORDER BY exp DESC LIMIT 50`,
       )).rows;
     } else if (type === 'families') {
       rows = (await query(
@@ -85,7 +82,7 @@ router.get('/', async (req, res) => {
     return res.json({
       type, period,
       entries: rows.filter((x) => people.has(x.user_a) && people.has(x.user_b))
-        .map((x, i) => ({ rank: i + 1, user: publicUser(people.get(x.user_a), req.user.id), partner: publicUser(people.get(x.user_b), req.user.id), total: String(x.total) })),
+        .map((x, i) => ({ rank: i + 1, user: publicUser(people.get(x.user_a), req.user.id), partner: publicUser(people.get(x.user_b), req.user.id), total: String(x.total), level: cpLevelFor(x.total) })),
     });
   }
   if (type === 'families') {

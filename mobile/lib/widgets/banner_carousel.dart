@@ -34,12 +34,19 @@ class _BannerCarouselState extends State<BannerCarousel> {
       // İlk gösterilen sayfa her zaman 1. banner olsun.
       final start = _items.isEmpty ? _loopBase : _loopBase - (_loopBase % _items.length);
       _page = start;
-      if (_ctl.hasClients) _ctl.jumpToPage(start);
+      // Sayfa görünümü bu karede kuruluyor: atlama bir sonraki karede yapılır (önceden kurulmadan atlanmaya çalışılıyor,
+      // sayfa ile sayaç uyuşmuyor ve banner dokunulana kadar dönmüyordu).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _ctl.hasClients) _ctl.jumpToPage(start);
+      });
       _timer?.cancel();
       if (_items.length > 1) {
-        _timer = Timer.periodic(const Duration(seconds: 5), (_) {
+        _timer = Timer.periodic(const Duration(seconds: 4), (_) {
           if (!mounted || !_ctl.hasClients) return;
-          _ctl.animateToPage(_page + 1, duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
+          // Kullanıcı o an kaydırıyorsa bekle; konum her zaman denetleyiciden okunur.
+          if (_ctl.position.isScrollingNotifier.value) return;
+          final cur = _ctl.page?.round() ?? _page;
+          _ctl.animateToPage(cur + 1, duration: const Duration(milliseconds: 450), curve: Curves.easeOut);
         });
       }
     } catch (_) {

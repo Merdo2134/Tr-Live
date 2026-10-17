@@ -10,6 +10,7 @@ import '../widgets/anim_asset.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/lucky_bag.dart';
 import '../widgets/common.dart';
+import '../widgets/cp_widgets.dart';
 import 'admin_screen.dart';
 import 'agency_screen.dart';
 import 'dealer_screen.dart';
@@ -380,6 +381,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ]),
             _statsRow(p),
+            // CP eşi (onaylı CP ilişkisi varsa).
+            if (mapOf(p['cp'])?['partner'] != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                child: CpPartnerCard(
+                  cp: mapOf(p['cp'])!,
+                  onTap: () {
+                    final id = mapOf(mapOf(p['cp'])?['partner'])?['id']?.toString();
+                    if (id != null) _open(UserProfileScreen(userId: id));
+                  },
+                ),
+              ),
             _moneyCards(p),
             _quickTiles(p),
             _menu(p, isDealer),

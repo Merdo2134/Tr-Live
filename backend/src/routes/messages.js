@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { addMessageExp } from '../services/cp.js';
 import express from 'express';
 import { query } from '../database.js';
 import { requireAuth } from '../auth.js';
@@ -98,5 +99,7 @@ router.post('/with/:userId', userLimit('dm10s', 6, 10e3), userLimit('dm1h', 200,
   const m = (await query(`INSERT INTO direct_messages(sender_id, receiver_id, body, image_url) VALUES($1,$2,$3,$4) RETURNING *`, [req.user.id, peerId, body, imageUrl])).rows[0];
   const message = msgJson(m);
   hub.sendToUser(peerId, { type: 'dm', message });
+  // CP yakınlığı: çift başına günde ilk 10 mesaj 10'ar exp. Hata mesajı engellemesin.
+  addMessageExp(req.user.id, peerId).catch((e) => console.error('CP mesaj puanı:', e.message));
   res.status(201).json({ message });
 });

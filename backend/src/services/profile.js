@@ -2,6 +2,9 @@ import { query } from '../database.js';
 import { HIDDEN_NAME, selfUser } from '../views.js';
 import { BASE_FEATURES } from './wip.js';
 import { presenceView } from './presence.js';
+import { loadPublicRow } from './users.js';
+import { cpLevelFor } from '../levels.js';
+import { publicUser } from '../views.js';
 
 export async function equippedItems(userId, run = query) {
   const r = await run(
@@ -77,6 +80,18 @@ export async function loadProfile(viewerId, targetId) {
 
   const f = family.rows[0];
   const b = broadcaster.rows[0];
+  // CP: onaylı CP ilişkisi varsa eşi ve yakınlık seviyesi profilde görünür.
+  let cp = null;
+  if (u.cp_partner_id) {
+    const [pa, pb] = u.id < u.cp_partner_id ? [u.id, u.cp_partner_id] : [u.cp_partner_id, u.id];
+    const [pair, partner] = await Promise.all([
+      query(`SELECT exp, relation_since FROM cp_pairs WHERE user_a = $1 AND user_b = $2 AND relation = 'cp'`, [pa, pb]),
+      loadPublicRow(u.cp_partner_id),
+    ]);
+    if (pair.rows[0] && partner) {
+      cp = { partner: publicUser(partner, viewerId), level: cpLevelFor(pair.rows[0].exp), exp: String(pair.rows[0].exp), since: pair.rows[0].relation_since };
+    }
+  }
   const profile = {
     id: u.id,
     publicId: u.public_id ?? null,
@@ -108,6 +123,7 @@ export async function loadProfile(viewerId, targetId) {
       features: { ...BASE_FEATURES, ...u.wip_features },
     } : null,
     equipped: items,
+    cp,
     // Çevrimiçi / son görülme (kişi gizlemediyse). Kendi profilinde gösterilmez.
     presence: isSelf || blocked.rowCount ? null : presenceView(u),
     family: f ? { id: f.id, name: f.name, logoUrl: f.logo_url, level: f.level, role: f.role } : null,
@@ -128,7 +144,7 @@ export async function loadProfile(viewerId, targetId) {
       followers: profile.followers, following: profile.following, visitorCount: counts.rows[0].visitors,
       broadcasterStatus: b?.status ?? null,
       agencyOwned: ownedAgency.rows[0] ? { id: ownedAgency.rows[0].id, name: ownedAgency.rows[0].name, status: ownedAgency.rows[0].status } : null,
-      wip: profile.wip, equipped: items, family: profile.family, broadcaster: profile.broadcaster,
+      wip: profile.wip, equipped: items, family: profile.family, broadcaster: profile.broadcaster, cp,
     });
   }
   return profile;

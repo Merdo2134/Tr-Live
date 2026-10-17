@@ -5,6 +5,7 @@ import '../widgets/anim_asset.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import 'messages_screen.dart';
+import '../widgets/level_badge.dart';
 import 'user_screens.dart';
 
 /// Arkadaşlarım ve bana gelen arkadaşlık istekleri. Yalnızca arkadaşlar mesajlaşabilir.
@@ -103,10 +104,6 @@ class _LevelsScreenState extends State<LevelsScreen> {
   static const _ranges = [
     [1, 19], [20, 29], [30, 39], [40, 49], [50, 59], [60, 69], [70, 79], [80, 89], [90, 99], [100, 119], [120, 139], [140, 149], [150, 160],
   ];
-  static const _chipColors = [
-    [Color(0xFF16A34A), Color(0xFF22D3EE)], [Color(0xFF2563EB), Color(0xFF22D3EE)], [Color(0xFF7C3AED), Color(0xFFA78BFA)],
-    [Color(0xFFE11D48), Color(0xFFFB7185)], [Color(0xFFEA580C), Color(0xFFFBBF24)], [Color(0xFF9333EA), Color(0xFFF472B6)],
-  ];
 
   String? _frame(Map<String, dynamic> p) {
     final items = p['equipped'];
@@ -173,8 +170,12 @@ class _LevelsScreenState extends State<LevelsScreen> {
                   child: Stack(alignment: Alignment.center, children: [
                     UserAvatar(user: me, radius: 56),
                     if (frame != null) IgnorePointer(child: SizedBox(width: 56 * 2 * kFrameScale, height: 56 * 2 * kFrameScale, child: AnimAsset(url: frame, repeat: true, cache: false))),
+                    // Seviye rozeti: sağ altta (taç = atış, kalp = alış).
+                    Positioned(right: 0, bottom: 0, child: LevelBadgeImage(level: level, send: !_broadcaster, size: 78)),
                   ]),
                 ),
+                const SizedBox(height: 4),
+                LevelPill(level: level, send: !_broadcaster, height: 24),
                 const SizedBox(height: 8),
                 Row(children: [
                   Text('Lv.$level', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
@@ -209,14 +210,9 @@ class _LevelsScreenState extends State<LevelsScreen> {
                       decoration: BoxDecoration(color: level >= _ranges[i][0] && level <= _ranges[i][1] ? rowColor.withValues(alpha: 1) : rowColor.withValues(alpha: 0.75)),
                       children: [
                         SizedBox(height: 64, child: Center(child: Text(_ranges[i][0] == _ranges[i][1] ? '${_ranges[i][0]}' : '${_ranges[i][0]}-${_ranges[i][1]}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: level >= _ranges[i][0] && level <= _ranges[i][1] ? const Color(0xFFFFEB3B) : Colors.white)))),
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: LinearGradient(colors: _chipColors[i % _chipColors.length])),
-                            child: Text('${_ranges[i][1]}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11)),
-                          ),
-                        ),
-                        const Center(child: Text('-', style: TextStyle(color: Colors.white70))),
+                        // Etiket: yayıncı (alış) kalpli, kullanıcı (atış) taçlı.
+                        Center(child: LevelPill(level: _ranges[i][0], send: !_broadcaster, height: 20)),
+                        Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: LevelBadgeImage(level: _ranges[i][0], send: !_broadcaster, size: 58))),
                       ],
                     ),
                 ],
@@ -229,8 +225,8 @@ class _LevelsScreenState extends State<LevelsScreen> {
   }
 }
 
-/// Profildeki gradyanlı "Lv. xx" çubuğu (Figma).
-Widget levelBar(String title, dynamic level, IconData icon, List<Color> colors) {
+/// Profildeki gradyanlı "Lv. xx" çubuğu (Figma). [send] verilirse simge yerine seviye rozeti (taç = atış, kalp = alış).
+Widget levelBar(String title, dynamic level, IconData icon, List<Color> colors, {bool? send}) {
   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Padding(padding: const EdgeInsets.only(left: 2, bottom: 6), child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700))),
     Container(
@@ -238,7 +234,7 @@ Widget levelBar(String title, dynamic level, IconData icon, List<Color> colors) 
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: LinearGradient(colors: colors)),
       child: Row(children: [
-        Icon(icon, color: Colors.white, size: 28),
+        if (send == null) Icon(icon, color: Colors.white, size: 28) else LevelBadgeImage(level: level ?? 1, send: send, size: 50),
         const Spacer(),
         Text('Lv. ${level ?? 0}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic)),
       ]),

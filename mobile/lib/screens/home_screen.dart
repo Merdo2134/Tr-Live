@@ -9,6 +9,7 @@ import '../services/api.dart';
 import '../widgets/drag_bubble.dart';
 import '../services/inbox_service.dart';
 import '../services/room_dock.dart';
+import '../services/socket_service.dart';
 import '../widgets/common.dart';
 import '../widgets/gift_ribbon.dart';
 import 'feed_screen.dart';
@@ -31,10 +32,24 @@ class _HomeScreenState extends State<HomeScreen> {
   final _audioKey = GlobalKey<RoomsTabState>();
   final _videoKey = GlobalKey<RoomsTabState>();
 
+  StreamSubscription? _cpSub;
+
   @override
   void initState() {
     super.initState();
     Inbox.start();
+    // CP sistemi: biri seni Arkadaş / CP olarak seçince kısa bildirim (yanıt: Mesajlar → Arkadaşlık isteği ya da profil kartı).
+    _cpSub = SocketService.instance.events.listen((e) {
+      if (!mounted) return;
+      if (e['type'] == 'agency_invite') {
+        final a = (mapOf(e['agency'])?['name'] ?? 'Bir ajans').toString();
+        toast(context, '$a seni yayıncı olarak davet etti (Mesajlar → Ajans daveti)');
+        return;
+      }
+      if (e['type'] != 'cp_request') return;
+      final name = (mapOf(e['from'])?['displayName'] ?? 'Biri').toString();
+      toast(context, '$name seni ${e['kind'] == 'cp' ? 'CP' : 'Arkadaş'} olarak seçti ❤ (Mesajlar → Arkadaşlık isteği)');
+    });
   }
 
   Future<void> _joinByCode() async {
@@ -47,6 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _cpSub?.cancel();
     Inbox.stop();
     super.dispose();
   }
@@ -105,20 +121,10 @@ class _HomeScreenState extends State<HomeScreen> {
       initial: const Offset(-1, -170),
       onTap: RoomDock.expand,
       child: Stack(clipBehavior: Clip.none, children: [
-        Container(
-          width: 64,
-          height: 64,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(colors: [Color(0xFF7C4DFF), Color(0xFFFF4081)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 8)],
-          ),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.graphic_eq, color: Colors.white, size: 22),
-            Text(initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15)),
-          ]),
+        // Oda fotoğrafı yuvarlak içinde döner (plak gibi); fotoğraf yoksa odanın baş harfi.
+        ValueListenableBuilder<String?>(
+          valueListenable: RoomDock.cover,
+          builder: (context, cover, _) => _SpinningRoomCover(cover: cover, initial: initial),
         ),
         // Müzik yalnızca odanın içinde: dışarıda ayrı müzik balonu yok, çalıyorsa oda balonunda küçük nota görünür.
         Positioned(
@@ -505,5 +511,57 @@ class RoomsTabState extends State<RoomsTab> {
         ),
       Expanded(child: body),
     ]);
+  }
+}
+
+
+/// Küçültülmüş oda balonu: oda fotoğrafı yavaşça döner.
+class _SpinningRoomCover extends StatefulWidget {
+  final String? cover;
+  final String initial;
+  const _SpinningRoomCover({required this.cover, required this.initial});
+
+  @override
+  State<_SpinningRoomCover> createState() => _SpinningRoomCoverState();
+}
+
+class _SpinningRoomCoverState extends State<_SpinningRoomCover> with SingleTickerProviderStateMixin {
+  late final AnimationController _spin = AnimationController(vsync: this, duration: const Duration(seconds: 10))..repeat();
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = Container(
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF7C4DFF), Color(0xFFFF4081)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.graphic_eq, color: Colors.white, size: 22),
+        Text(widget.initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15)),
+      ]),
+    );
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 8)],
+      ),
+      child: ClipOval(
+        child: RepaintBoundary(
+          child: RotationTransition(
+            turns: _spin,
+            child: widget.cover == null
+                ? fallback
+                : NetImg(widget.cover!, box: const Size.square(64), fit: BoxFit.cover, errorBuilder: (_, __, ___) => fallback),
+          ),
+        ),
+      ),
+    );
   }
 }

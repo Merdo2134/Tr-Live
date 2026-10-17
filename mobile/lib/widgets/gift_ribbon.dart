@@ -63,10 +63,12 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     } else if (type == 'room_gift' && widget.roomId != null && e['roomId'] == widget.roomId) {
       // Önce ikon koltuğa uçar (oda ekranı), sonra tam ekran animasyon başlar.
       final g = mapOf(e['gift']);
-      Future.delayed(const Duration(milliseconds: 700), () {
+      Future.delayed(const Duration(milliseconds: 1300), () {
         if (mounted) _enqueueAnim(g);
       });
       if (!_mergeCombo(e)) _enqueue(e);
+    } else if (type == 'lucky_bag_claimed' && widget.roomId != null && e['roomId'] == widget.roomId && e['user'] != null) {
+      _enqueue(e); // çantadan kim ne kadar aldı: odanın ortasından geçen kısa şerit
     } else if (type == 'room_member_joined' && widget.roomId != null && e['roomId'] == widget.roomId) {
       final effect = mapOf(e['entranceEffect']);
       if (effect != null) _showEntrance(e, effect);
@@ -172,8 +174,11 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
         _currentSeq++;
       });
     }
-    _timer = Timer(const Duration(milliseconds: 5200), _next);
+    _timer = Timer(Duration(milliseconds: _stripMs(e) + 200), _next);
   }
+
+  /// Çanta payı şeritleri kısa (art arda çok gelir), hediye şeritleri uzun.
+  int _stripMs(Map<String, dynamic> e) => e['type'] == 'lucky_bag_claimed' ? 2800 : 5000;
 
   int _entranceSeq = 0;
 
@@ -191,12 +196,112 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.of(context).padding.top + 8;
+    // Odada şerit odanın ortasından geçer (koltukların altı, sohbetin üstü); ana sayfada en üstte.
+    final ribbonTop = widget.roomId != null ? MediaQuery.sizeOf(context).height * 0.42 : top;
     return Stack(children: [
       widget.child,
       if (_anim != null) _buildAnim(),
       if (_entrance != null) _buildEntrance(top),
-      if (_current != null) Positioned(top: top, left: 0, right: 0, child: _SlideStrip(key: ValueKey(_currentSeq), bump: _bump, child: _buildRibbon(_current!))),
+      if (_current != null)
+        Positioned(
+          top: ribbonTop,
+          left: 0,
+          right: 0,
+          child: _SlideStrip(key: ValueKey(_currentSeq), bump: _bump, durationMs: _stripMs(_current!), child: _buildRibbon(_current!)),
+        ),
     ]);
+  }
+
+  /// Çantadan pay alan kişi: pembe şerit, kese ve Coin.
+  Widget _buildBagClaimRibbon(Map<String, dynamic> e) {
+    final u = mapOf(e['user']);
+    return IgnorePointer(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(colors: [Color(0x00FF4F9A), Color(0xEEFF4F9A), Color(0xEEB0127A), Color(0x00B0127A)]),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Image.asset('assets/images/lucky_pouch.webp', width: 30, height: 30),
+            const SizedBox(width: 6),
+            UserAvatar(user: u, radius: 13),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                '${u?['displayName'] ?? 'Biri'} çantadan aldı',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800, color: Colors.white, fontSize: 13.5, shadows: [Shadow(color: Colors.black45, blurRadius: 3)]),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Image.asset('assets/images/lucky_coin.png', width: 18, height: 18),
+            const SizedBox(width: 3),
+            Text(fmtNumber(e['amount']), style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFFFFE082), fontSize: 15)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// Global hediye şeridi (yeni tasarım): kırmızı-altın bant üzerinde gönderen → alan, hediye ve adet.
+  Widget _buildGlobalRibbon(Map<String, dynamic> e) {
+    final gift = mapOf(e['gift']) ?? {};
+    final sender = mapOf(e['sender']);
+    final receivers = e['receivers'] is List ? (e['receivers'] as List) : const [];
+    final names = receivers
+        .map((r) => (r is Map && r['user'] is Map ? (r['user'] as Map)['displayName'] : (r is Map ? r['displayName'] : null)))
+        .whereType<String>()
+        .toList();
+    final icon = Api.absoluteUrl(gift['iconUrl'] as String?);
+    return IgnorePointer(
+      child: LayoutBuilder(builder: (context, box) {
+        final w = (box.maxWidth * 0.96).clamp(0.0, 520.0).toDouble();
+        final h = w / 3;
+        final fs = (h * 0.15).clamp(10.0, 16.0).toDouble();
+        return Center(
+          child: SizedBox(
+            width: w,
+            height: h,
+            child: Stack(children: [
+              Positioned.fill(child: Image.asset('assets/images/gift_ribbon_gold.webp', fit: BoxFit.fill)),
+              // Kırmızı alanın içi (görselde yaklaşık %35–%80 yükseklik).
+              Positioned(
+                left: w * 0.08,
+                right: w * 0.08,
+                top: h * 0.36,
+                height: h * 0.44,
+                child: Row(children: [
+                  UserAvatar(user: sender, radius: h * 0.15),
+                  SizedBox(width: w * 0.02),
+                  Expanded(
+                    child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(
+                        '${sender?['displayName'] ?? 'Biri'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: const Color(0xFFFFE082), fontWeight: FontWeight.w900, fontSize: fs, height: 1.15, shadows: const [Shadow(color: Colors.black54, blurRadius: 3)]),
+                      ),
+                      Text(
+                        '→ ${names.isEmpty ? 'herkes' : names.join(', ')}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: fs * 0.9, height: 1.15, shadows: const [Shadow(color: Colors.black54, blurRadius: 3)]),
+                      ),
+                    ]),
+                  ),
+                  if (icon != null) NetImg(icon, width: h * 0.34, height: h * 0.34, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard, color: Colors.white)),
+                  SizedBox(width: w * 0.01),
+                  Text('x${e['quantity'] ?? 1}', style: TextStyle(color: const Color(0xFFFFD54F), fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, fontSize: fs * 1.25, shadows: const [Shadow(color: Color(0xFFFF6D00), blurRadius: 6)])),
+                ]),
+              ),
+            ]),
+          ),
+        );
+      }),
+    );
   }
 
   Widget _buildBagRibbon(Map<String, dynamic> e) {
@@ -211,7 +316,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
             boxShadow: const [BoxShadow(color: Colors.amber, blurRadius: 14)],
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Text('🧧', style: TextStyle(fontSize: 22)),
+            Image.asset('assets/images/lucky_pouch.webp', width: 30, height: 30),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
@@ -262,6 +367,8 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   Widget _buildRibbon(Map<String, dynamic> e) {
     if (e['type'] == 'lucky_bag_global') return _buildBagRibbon(e);
     if (e['type'] == 'lucky_gift_win') return _buildLuckyRibbon(e);
+    if (e['type'] == 'lucky_bag_claimed') return _buildBagClaimRibbon(e);
+    if (e['type'] == 'global_gift_ribbon') return _buildGlobalRibbon(e);
     final gift = mapOf(e['gift']) ?? {};
     final sender = mapOf(e['sender']);
     final receivers = e['receivers'] is List ? (e['receivers'] as List) : const [];
@@ -432,13 +539,14 @@ class _SlideStrip extends StatefulWidget {
   final Widget child;
   /// Değişince (combo) şerit ekranda kalır ve bekleme süresi baştan başlar.
   final int bump;
-  const _SlideStrip({super.key, required this.child, this.bump = 0});
+  final int durationMs;
+  const _SlideStrip({super.key, required this.child, this.bump = 0, this.durationMs = 5000});
   @override
   State<_SlideStrip> createState() => _SlideStripState();
 }
 
 class _SlideStripState extends State<_SlideStrip> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 5000))..forward();
+  late final AnimationController _c = AnimationController(vsync: this, duration: Duration(milliseconds: widget.durationMs))..forward();
 
   @override
   void didUpdateWidget(covariant _SlideStrip oldWidget) {

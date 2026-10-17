@@ -5,10 +5,12 @@ import '../widgets/anim_asset.dart';
 import '../services/session.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/cp_widgets.dart';
 import '../widgets/presence_widgets.dart';
 import '../widgets/safety_actions.dart';
 import 'feed_screen.dart';
 import 'messages_screen.dart';
+import '../widgets/level_badge.dart';
 import 'social_screens.dart';
 
 class UserProfileScreen extends StatefulWidget {
@@ -162,7 +164,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         const SizedBox(height: 8),
         Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 4, children: [
           if (p['age'] != null) _chip(Icons.cake, '${p['age']}', const Color(0xFF3D8BFF)),
-          _chip(Icons.star, '${p['coinLevel'] ?? 0}', const Color(0xFFFF2D6F)),
+          LevelPill(level: p['coinLevel'] ?? 1, send: true, height: 22),
+          LevelPill(level: p['giftLevel'] ?? 1, send: false, height: 22),
           if (p['broadcaster'] != null) _chip(Icons.podcasts, 'Yayıncı', const Color(0xFFB0003A)),
           ...medals,
         ]),
@@ -256,6 +259,18 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // CP eşi (onaylı CP ilişkisi) ve bu kişiyle aramızdaki yakınlık.
+        if (mapOf(p['cp'])?['partner'] != null) ...[
+          CpPartnerCard(
+            cp: mapOf(p['cp'])!,
+            onTap: () {
+              final id = mapOf(mapOf(p['cp'])?['partner'])?['id']?.toString();
+              if (id != null && id != widget.userId) _push(UserProfileScreen(userId: id));
+            },
+          ),
+          const SizedBox(height: 10),
+        ],
+        if (widget.userId != Session.id) ...[CpPanel(userId: widget.userId, displayName: (p['displayName'] ?? '').toString()), const SizedBox(height: 10)],
         if (family != null)
           Container(
             height: 66,
@@ -311,9 +326,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         ),
         const SizedBox(height: 16),
         Row(children: [
-          Expanded(child: levelBar('Kullanıcı Seviyesi', p['coinLevel'], Icons.workspace_premium, const [Color(0xFFFF4081), Color(0xFF7C4DFF)])),
+          Expanded(child: levelBar('Kullanıcı Seviyesi', p['coinLevel'], Icons.workspace_premium, const [Color(0xFFFF4081), Color(0xFF7C4DFF)], send: true)),
           const SizedBox(width: 12),
-          Expanded(child: levelBar('Yayıncı Seviyesi', p['giftLevel'], Icons.star, const [Color(0xFFFF6D00), Color(0xFFFF1744)])),
+          Expanded(child: levelBar('Yayıncı Seviyesi', p['giftLevel'], Icons.star, const [Color(0xFFFF6D00), Color(0xFFFF1744)], send: false)),
         ]),
         const SizedBox(height: 18),
         const Text('Biyografi', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),

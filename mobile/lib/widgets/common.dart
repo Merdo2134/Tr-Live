@@ -379,7 +379,7 @@ class UserName extends StatelessWidget {
         Flexible(
           child: WipNameText((user?['displayName'] ?? '').toString(), level: (user?['wipLevel'] as num?)?.toInt(), color: color, style: style),
         ),
-        WipChip(level: user?['wipLevel'], colorHex: user?['nameColor'] as String?),
+        WipChip(level: user?['wipBadge'] ?? user?['wipLevel'], colorHex: user?['nameColor'] as String?),
       ],
     );
   }

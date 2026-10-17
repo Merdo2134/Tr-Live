@@ -53,3 +53,25 @@ export function levelInfo(total) {
   const maxed = level >= MAX_LEVEL;
   return { level, exp: exp.toString(), levelStartExp: expForLevel(level).toString(), nextLevelExp: (maxed ? expForLevel(level) : expForLevel(level + 1)).toString(), maxed };
 }
+
+// CP (yakınlık) kademeleri: toplam exp eşikleri. 0 = henüz kademe yok, 1–5.
+export const CP_LEVEL_STEPS = [10000n, 50000n, 200000n, 600000n, 1500000n];
+export const CP_MAX_LEVEL = CP_LEVEL_STEPS.length;
+export const CP_CHOOSE_LEVEL = 3; // ilişki (Arkadaş / CP) seçimi
+export const CP_EFFECT_LEVEL = 5; // odada yan yana kalp efekti
+export function cpLevelFor(exp) {
+  const t = BigInt(exp ?? 0);
+  let level = 0;
+  for (const s of CP_LEVEL_STEPS) if (t >= s) level += 1; else break;
+  return level;
+}
+export function cpInfo(exp) {
+  const level = cpLevelFor(exp);
+  const maxed = level >= CP_MAX_LEVEL;
+  return {
+    exp: String(exp ?? 0), level, maxed,
+    levelStartExp: level === 0 ? '0' : CP_LEVEL_STEPS[level - 1].toString(),
+    nextLevelExp: (maxed ? CP_LEVEL_STEPS[CP_MAX_LEVEL - 1] : CP_LEVEL_STEPS[level]).toString(),
+    steps: CP_LEVEL_STEPS.map(String),
+  };
+}
