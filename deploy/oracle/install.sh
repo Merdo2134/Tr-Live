@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TR Live tek sunucu kurulumu (Oracle Cloud Always Free, Ubuntu 22.04/24.04, ARM ya da x86).
+# TR Live tek sunucu kurulumu (Oracle Cloud Always Free; Ubuntu 22.04/24.04 ya da Oracle Linux 9; ARM ya da x86).
 # Kurar: Docker, güvenlik duvarı kuralları, PostgreSQL, uygulama sunucusu, LiveKit (ses/görüntü), Caddy (HTTPS),
 # yönetim paneli (/panel), günlük yedek ve otomatik güncelleme (GitHub main dalı 5 dakikada bir kontrol edilir).
 # Tekrar çalıştırmak güvenlidir: eksik olanı tamamlar, sırları ve veritabanını korur.
@@ -28,26 +28,43 @@ log() { echo "[trlive $(date '+%F %H:%M:%S')] $*"; }
 console() { echo "$*" > /dev/console 2>/dev/null || true; echo "$*"; }
 [ "$(id -u)" = 0 ] || { echo "root olarak çalıştırın (sudo)"; exit 1; }
 
-# ---------- 1) Paketler ----------
+# ---------- 1) Paketler (Ubuntu ya da Oracle Linux 9) ----------
 if [ "$MODE" = install ]; then
-  export DEBIAN_FRONTEND=noninteractive
-  # İlk açılışta otomatik güncellemeler apt kilidini tutar: beklenir.
-  echo 'DPkg::Lock::Timeout "900";' > /etc/apt/apt.conf.d/99trlive
-  for _ in $(seq 1 180); do
-    fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1 || break
-    sleep 5
-  done
-  log "Paketler kuruluyor"
-  apt-get update -qq
-  apt-get install -y -qq git curl ca-certificates psmisc >/dev/null
-  if ! command -v docker >/dev/null; then
-    log "Docker kuruluyor"
-    curl -fsSL --retry 5 https://get.docker.com | sh >/dev/null
+  if command -v apt-get >/dev/null; then
+    export DEBIAN_FRONTEND=noninteractive
+    # İlk açılışta otomatik güncellemeler apt kilidini tutar: beklenir.
+    echo 'DPkg::Lock::Timeout "900";' > /etc/apt/apt.conf.d/99trlive
+    for _ in $(seq 1 180); do
+      fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1 || break
+      sleep 5
+    done
+    log "Paketler kuruluyor (Ubuntu)"
+    apt-get update -qq
+    apt-get install -y -qq git curl ca-certificates psmisc >/dev/null
+    if ! command -v docker >/dev/null; then
+      log "Docker kuruluyor"
+      curl -fsSL --retry 5 https://get.docker.com | sh >/dev/null
+    fi
+  elif command -v dnf >/dev/null; then
+    log "Paketler kuruluyor (Oracle Linux)"
+    dnf -y -q install git curl ca-certificates psmisc dnf-plugins-core >/dev/null
+    if ! command -v docker >/dev/null; then
+      log "Docker kuruluyor"
+      dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo >/dev/null
+      dnf -y -q install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+    fi
+    # SELinux, konteynerlerin ayar dosyalarını okumasını engellemesin.
+    if command -v setenforce >/dev/null; then
+      setenforce 0 2>/dev/null || true
+      sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config 2>/dev/null || true
+    fi
+  else
+    log "HATA: desteklenmeyen işletim sistemi (Ubuntu ya da Oracle Linux 9 gerekli)"; exit 1
   fi
   systemctl enable --now docker >/dev/null
   # Derleme sırasında bellek yetmezse diye 2 GB takas alanı.
   if ! swapon --show | grep -q /swapfile; then
-    fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+    { fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none; } && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
     grep -q /swapfile /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
   fi
 fi
@@ -175,7 +192,7 @@ if [ "$MODE" = install ]; then
   unit trlive-firewall.service <<EOF
 [Unit]
 Description=TR Live güvenlik duvarı kuralları
-After=docker.service netfilter-persistent.service
+After=docker.service firewalld.service netfilter-persistent.service
 Wants=docker.service
 [Service]
 Type=oneshot

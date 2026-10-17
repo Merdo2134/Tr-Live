@@ -7,7 +7,7 @@ GitHub deposu herkese açık (public) kalmalı; sunucu kodu oradan indirir.
 ## 1. Sunucuyu aç
 1. cloud.oracle.com → hesap aç (kart doğrulaması ister; Always Free ücretsizdir). Bölge: Frankfurt (ya da yakın bir Avrupa bölgesi).
 2. Compute → Instances → **Create instance**
-   - Image: **Canonical Ubuntu 24.04**
+   - Image: varsayılan **Oracle Linux 9** ya da **Canonical Ubuntu 24.04** (ikisi de olur)
    - Shape: **Ampere – VM.Standard.A1.Flex**, 2 OCPU, 12 GB bellek
    - SSH keys: "Generate a key pair for me" → özel anahtarı indir ve sakla (normalde gerekmez).
    - En altta **Show advanced options → Management → Paste cloud-init script**: `deploy/oracle/cloud-init.sh`
