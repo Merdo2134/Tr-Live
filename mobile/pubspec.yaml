@@ -1,7 +1,7 @@
 name: tr_live
 description: TR Live - canlı sesli/görüntülü odalar, aile, WIP, ajans/yayıncı, hediyeler ve yönetim
 publish_to: none
-version: 2.42.2+1
+version: 2.42.3+1
 environment:
   sdk: '>=3.8.0 <4.0.0'
   flutter: '>=3.32.0'
@@ -26,6 +26,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   # Yönetimden herkese telefon bildirimi (Firebase gerektirmez). Sürüm sabit: API'si bu sürüme göre yazıldı.
   flutter_local_notifications: 19.5.0
+# shared_preferences_android 2.5.0 (16 Ekim 2026) yeni JNI yöntemine geçti; yayın APK'sında küçültme (R8) yüzünden
+# "NoSuchMethodError ... SharedPreferencesApiRegistrar.getAll" ile açılışta çöküyor. Sorunsuz son sürüme sabitlendi.
+dependency_overrides:
+  shared_preferences_android: 2.4.29
 dev_dependencies:
   flutter_test:
     sdk: flutter

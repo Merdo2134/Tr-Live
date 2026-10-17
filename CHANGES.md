@@ -1,3 +1,8 @@
+## v2.42.3 — Açılış çökmesi (shared_preferences) düzeltildi
+- 16 Ekim'de yayınlanan `shared_preferences_android 2.5.0` yayın APK'sında açılışta `NoSuchMethodError
+  SharedPreferencesApiRegistrar.getAll` hatası veriyordu (uygulama hiçbir kayıtlı veriyi okuyamıyordu). Bir önceki
+  sorunsuz sürüme (2.4.29) sabitlendi.
+
 ## v2.42.2 — Açılışta logoda takılma düzeltmesi
 - Bildirim izni penceresi uygulamanın ilk ekranı çizilmeden açılıyordu; bazı telefonlarda uygulama açılış logosunda
   takılı kalıyordu. Bildirim servisi artık ekran açıldıktan 4 sn sonra başlar.
