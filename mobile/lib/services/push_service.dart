@@ -3,27 +3,16 @@ import 'dart:convert';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:workmanager/workmanager.dart';
+import 'package:flutter/widgets.dart';
 import '../version.dart';
 import 'api.dart';
 import 'socket_service.dart';
 
-/// Arka plan görevi: uygulama kapalıyken de Android ~15 dakikada bir burayı çalıştırır; yeni yönetim bildirimi
-/// varsa telefona bildirim olarak gösterir.
-@pragma('vm:entry-point')
-void pushCallbackDispatcher() {
-  Workmanager().executeTask((task, inputData) async {
-    try {
-      await PushService.poll();
-    } catch (_) {/* bir sonraki çalışmada tekrar denenir */}
-    return true;
-  });
-}
-
-/// Yönetim panelinden "herkese telefon bildirimi". Uygulama açıkken soketten anında, kapalıyken arka plan
-/// kontrolüyle (en geç ~15 dk) telefona düşer. Firebase gerektirmez.
-class PushService {
+/// Yönetim panelinden "herkese telefon bildirimi". Uygulama açıkken ya da arka planda çalışırken soketten anında
+/// telefon bildirimi olarak düşer; uygulama kapalıyken gönderilenler, uygulama açılınca / öne gelince gösterilir.
+class PushService with WidgetsBindingObserver {
   PushService._();
+  static final PushService _observer = PushService._();
 
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
@@ -55,7 +44,7 @@ class PushService {
   /// yeni kurulan telefona yığılmasın).
   static Future<void> poll() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.reload(); // arka plan görevinin yazdığı son numara da görülsün
+    await prefs.reload();
     var last = prefs.getString(_lastKey);
     final r = await http
         .get(Uri.parse('${Api.baseUrl}/api/push/latest?after=${last ?? '0'}'), headers: {'X-App-Version': kAppVersion})
@@ -82,7 +71,7 @@ class PushService {
     await prefs.setString(_lastKey, '$maxId');
   }
 
-  /// Uygulama açılışında: bildirim izni, arka plan kontrolü ve anlık (soket) bildirimler.
+  /// Uygulama açılışında: bildirim izni, anlık (soket) bildirimler ve kaçırılanların kontrolü.
   static Future<void> start() async {
     _sub ??= SocketService.instance.events.listen((e) async {
       if (e['type'] != 'push') return;
@@ -100,18 +89,16 @@ class PushService {
       await _init();
       await _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.requestNotificationsPermission();
     } catch (_) {/* izin verilmezse bildirim gösterilmez, uygulama çalışır */}
-    try {
-      await Workmanager().initialize(pushCallbackDispatcher);
-      await Workmanager().registerPeriodicTask(
-        'trlive_push',
-        'push_check',
-        frequency: const Duration(minutes: 15),
-        constraints: Constraints(networkType: NetworkType.connected),
-        existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
-      );
-    } catch (_) {/* arka plan kontrolü kurulamazsa yalnızca açıkken gelir */}
+    // Uygulama öne gelince kaçırılan bildirimler sorulur.
+    WidgetsBinding.instance.removeObserver(_observer);
+    WidgetsBinding.instance.addObserver(_observer);
     try {
       await poll();
     } catch (_) {}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(poll().catchError((_) {}));
   }
 }

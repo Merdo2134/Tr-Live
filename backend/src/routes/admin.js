@@ -944,7 +944,7 @@ router.put('/announcements/image', express.raw({ type: Object.keys(IMAGE_TYPES),
 });
 
 // Telefon bildirimi: uygulaması yüklü herkese. Açık uygulamalara anında (soket), kapalı/arka plandakilere
-// uygulamanın ~15 dk'lık kontrolünde telefon bildirimi olarak düşer.
+// uygulama açılınca telefon bildirimi olarak düşer.
 router.get('/push', requireSuperAdmin, async (_req, res) => {
   const r = await query(`SELECT id, title, body, created_at FROM push_messages ORDER BY id DESC LIMIT 30`);
   res.json({ messages: r.rows.map((x) => ({ id: String(x.id), title: x.title, body: x.body, createdAt: x.created_at })) });

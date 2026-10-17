@@ -1,3 +1,10 @@
+## v2.42.1 — APK derleme hatası düzeltildi
+- APK derlemesi `workmanager` eklentisi yüzünden kırılıyordu (`WorkmanagerPlugin` bulunamadı: eklentinin yeni sürümü
+  Kotlin derlemesini yeni Android Gradle'a bırakıyor). Eklenti kaldırıldı.
+- Herkese telefon bildirimi: uygulama açıkken / arka plandayken soketten anında bildirim olarak düşer; uygulama tamamen
+  kapalıyken gönderilenler uygulama açılınca ya da öne gelince bildirim olarak gösterilir (arka planda ~15 dk'lık
+  kontrol artık yok).
+
 ## v2.42.0 — Büyük güncelleme: yönetim dokunulmazlığı, kalıcı oda, müzik, şanslı çanta, hediye, seviye görünümleri
 1. **Yönetim dokunulmazlığı:** yönetim (admin) hesabına hiçbir komut uygulanamaz (başka admin dahil: ban, isim/foto,
    odada mikten alma, atma, engelleme, susturma, rol, koltuk kilidiyle indirme). Yardımcı admine yalnızca yönetim

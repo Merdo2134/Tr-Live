@@ -72,7 +72,7 @@ class _ContentTabState extends State<ContentTab> {
     if (!mounted) return;
     final r = await guard(context, () => Api.post('/api/admin/push', {'title': title, 'body': body}));
     if (r != null && mounted) {
-      toast(context, 'Bildirim gönderildi. Açık uygulamalara hemen, kapalı olanlara en geç ~15 dakika içinde düşer.');
+      toast(context, 'Bildirim gönderildi. Açık uygulamalara hemen, kapalı olanlara uygulama açılınca düşer.');
       _load();
     }
   }
@@ -193,7 +193,7 @@ class _ContentTabState extends State<ContentTab> {
         FilledButton.icon(onPressed: _sendPush, icon: const Icon(Icons.notifications_active), label: const Text('Herkese gönder')),
       ]),
       const SizedBox(height: 4),
-      const Text('Uygulaması yüklü herkesin telefonuna bildirim olarak düşer (uygulama kapalıysa en geç ~15 dk).', style: TextStyle(color: Pal.textDim, fontSize: 12)),
+      const Text('Uygulaması yüklü herkesin telefonuna bildirim olarak düşer (uygulama kapalıysa açılınca).', style: TextStyle(color: Pal.textDim, fontSize: 12)),
       for (final p in _push.take(5))
         ListTile(
           dense: true,

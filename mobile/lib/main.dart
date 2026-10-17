@@ -72,7 +72,7 @@ Future<void> _boot() async {
   };
   PresenceService.init();
   runApp(const TRLiveApp());
-  // Yönetimden "herkese telefon bildirimi": izin + arka plan kontrolü (uygulama kapalıyken de ~15 dk'da bir).
+  // Yönetimden "herkese telefon bildirimi": izin + soket + açılışta/öne gelişte kontrol.
   unawaited(PushService.start());
 }
 
