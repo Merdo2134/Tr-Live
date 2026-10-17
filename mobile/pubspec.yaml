@@ -27,9 +27,9 @@ dependencies:
   # Yönetimden herkese telefon bildirimi (Firebase gerektirmez). Sürüm sabit: API'si bu sürüme göre yazıldı.
   flutter_local_notifications: 19.5.0
 # shared_preferences_android 2.5.0 (16 Ekim 2026) yeni JNI yöntemine geçti; yayın APK'sında küçültme (R8) yüzünden
-# "NoSuchMethodError ... SharedPreferencesApiRegistrar.getAll" ile açılışta çöküyor. Sorunsuz son sürüme sabitlendi.
+# "NoSuchMethodError ... SharedPreferencesApiRegistrar.getAll" ile açılışta çöküyor. Sorunsuz son yayınlanmış sürüme (2.4.28) sabitlendi.
 dependency_overrides:
-  shared_preferences_android: 2.4.29
+  shared_preferences_android: 2.4.28
 dev_dependencies:
   flutter_test:
     sdk: flutter
