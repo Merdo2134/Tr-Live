@@ -13,6 +13,7 @@ import { pruneIdempotencyKeys } from './idempotency.js';
 import { promoteBootstrapAdmins } from './services/bootstrap.js';
 import { nonOverlapping } from './ticker.js';
 import { router as authRouter } from './routes/auth.js';
+import { router as authSocialRouter } from './routes/auth_social.js';
 import { router as meRouter } from './routes/me.js';
 import { router as usersRouter } from './routes/users.js';
 import { router as inventoryRouter } from './routes/inventory.js';
@@ -100,7 +101,9 @@ app.use('/uploads', express.static(config.uploadDir, {
 // kullanıcıyı aynı IP'den çıkarır, saatlik yenilemeler sınırı doldurup herkesi oturumdan atardı.
 // Zorunlu güncelleme: yönetim panelindeki "en düşük sürüm"ün altındaki uygulamalar (X-App-Version başlığı
 // göndermeyen eski sürümler dahil) 426 alır ve uygulama "Güncelleme gerekli" ekranını gösterir.
-const UPDATE_EXEMPT = new Set(['/health', '/app/config', '/client-errors', '/auth/logout', '/push/latest']);
+const UPDATE_EXEMPT = new Set(['/health', '/app/config', '/client-errors', '/auth/logout', '/push/latest',
+  // Google/Facebook dönüşü tarayıcıdan gelir (uygulama sürümü başlığı yok).
+  '/auth/oauth/google/callback', '/auth/oauth/facebook/callback', '/legal/privacy', '/legal/data-deletion']);
 app.use('/api', async (req, res, next) => {
   if (UPDATE_EXEMPT.has(req.path)) return next();
   const c = await getConfig();
@@ -111,7 +114,8 @@ app.use('/api', async (req, res, next) => {
 app.use('/api', systemRouter);
 
 const authIpLimit = ipLimit('auth', 60, 15 * 60e3);
-app.use('/api/auth', (req, res, next) => (['/refresh', '/logout'].includes(req.path) ? next() : authIpLimit(req, res, next)), authRouter);
+// /oauth/poll: uygulama giriş sonucunu birkaç saniyede bir sorar; kendi sınırı vardır (ortak sınırı doldurmasın).
+app.use('/api/auth', (req, res, next) => (['/refresh', '/logout', '/oauth/poll'].includes(req.path) ? next() : authIpLimit(req, res, next)), authRouter, authSocialRouter);
 app.use('/api/me', meRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/inventory', inventoryRouter);

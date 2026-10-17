@@ -147,7 +147,8 @@ router.post('/password', userLimit('password', 5, 15 * 60e3), async (req, res) =
   const current = String(req.body?.currentPassword ?? '');
   const next = String(req.body?.newPassword ?? '');
   passwordRules(next);
-  if (!req.user.password_hash || !(await checkPassword(current, req.user.password_hash))) throw fail('Mevcut şifre hatalı.', 403);
+  // Şifresi olmayan (Google/Facebook) hesap ilk kez şifre belirleyebilir.
+  if (req.user.password_hash && !(await checkPassword(current, req.user.password_hash))) throw fail('Mevcut şifre hatalı.', 403);
   const hash = await hashPassword(next);
   // token_version artınca eski oturumlar geçersiz olur.
   await query(`UPDATE users SET password_hash = $1, token_version = token_version + 1, updated_at = NOW() WHERE id = $2`, [hash, req.user.id]);
@@ -159,7 +160,12 @@ router.post('/password', userLimit('password', 5, 15 * 60e3), async (req, res) =
 // Mağaza kuralları gereği uygulama içinden hesap silme.
 router.delete('/', userLimit('acct_delete', 5, 15 * 60e3), async (req, res) => {
   const password = String(req.body?.password ?? '');
-  if (!req.user.password_hash || !(await checkPassword(password, req.user.password_hash))) throw fail('Şifre hatalı.', 403);
+  if (req.user.password_hash) {
+    if (!(await checkPassword(password, req.user.password_hash))) throw fail('Şifre hatalı.', 403);
+  } else if (!['SİL', 'SIL', 'sil'].includes(String(req.body?.confirm ?? '').trim())) {
+    // Şifresi olmayan (Google/Facebook) hesap: onay için "SİL" yazılır.
+    throw fail('Onay için SİL yazın.', 403);
+  }
   const owned = await query(`SELECT 1 FROM families WHERE owner_id = $1 AND is_active = TRUE`, [req.user.id]);
   if (owned.rowCount) throw fail('Önce ailenizin sahipliğini devredin veya aileyi dağıtın.', 409);
   const agency = await query(`SELECT 1 FROM agencies WHERE owner_id = $1 AND status IN ('pending','active','suspended')`, [req.user.id]);
@@ -175,11 +181,13 @@ router.delete('/', userLimit('acct_delete', 5, 15 * 60e3), async (req, res) => {
     // Kullanıcı adı tam kimlikten türetilir (8 karakterlik kısaltma çakışıp silmeyi engelleyebiliyordu).
     await c.query(
       `UPDATE users SET account_status = 'deleted', username = 'del_' || replace(id::text, '-', ''), display_name = 'Silinmiş Kullanıcı',
-         password_hash = NULL, avatar_url = NULL, cover_url = NULL, bio = NULL, birth_date = NULL, country = NULL, city = NULL,
+         password_hash = NULL, phone = NULL, avatar_url = NULL, cover_url = NULL, bio = NULL, birth_date = NULL, country = NULL, city = NULL,
          is_hidden = FALSE, token_version = token_version + 1, updated_at = NOW() WHERE id = $1`,
       [req.user.id],
     );
     await c.query(`DELETE FROM room_members WHERE user_id = $1`, [req.user.id]);
+    // Google/Facebook bağlantısı kaldırılır: aynı hesapla yeniden kayıt olunabilir.
+    await c.query(`DELETE FROM user_identities WHERE user_id = $1`, [req.user.id]);
     await c.query(`DELETE FROM family_members WHERE user_id = $1`, [req.user.id]);
     await c.query(`DELETE FROM follows WHERE follower_id = $1 OR followed_id = $1`, [req.user.id]);
     await c.query(`UPDATE broadcasters SET agency_id = NULL, status = 'suspended' WHERE user_id = $1`, [req.user.id]);

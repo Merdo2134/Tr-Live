@@ -8,6 +8,7 @@ import 'services/api.dart';
 import 'services/auth_service.dart';
 import 'services/background_service.dart';
 import 'services/error_log.dart';
+import 'services/login_link.dart';
 import 'services/presence_service.dart';
 import 'services/push_service.dart';
 import 'services/session.dart';
@@ -38,6 +39,8 @@ Future<void> main() async {
 
 Future<void> _boot() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Google/Facebook girişinden dönüş bağlantısı (sayfa yönlendirmesinden önce yakalansın diye en başta).
+  LoginLink.instance.init();
   // Yayın sürümünde bozulan bir parça gri kutu yerine sade bir simgeyle görünsün (ekranın geri kalanı çalışır).
   if (kReleaseMode) {
     ErrorWidget.builder = (details) => const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white24, size: 28));
@@ -107,7 +110,9 @@ class TRLiveApp extends StatelessWidget {
       // Kısa listelerde de aşağı çekip yenileme çalışsın.
       scrollBehavior: const _AppScroll(),
       builder: appFrame,
-      home: const _Boot(),
+      // Açılış ekranı. Uygulama bir bağlantıyla (ör. giriş dönüşü) soğuk açılırsa bağlantı sayfa sayılmaz.
+      onGenerateInitialRoutes: (_) => [MaterialPageRoute(builder: (_) => const _Boot())],
+      onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => const _Boot()),
     );
   }
 }

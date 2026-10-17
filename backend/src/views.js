@@ -83,6 +83,9 @@ export function selfUser(row) {
     chatRestrictedUntil: row.chat_restricted_until && new Date(row.chat_restricted_until) > new Date() ? row.chat_restricted_until : null,
     systemRole: row.system_role,
     kycStatus: row.kyc_status ?? 'none',
+    phone: row.phone ?? null,
+    // Google/Facebook ile açılan hesapların şifresi yoktur (silme onayı ve şifre belirleme buna göre).
+    hasPassword: Boolean(row.password_hash),
     createdAt: row.created_at,
   };
 }

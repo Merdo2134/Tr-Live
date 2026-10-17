@@ -57,7 +57,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _changePassword() async {
-    final current = await askText(context, 'Mevcut şifre', obscure: true);
+    // Google/Facebook hesabının şifresi yoktur: ilk kez şifre belirlenir (mevcut şifre sorulmaz).
+    final has = Session.me.value?['hasPassword'] != false;
+    final current = has ? await askText(context, 'Mevcut şifre', obscure: true) : '';
     if (current == null || !mounted) return;
     final next = await askText(context, 'Yeni şifre (en az 6 karakter)', obscure: true);
     if (next == null || !mounted) return;
@@ -71,9 +73,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _deleteAccount() async {
     if (!await confirm(context, 'Hesabınız ve kişisel verileriniz kalıcı olarak silinir. Bu işlem geri alınamaz.', action: 'Devam')) return;
     if (!mounted) return;
-    final password = await askText(context, 'Onay için şifrenizi girin', obscure: true);
-    if (password == null || !mounted) return;
-    final r = await guard(context, () => Api.delete('/api/me', {'password': password}));
+    final has = Session.me.value?['hasPassword'] != false;
+    final answer = has ? await askText(context, 'Onay için şifrenizi girin', obscure: true) : await askText(context, 'Onay için SİL yazın');
+    if (answer == null || !mounted) return;
+    final r = await guard(context, () => Api.delete('/api/me', has ? {'password': answer} : {'confirm': answer}));
     if (r != null) await _goLogin();
   }
 

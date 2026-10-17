@@ -1,3 +1,24 @@
+## v2.44.1 — Oracle Cloud'a taşıma paketi
+- `deploy/oracle/`: tek sunucuda PostgreSQL + uygulama sunucusu + LiveKit + HTTPS (Caddy, sslip.io adresi) + yönetim
+  paneli. Oracle'da sunucu açarken `cloud-init.sh` yapıştırılır, gerisi kendiliğinden kurulur (komut yok).
+- **Panel** (`https://…/panel`): durum, ayarlar (Google/Facebook anahtarları, yöneticiler…), eski veritabanını tek
+  tuşla aktarma, "şimdi güncelle". Sunucu GitHub'daki main dalını 5 dakikada bir kontrol edip kendini günceller.
+- Günlük veritabanı yedeği (son 7 gün). Adım adım rehber: `deploy/oracle/KURULUM.md`.
+- Sunucu, aynı makinedeki LiveKit'e iç adresten (`LIVEKIT_API_URL`) bağlanabilir.
+
+## v2.44.0 — Google, Facebook ve telefon numarasıyla giriş
+- **Giriş ekranı yenilendi:** "Google ile devam et", "Facebook ile devam et", "Telefon numarası ile". Yeni kayıt
+  yalnızca bu üç yolla; kullanıcı adıyla kayıt kaldırıldı (eski hesaplar "Kullanıcı adıyla giriş" ile girmeye devam eder).
+- **Google / Facebook:** giriş sayfası tarayıcıda açılır, onay verince uygulamaya dönülür ve giriş kendiliğinden
+  tamamlanır (SDK yok, imza anahtarına bağlı değil). İlk girişte hesap açılır; kullanıcı adı otomatik verilir.
+  Render'a `GOOGLE_CLIENT_ID/SECRET`, `FACEBOOK_APP_ID/SECRET`, `PUBLIC_BASE_URL` eklenince düğmeler görünür.
+- **Telefon:** numara + şifre + görünen adla kayıt (SMS kodu yok); girişte telefon numarası ya da kullanıcı adı
+  yazılabilir. Türkiye numaraları 0555…, 555…, +90… biçimlerinde kabul edilir; her numaraya tek hesap.
+- Şifresi olmayan (Google/Facebook) hesaplar: "Şifre değiştir" ilk şifreyi belirler; "Hesabı sil" onayı için SİL yazılır.
+  Silinen hesabın telefon ve Google/Facebook bağlantısı kaldırılır.
+- Herkese açık **Gizlilik Politikası** (`/api/legal/privacy`) ve **Veri Silme** (`/api/legal/data-deletion`) sayfaları.
+- Yeni tablo: `035_social_login.sql` (diğer migration'lar gibi sunucu güncellenirken uygulanır).
+
 ## v2.43.1 — Akış düzeni, global şerit yalnızca odalarda
 - **Global hediye şeridi** yalnızca açık odalarda görünür (ana ekranda, profilde ve oda küçültülmüşken görünmez).
 - **Akış gönderileri** ekranı kaplamıyor: solda fotoğraf, sağda ad + WIP ve seviye rozetleri, "+ Takip et",

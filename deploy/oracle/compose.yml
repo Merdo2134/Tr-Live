@@ -1,0 +1,83 @@
+# TR Live tek sunucu: PostgreSQL + uygulama sunucusu + LiveKit + Caddy (HTTPS) + yönetim paneli.
+# install.sh tarafından /opt/trlive/env altındaki ayarlarla çalıştırılır; elle düzenlemeye gerek yok.
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trlive
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: trlive
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "max_connections=100"]
+    shm_size: 256mb
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U trlive -d trlive"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  backend:
+    build: ../../backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - /opt/trlive/env/stack.env
+      - /opt/trlive/env/extra.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - uploads:/app/uploads
+    networks: [internal]
+
+  panel:
+    build: ./panel
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://trlive:${POSTGRES_PASSWORD}@postgres:5432/trlive
+      DOMAIN: ${DOMAIN}
+    env_file:
+      - /opt/trlive/env/panel.env
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - /opt/trlive/env:/data/env
+      - /opt/trlive/state:/data/state
+    networks: [internal]
+
+  # Medya (UDP) için host ağı en sorunsuz yöntem.
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    network_mode: host
+    volumes:
+      - /opt/trlive/env/livekit.yaml:/etc/livekit.yaml:ro
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /opt/trlive/env/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:

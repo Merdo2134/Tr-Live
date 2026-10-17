@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'device_info.dart';
+import 'login_link.dart';
 import 'error_log.dart';
 import 'inbox_service.dart';
 import 'music_service.dart';
@@ -52,6 +57,77 @@ class AuthService {
         'password': password,
         'device': await DeviceInfo.collect(),
       }));
+
+  /// Telefon numarasıyla kayıt (SMS kodu yok): numara + şifre + görünen ad.
+  static Future<void> registerPhone(String phone, String password, String displayName) async => _save(await Api.post('/api/auth/register-phone', {
+        'phone': phone,
+        'password': password,
+        'displayName': displayName,
+        'device': await DeviceInfo.collect(),
+      }));
+
+  /// Sunucuda açık olan giriş yöntemleri (Google / Facebook ayarlanmadıysa düğmesi gizlenir).
+  static Future<Map<String, dynamic>> providers() async {
+    try {
+      return await Api.get('/api/auth/providers');
+    } catch (_) {
+      return const {'google': false, 'facebook': false, 'phone': true};
+    }
+  }
+
+  /// Google / Facebook ile giriş: giriş sayfası tarayıcıda açılır; onay verilince tarayıcı uygulamaya bir dönüş
+  /// bağlantısıyla (tek kullanımlık kod) döner ve oturum o kodla alınır. Bu arada sunucuya durum da sorulur
+  /// (iptal / hata hemen görünsün). [cancelled] true olursa bekleme biter. En fazla 5 dakika beklenir.
+  static Future<void> social(String provider, {required bool Function() cancelled, void Function()? onWaitingApp}) async {
+    final rnd = Random.secure();
+    final poll = base64Url.encode(List<int>.generate(36, (_) => rnd.nextInt(256))).replaceAll('=', '');
+    final start = await Api.post('/api/auth/oauth/start', {'provider': provider, 'poll': poll});
+    final state = start['state']?.toString() ?? '';
+    final url = Uri.tryParse(start['url']?.toString() ?? '');
+    if (state.isEmpty || url == null) throw ApiException('Giriş başlatılamadı.');
+    String? code;
+    var linkArrived = Completer<void>();
+    final sub = LoginLink.instance.links.listen((q) {
+      if (q['state'] != state) return;
+      final c = q['code'];
+      if (c != null && c.isNotEmpty) code = c;
+      if (!linkArrived.isCompleted) linkArrived.complete();
+    });
+    try {
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) throw ApiException('Tarayıcı açılamadı.');
+      final until = DateTime.now().add(const Duration(minutes: 5));
+      while (DateTime.now().isBefore(until)) {
+        // Dönüş bağlantısı gelince hemen, gelmezse 3 sn'de bir sorulur.
+        await Future.any([linkArrived.future, Future<void>.delayed(const Duration(seconds: 3))]);
+        if (linkArrived.isCompleted) linkArrived = Completer<void>();
+        if (cancelled()) return;
+        Map<String, dynamic> r;
+        try {
+          r = await Api.post('/api/auth/oauth/poll', {'state': state, 'poll': poll, if (code != null) 'code': code, 'device': await DeviceInfo.collect()});
+        } on ApiException catch (e) {
+          final s = e.statusCode;
+          if (s != null && s < 500 && s != 429) rethrow; // kesin hata (ör. geçersiz kod)
+          continue; // bağlantı anlık koptuysa tekrar sorulur
+        }
+        if (cancelled()) return;
+        switch (r['status']) {
+          case 'done':
+            await _save(r);
+            return;
+          case 'error':
+            throw ApiException((r['message'] ?? 'Giriş yapılamadı.').toString());
+          case 'expired':
+            throw ApiException('Giriş isteğinin süresi doldu. Tekrar deneyin.');
+          case 'waiting_app':
+            // Onay verildi ama dönüş bağlantısı gelmedi (tarayıcı otomatik açmadı).
+            onWaitingApp?.call();
+        }
+      }
+      throw ApiException('Giriş tamamlanmadı. Tekrar deneyin.');
+    } finally {
+      await sub.cancel();
+    }
+  }
 
   static Future<void> register(String username, String password, String displayName) async => _save(await Api.post('/api/auth/register', {
         'username': username,

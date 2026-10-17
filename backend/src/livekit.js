@@ -1,7 +1,9 @@
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 
 const configured = () => Boolean(process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET && process.env.LIVEKIT_URL);
-const httpUrl = () => (process.env.LIVEKIT_URL || '').replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+// Sunucudan LiveKit'e (oda yönetimi) giden adres. Aynı makinede kuruluysa iç adres (LIVEKIT_API_URL) kullanılır;
+// yoksa uygulamalara verilen genel adresten türetilir.
+const httpUrl = () => (process.env.LIVEKIT_API_URL || (process.env.LIVEKIT_URL || '').replace(/^wss:/, 'https:').replace(/^ws:/, 'http:'));
 const client = () => new RoomServiceClient(httpUrl(), process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
 
 export async function token({ identity, name, room, canPublish = true, metadata = '' }) {
