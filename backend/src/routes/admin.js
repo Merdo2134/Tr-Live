@@ -9,6 +9,7 @@ import { loadConfig, configJson, closePeriod, hostStatementJson, agencyStatement
 import { parsePeriodKey, previousPeriod } from '../settlement.js';
 import { ensureAgencyCode } from './agencies.js';
 import { equipIfNone, announceUserChange } from '../services/users.js';
+import { EVENT_KINDS, EVENT_TITLES, isStar, validateRewards, rewardsView, defaultRules } from '../services/weekly_events.js';
 import { cleanPublic } from '../safe_text.js';
 import { WIP_MIN_LEVEL, WIP_MAX_LEVEL } from '../levels.js';
 import { wipLabel } from '../services/wip.js';
@@ -984,6 +985,51 @@ router.delete('/security/blocks/:ip', requireSuperAdmin, async (req, res) => {
   const ip = String(req.params.ip);
   if (!net.isIP(ip)) throw fail('Geçerli bir IP adresi girin.');
   await unbanIp(ip);
+  res.json({ ok: true });
+});
+
+// ---------- Haftalık etkinlikler (Çift, Kral/Kraliçe, Yıldız): açık/kapalı, yıldız hediyesi, ödüller, kurallar ----------
+router.get('/weekly-events', requireSuperAdmin, async (_req, res) => {
+  const r = await query(
+    `SELECT c.*, g.name AS g_name, g.icon_url AS g_icon FROM weekly_event_config c LEFT JOIN gifts g ON g.id = c.gift_id ORDER BY c.kind`,
+  );
+  res.json({
+    events: r.rows.map((c) => ({
+      kind: c.kind, title: EVENT_TITLES[c.kind], enabled: c.enabled, isStar: isStar(c.kind),
+      gift: c.gift_id ? { id: c.gift_id, name: c.g_name, iconUrl: c.g_icon } : null,
+      rewards: c.rewards, rewardsView: rewardsView(c.rewards), rules: c.rules ?? '', defaultRules: defaultRules(c.kind),
+    })),
+  });
+});
+
+router.put('/weekly-events/:kind', requireSuperAdmin, async (req, res) => {
+  const kind = String(req.params.kind);
+  if (!EVENT_KINDS.includes(kind)) throw fail('Etkinlik bulunamadı.', 404);
+  const sets = []; const values = [];
+  const set = (col, v) => { values.push(v); sets.push(`${col} = $${values.length}`); };
+  const b = req.body ?? {};
+  if (b.enabled !== undefined) {
+    if (typeof b.enabled !== 'boolean') throw fail('enabled true/false olmalı.');
+    set('enabled', b.enabled);
+  }
+  if (b.giftId !== undefined) {
+    if (!isStar(kind)) throw fail('Hediye yalnızca Yıldız etkinliklerinde seçilir.');
+    if (b.giftId === null) set('gift_id', null);
+    else {
+      const gid = uuid(b.giftId, 'Hediye');
+      if (!(await query(`SELECT 1 FROM gifts WHERE id = $1`, [gid])).rowCount) throw fail('Hediye bulunamadı.', 404);
+      set('gift_id', gid);
+    }
+  }
+  if (b.rewards !== undefined) set('rewards', JSON.stringify(await validateRewards(b.rewards)));
+  if (b.rules !== undefined) set('rules', text(b.rules ?? '', 'Kurallar', { max: 3000 }));
+  if (!sets.length) throw fail('Değiştirilecek alan yok.');
+  values.push(kind);
+  await query(`UPDATE weekly_event_config SET ${sets.join(', ')}, updated_at = NOW() WHERE kind = $${values.length}`, values);
+  await query(
+    `INSERT INTO financial_audit_logs(admin_id, action, reference_type, reference_id, metadata) VALUES($1,'weekly_event_config','weekly_event',$2,$3)`,
+    [req.user.id, kind, JSON.stringify(Object.keys(b))],
+  );
   res.json({ ok: true });
 });
 

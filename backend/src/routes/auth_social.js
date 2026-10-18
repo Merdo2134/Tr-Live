@@ -15,7 +15,7 @@ import { tokensFor, createAccount, checkAccount } from './auth.js';
  *  4. Uygulama /oauth/poll ile (state + poll sırrı) sonucu alır. Sırrı yalnızca uygulama bildiği için tarayıcı
  *     adresini gören biri oturumu alamaz.
  * Ayarlar (Render ortam değişkenleri): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, FACEBOOK_APP_ID, FACEBOOK_APP_SECRET,
- * PUBLIC_BASE_URL (ör. https://tr-live-1.onrender.com). Biri eksikse o yöntem uygulamada görünmez.
+ * PUBLIC_BASE_URL (ör. https://130-61-222-48.sslip.io). Biri eksikse o yöntem uygulamada görünmez.
  */
 export const router = Router();
 

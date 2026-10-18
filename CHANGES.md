@@ -1,3 +1,22 @@
+## v2.48.1 — Etkinlik banner görselleri ve tonlarına göre sayfa tasarımı
+- Ana sayfadaki etkinlik kartları artık özel banner görselleri: **Haftalık Kral ve Kraliçe**, **Haftanın Çifti**,
+  **Haftalık Yıldızlar**; dokununca ilgili etkinlik sayfası açılır, şimdiki lider sağ altta yazar.
+- Kral ve Kraliçe görselindeki tarih kutusu her hafta o haftanın başlangıç/bitiş tarihini gösterir.
+- Etkinlik sayfalarının başında aynı görsel; renkler görsellere göre: Kral & Kraliçe mor-pembe + altın,
+  Çift kahve-bordo + altın, Yıldızlar koyu kırmızı + altın. Sekmeler kaydırınca üstte sabit kalır.
+
+## v2.48.0 — Haftalık etkinlikler: Çift, Kral & Kraliçe, Yıldız
+- **Haftalık Çift:** onaylı CP çiftlerinin birbirine gönderdiği CP hediyelerinin Coin değeri; ilk 3 çiftin iki kişisine de ödül.
+- **Kral & Kraliçe:** erkek / kadın kullanıcılar ayrı yarışır, hafta boyunca en çok hediye (Coin değeri) alanlar; ayrı ödüller.
+- **Haftalık Yıldız:** yönetimin seçtiği 4 hediyenin her biri ayrı yarış; o hediyeden en çok gönderen (adet) kazanır; her birine ayrı ödül.
+- Hafta Pazartesi 00:00 (Türkiye saati) başlar. Hafta bitince ilk 3'e ödüller (Coin, WIP üyeliği, çerçeve, rozet, araç,
+  balon… ) otomatik verilir, kazananlara bildirim gider ve "Etkinlik" duyurusu yayınlanır.
+- **Ana sayfa banner'ları:** açık etkinlikler için kartlar (şimdiki lider yazar); dokununca etkinlik sayfası: geri sayım,
+  **Sıralama** (ilk 3 kürsü, ilk 50, kendi sıran, geçen haftanın kazananları), **Ödüller**, **Kurallar**.
+  Yönetimden eklenen banner'ın bağlantısı varsa dokununca açılır.
+- **Yönetim → Katalog → Haftalık etkinlikler:** etkinliği aç/kapat, Yıldız hediyelerini seç, her sıranın ödüllerini ekle/kaldır, kuralları düzenle.
+- Yeni migration: `038_weekly_events.sql` (kurulduğu haftadan önceki hafta dağıtılmış sayılır).
+
 ## v2.47.0 — WIP öğeleri Görünüm'de, WIP araçları oynuyor
 - **Görünüm sayfası:** WIP üyeliğinin verdiği araç, çerçeve, sohbet balonu, giriş efekti ve rozet ("WIP üyeliği"
   etiketiyle) ilgili sekmelerde listelenir; her biri ayrı ayrı **Kaldır / Etkinleştir** yapılabilir. Kaldırılan öğe

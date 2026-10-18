@@ -9,6 +9,7 @@ import '../services/session.dart';
 import '../widgets/anim_asset.dart';
 import '../widgets/common.dart';
 import '../widgets/wip_items.dart';
+import 'admin_events.dart';
 import 'admin_content.dart';
 import 'admin_dashboard.dart';
 import 'admin_payouts.dart';
@@ -1042,6 +1043,12 @@ class _CatalogTab extends StatelessWidget {
     return ListView(padding: const EdgeInsets.all(16), children: [
       const Text('Adresler https:// ile başlamalıdır. Oluşan kimlik, envanterde "Anahtar" olarak kullanılır.', style: TextStyle(color: Colors.white70)),
       const SizedBox(height: 12),
+      FilledButton.icon(
+        icon: const Icon(Icons.emoji_events),
+        label: const Text('Haftalık etkinlikler (Çift, Kral/Kraliçe, Yıldız)'),
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminWeeklyEventsPage())),
+      ),
+      const SizedBox(height: 8),
       OutlinedButton.icon(
         icon: const Icon(Icons.grid_view),
         label: const Text('Katalog listesi (önizleme)'),

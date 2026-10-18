@@ -14,6 +14,8 @@ import { promoteBootstrapAdmins } from './services/bootstrap.js';
 import { nonOverlapping } from './ticker.js';
 import { router as authRouter } from './routes/auth.js';
 import { router as authSocialRouter } from './routes/auth_social.js';
+import { router as eventsRouter } from './routes/events.js';
+import { startWeeklyEventsTicker } from './services/weekly_events.js';
 import { router as meRouter } from './routes/me.js';
 import { router as usersRouter } from './routes/users.js';
 import { router as inventoryRouter } from './routes/inventory.js';
@@ -131,6 +133,7 @@ app.use('/api/families', familiesRouter);
 app.use('/api/wip', wipRouter);
 app.use('/api/dealer', dealersRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/events', eventsRouter);
 // Aşağıdakiler '/api' altında birden çok yol tanımladığı için en sona konur.
 app.use('/api', feedRouter);
 app.use('/api', giftsRouter);
@@ -216,6 +219,7 @@ const bagTicker = startBagTicker();
 const avatarSweeper = startAvatarSweeper();
 const pkTicker = startPkTicker();
 const gameTicker = startGameTicker();
+const eventsTicker = startWeeklyEventsTicker();
 closeStaleMicSessions().catch((e) => console.error('Mikrofon oturumları temizlenemedi:', e.message));
 const janitor = startFirewallJanitor();
 // Bir günden eski işlem (idempotency) anahtarları saatte bir silinir.
@@ -237,6 +241,7 @@ async function shutdown(signal) {
   clearInterval(avatarSweeper);
   clearInterval(pkTicker);
   clearInterval(gameTicker);
+  clearInterval(eventsTicker);
   clearInterval(janitor);
   clearInterval(idemJanitor);
   const force = setTimeout(() => process.exit(1), 10000);
