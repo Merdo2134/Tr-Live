@@ -83,6 +83,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) _reload();
   }
 
+  /// Telefon bildirimi tercihleri (sunucuda saklanır; kapatılan tür hiç gönderilmez).
+  Future<void> _notifyPrefs() async {
+    final r = await guard(context, () => Api.get('/api/me/notify-prefs'));
+    if (r == null || !mounted) return;
+    final prefs = Map<String, dynamic>.from(mapOf(r['prefs']) ?? {});
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) {
+          Widget sw(String key, String title, String sub) => SwitchListTile(
+                title: Text(title),
+                subtitle: Text(sub, style: const TextStyle(fontSize: 12)),
+                value: prefs[key] != false,
+                onChanged: (v) async {
+                  setS(() => prefs[key] = v);
+                  try {
+                    await Api.put('/api/me/notify-prefs', {key: v});
+                  } catch (e) {
+                    setS(() => prefs[key] = !v);
+                    if (c.mounted) toast(c, errorText(e), error: true);
+                  }
+                },
+              );
+          return SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Padding(padding: EdgeInsets.only(bottom: 4), child: Text('Bildirimler', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800))),
+              sw('friend', 'Arkadaşlık', 'Arkadaşlık isteği geldiğinde ve kabul edildiğinde'),
+              sw('follow', 'Yeni takipçi', 'Biri seni takip etmeye başladığında'),
+              sw('room', 'Arkadaşım oda açınca', 'Arkadaşın oda açtığında (aynı kişiden 30 dakikada bir)'),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 4, 16, 16),
+                child: Text('Uygulama açıkken ya da arka planda çalışırken bildirim hemen gelir; tamamen kapalıysa uygulamayı açınca gösterilir.',
+                    style: TextStyle(color: Pal.textDim, fontSize: 12)),
+              ),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _openSettings(Map<String, dynamic> p, bool isDealer) async {
     await Navigator.push(
       context,
@@ -93,6 +135,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             body: ListView(children: [
               ListTile(leading: const Icon(Icons.edit), title: const Text('Profili düzenle'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const EditProfileScreen())),
               ListTile(leading: const Icon(Icons.block), title: const Text('Engellenen kullanıcılar'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const BlockedUsersScreen())),
+              ListTile(leading: const Icon(Icons.notifications_active_outlined), title: const Text('Bildirimler'), subtitle: const Text('Arkadaşlık isteği, yeni takipçi, arkadaşın oda açması'), trailing: const Icon(Icons.chevron_right), onTap: _notifyPrefs),
               ListTile(leading: const Icon(Icons.receipt_long), title: const Text('Cüzdan ve Elmas Bozdurma'), trailing: const Icon(Icons.chevron_right), onTap: () => _open(const WalletScreen())),
               SwitchListTile(
                 secondary: const Icon(Icons.visibility_off),
@@ -103,6 +146,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   final r = await guard(context, () => Api.patch('/api/me', {'isHidden': v}));
                   if (r == null || !context.mounted) return; // sunucu reddettiyse anahtar eski hâlinde kalsın
                   p['isHidden'] = v;
+                  final me = mapOf(r['user']);
+                  if (me != null) Session.me.value = me;
+                  toast(context, v ? 'Gizli kullanıcı açık: odalarda ve listelerde herkese (sana da) "Gizli Kullanıcı" görünürsün.' : 'Gizli kullanıcı kapandı.');
                   setLocal(() {});
                 },
               ),
@@ -117,6 +163,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     final r = await guard(context, () => Api.patch('/api/me', {'ghostMode': v}));
                     if (r == null || !context.mounted) return;
                     p['ghostMode'] = v;
+                    final me = mapOf(r['user']);
+                    if (me != null) Session.me.value = me;
+                    toast(context, v
+                        ? (me?['ghostActive'] == true ? '👻 Hayalet mod açık: odalarda görünmezsin (mikrofona çıkınca görünürsün).' : 'Hayalet mod yalnızca SWIP üyeliği sürerken çalışır.')
+                        : 'Hayalet mod kapandı.');
                     setLocal(() {});
                   },
                 ),

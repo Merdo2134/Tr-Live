@@ -32,7 +32,10 @@ const wipItem = (row, type) => row.wip_items?.[type] ?? (row.wip_hidden?.[type] 
 
 export function publicUser(row, viewerId = null) {
   if (!row) return null;
-  const hidden = Boolean(row.is_hidden) && row.id !== viewerId;
+  // Gizli kullanıcı herkese — kendisine de — "Gizli Kullanıcı" görünür (odada, sohbette, listelerde tutarlı olsun;
+  // kişi gizli modda olduğunu kendi koltuğundan da görür). Profil düzenleme kendi profil sayfasından yapılır.
+  void viewerId;
+  const hidden = Boolean(row.is_hidden);
   if (hidden) {
     return {
       id: row.id, publicId: null, username: HIDDEN_NAME, displayName: HIDDEN_NAME, avatarUrl: null,

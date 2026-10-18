@@ -8,6 +8,7 @@ import { loadPublicRows } from '../services/users.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 import { featuresFor } from '../services/wip.js';
 import { isGhost } from '../services/presence.js';
+import { notifyUser } from '../services/notify.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -66,8 +67,8 @@ router.get('/:userId', async (req, res) => {
   const profile = await loadProfile(req.user.id, targetId);
   if (!profile) throw fail('Kullanıcı bulunamadı.', 404);
   // "Gizli ziyaret" (WIP ayrıcalığı) olan kişi ziyaretçi listesine düşmez.
-  if (targetId !== req.user.id && !profile.isHidden && !(await featuresFor(req.user.id)).invisibleVisit && !(await isGhost(req.user.id))) {
-    // Ziyaret kaydı; gizli kullanıcı ziyaretçi listesinde "Gizli Kullanıcı" görünür.
+  // Gizli kullanıcı, hayalet mod ve "gizli ziyaret" ziyaretçi listesine hiç düşmez.
+  if (targetId !== req.user.id && !profile.isHidden && !req.user.is_hidden && !(await featuresFor(req.user.id)).invisibleVisit && !(await isGhost(req.user.id))) {
     await query(
       `INSERT INTO profile_visitors(profile_user_id, visitor_id) VALUES($1,$2)
        ON CONFLICT (profile_user_id, visitor_id) DO UPDATE SET visit_count = profile_visitors.visit_count + 1, last_visited_at = NOW()`,
@@ -85,8 +86,12 @@ router.post('/:userId/follow', userLimit('follow', 60, 3600e3), async (req, res)
   if (t.is_hidden) throw fail('Gizli kullanıcı takip edilemez.', 403);
   const blocked = await query(`SELECT 1 FROM user_blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)`, [req.user.id, targetId]);
   if (blocked.rowCount) throw fail('Bu kullanıcıyı takip edemezsiniz.', 403);
-  await query(`INSERT INTO follows(follower_id, followed_id) VALUES($1,$2) ON CONFLICT (follower_id, followed_id) DO NOTHING`, [req.user.id, targetId]);
+  const ins = await query(`INSERT INTO follows(follower_id, followed_id) VALUES($1,$2) ON CONFLICT (follower_id, followed_id) DO NOTHING RETURNING follower_id`, [req.user.id, targetId]);
   res.json({ ok: true, isFollowing: true });
+  // Yeni takipte bildirim (gizli kullanıcı kimliği açığa çıkmasın diye bildirilmez).
+  if (ins.rowCount && !req.user.is_hidden) {
+    notifyUser(targetId, 'follow', '➕ Yeni takipçi', `${req.user.display_name || req.user.username} seni takip etmeye başladı.`, { userId: req.user.id });
+  }
 });
 
 router.delete('/:userId/follow', async (req, res) => {

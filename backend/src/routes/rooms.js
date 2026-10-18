@@ -22,6 +22,7 @@ import express from 'express';
 import { saveUpload, removeUpload, IMAGE_TYPES } from '../services/images.js';
 import { newRoomNumber } from '../services/ids.js';
 import { isGhost } from '../services/presence.js';
+import { notifyFriendsRoomOpen } from '../services/notify.js';
 
 export const router = Router();
 
@@ -211,6 +212,10 @@ router.post('/', requireAuth, userLimit('room_create', 20, 3600e3), async (req, 
   }
   const { room, created } = await openFromProfile(userId, profile, b.hidden === true);
   res.status(created ? 201 : 200).json({ room: roomJson(room, { showCode: true }), created });
+  // Yeni açılan (gizli olmayan) odada arkadaşlara bildirim. Gizli kullanıcı / hayalet modda gönderilmez.
+  if (created && !room.is_hidden && !req.user.is_hidden && !(await isGhost(userId).catch(() => true))) {
+    notifyFriendsRoomOpen(req.user, room);
+  }
 });
 
 // Oda yöneticileri (oda kapalıyken de kalıcı). Oda sahibi ilk sırada.

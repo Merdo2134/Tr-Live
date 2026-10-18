@@ -108,6 +108,8 @@ export async function loadProfile(viewerId, targetId) {
     giftLevel: u.gift_level,
     createdAt: u.created_at,
     isHidden: Boolean(u.is_hidden),
+    // Hayalet mod şu an gerçekten etkin mi (tercih açık + SWIP üyeliği sürüyor). Yalnızca kişinin kendisine.
+    ...(isSelf ? { ghostActive: u.ghost === true } : {}),
     followers: counts.rows[0].followers,
     following: counts.rows[0].following,
     isFollowing: following.rowCount > 0,

@@ -2946,6 +2946,15 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         const SizedBox(width: 3),
         Text(fmtNumber(total.toString()), style: TextStyle(fontSize: fs, fontWeight: FontWeight.w700, height: 1.0)),
       ])),
+      // Hayalet mod etkinken kendime görünen işaret (mikrofona çıkınca herkes görür, işaret kalkar).
+      if (Session.me.value?['ghostActive'] == true && !_onSeat) ...[
+        const SizedBox(width: 6),
+        chip(
+          Text('👻 Hayalet', style: TextStyle(fontSize: fs, fontWeight: FontWeight.w800, color: const Color(0xFFC9B8FF), height: 1.0)),
+          color: const Color(0xFF2A1A4A),
+          onTap: () => toast(context, 'Hayalet moddasın: odadakiler seni görmüyor. Mikrofona çıkarsan görünürsün.'),
+        ),
+      ],
       if (!isOwnerHere) ...[
         const SizedBox(width: 6),
         chip(

@@ -98,6 +98,36 @@ router.patch('/', async (req, res) => {
   announceUserChange(req.user.id);
 });
 
+// ---- Kişiye özel bildirimler (arkadaşlık isteği, takipçi, arkadaş oda açtı) ----
+// Uygulama kapalıyken gelenler: telefon açılınca son gösterilen numaradan sonrakiler alınır (en fazla 20).
+router.get('/notifications/pending', async (req, res) => {
+  const after = /^\d{1,18}$/.test(String(req.query.after ?? '')) ? String(req.query.after) : '0';
+  const last = (await query(`SELECT COALESCE(MAX(id), 0)::text AS id FROM user_notifications WHERE user_id = $1`, [req.user.id])).rows[0].id;
+  const r = await query(
+    `SELECT id::text, kind, title, body, data FROM user_notifications
+     WHERE user_id = $1 AND id > $2::bigint AND created_at > NOW() - INTERVAL '3 days' ORDER BY id DESC LIMIT 20`,
+    [req.user.id, after],
+  );
+  res.json({ lastId: last, notifications: r.rows.reverse() });
+});
+
+const NOTIFY_PREF_KEYS = ['friend', 'follow', 'room'];
+router.get('/notify-prefs', async (req, res) => {
+  const p = req.user.notify_prefs ?? {};
+  res.json({ prefs: Object.fromEntries(NOTIFY_PREF_KEYS.map((k) => [k, p[k] !== false])) });
+});
+router.put('/notify-prefs', async (req, res) => {
+  const b = req.body ?? {};
+  const next = { ...(req.user.notify_prefs ?? {}) };
+  for (const k of NOTIFY_PREF_KEYS) {
+    if (b[k] === undefined) continue;
+    if (typeof b[k] !== 'boolean') throw fail('Bildirim ayarı true/false olmalı.');
+    next[k] = b[k];
+  }
+  await query(`UPDATE users SET notify_prefs = $2 WHERE id = $1`, [req.user.id, JSON.stringify(next)]);
+  res.json({ prefs: Object.fromEntries(NOTIFY_PREF_KEYS.map((k) => [k, next[k] !== false])) });
+});
+
 // ---- Görsel yükleme: ham bayt (image/png|jpeg|webp), en fazla 3 MB; WIP 5 için hareketli gif/webp, en fazla 5 MB ----
 // Tüm görseller veritabanında saklanır (media_files): sunucu yeniden dağıtılsa da kaybolmaz.
 function imageUpload(column, allowAnimated = false) {

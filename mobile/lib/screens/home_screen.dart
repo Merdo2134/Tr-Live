@@ -8,6 +8,7 @@ import '../widgets/room_card.dart';
 import '../services/api.dart';
 import '../widgets/drag_bubble.dart';
 import '../services/inbox_service.dart';
+import '../services/push_service.dart';
 import '../services/room_dock.dart';
 import '../services/socket_service.dart';
 import '../widgets/common.dart';
@@ -39,6 +40,17 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     Inbox.start();
     // CP sistemi: biri seni Arkadaş / CP olarak seçince kısa bildirim (yanıt: Mesajlar → Arkadaşlık isteği ya da profil kartı).
+    // Telefon bildirimine dokununca: arkadaş oda açtı → odaya gir; istek / takip → kişinin profili.
+    PushService.onOpen = (kind, data) {
+      if (!mounted) return;
+      final roomId = data['roomId']?.toString();
+      final userId = data['userId']?.toString();
+      if (kind == 'room_open' && roomId != null) {
+        RoomDock.open(RoomRequest(roomId: roomId, name: (data['roomName'] ?? 'Oda').toString()));
+      } else if (userId != null) {
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => UserProfileScreen(userId: userId)));
+      }
+    };
     _cpSub = SocketService.instance.events.listen((e) {
       if (!mounted) return;
       if (e['type'] == 'agency_invite') {

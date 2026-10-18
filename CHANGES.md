@@ -1,3 +1,18 @@
+## v2.51.1 — Gizli kullanıcı ve hayalet mod tutarlılığı
+- **Gizli kullanıcı:** açıkken kişi odada, sohbette ve listelerde kendini de "Gizli Kullanıcı" olarak görür
+  (başkalarının gördüğüyle aynı). Başkasının profiline girince **ziyaretçi listesine düşmez**.
+- **Hayalet mod (SWIP):** açıkken oda başlığında kendine "👻 Hayalet" işareti çıkar (mikrofona çıkınca kalkar,
+  çünkü mikrofondaki herkes görünür). Açarken mod gerçekten etkinse ya da SWIP üyeliği yoksa uyarı verilir.
+- Profil sayfası artık hayalet modun gerçekten etkin olup olmadığını (ghostActive) bildirir.
+
+## v2.51.0 — Otomatik bildirimler: arkadaşlık, takip, arkadaş oda açtı
+- **Arkadaşlık isteği** gelince ve isteğin **kabul edilince**, biri **seni takip edince**, **arkadaşın oda açınca**
+  telefona bildirim düşer (aynı arkadaştan oda bildirimi 30 dakikada en fazla bir kez).
+- Bildirime dokununca: oda bildirimi → doğrudan odaya girer; istek / takip → kişinin profili açılır.
+- Uygulama açıkken ya da arka planda çalışırken anında; tamamen kapalıysa uygulama açılınca gösterilir (son 3 gün).
+- **Profil → Ayarlar → Bildirimler:** üç tür ayrı ayrı kapatılabilir. Gizli kullanıcı / hayalet modda bildirim gitmez.
+- Yeni migration: `039_user_notifications.sql` (30 günden eski bildirimler otomatik silinir).
+
 ## v2.50.2 — Global hediye şeridi
 - Global şerit artık bir kez görünür (gönderende iki kez çıkıyordu): her duyuruya kimlik verildi, aynı duyuru
   tekrar gelirse uygulama göstermez.
