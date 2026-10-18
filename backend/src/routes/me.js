@@ -9,6 +9,7 @@ import { activeWip, requireFeature } from '../services/wip.js';
 import { isAnimatedImage, mimeFor } from '../services/media.js';
 import { detectImage, storeImage, removeUpload, removeAnimatedAvatar, forgetMedia, IMAGE_TYPES } from '../services/images.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
+import { announceUserChange } from '../services/users.js';
 import { cleanPublic } from '../safe_text.js';
 import { hub } from '../realtime.js';
 import { userLimit } from '../firewall.js';
@@ -94,6 +95,7 @@ router.patch('/', async (req, res) => {
     if (b.showPresence !== undefined || b.isHidden !== undefined || b.ghostMode !== undefined) await refreshGhost(req.user.id, wasGhost);
   }
   res.json({ user: await loadProfile(req.user.id, req.user.id) });
+  announceUserChange(req.user.id);
 });
 
 // ---- Görsel yükleme: ham bayt (image/png|jpeg|webp), en fazla 3 MB; WIP 5 için hareketli gif/webp, en fazla 5 MB ----
@@ -122,7 +124,9 @@ function imageUpload(column, allowAnimated = false) {
       );
       // Eski hareketli fotoğraf veritabanında birikmesin (yalnızca bu kullanıcının yüklediği kayıt silinir).
       if (old?.avatar_animated) await removeAnimatedAvatar(old.url, req.user.id);
-      return res.json({ url, animated: true });
+      res.json({ url, animated: true });
+      announceUserChange(req.user.id);
+      return;
     }
     const kind = detectImage(buf);
     if (!kind || kind !== req.headers['content-type']?.split(';')[0]) throw fail('Görsel biçimi geçersiz.');
@@ -137,6 +141,7 @@ function imageUpload(column, allowAnimated = false) {
     }
     await removeUpload(old?.url, req.user.id);
     res.json({ url, animated: false });
+    if (column === 'avatar_url') announceUserChange(req.user.id);
   }];
 }
 

@@ -8,6 +8,8 @@ import { validateAgencyConfig } from '../agency_config.js';
 import { loadConfig, configJson, closePeriod, hostStatementJson, agencyStatementJson } from '../services/payouts.js';
 import { parsePeriodKey, previousPeriod } from '../settlement.js';
 import { ensureAgencyCode } from './agencies.js';
+import { equipIfNone, announceUserChange } from '../services/users.js';
+import { cleanPublic } from '../safe_text.js';
 import { WIP_MIN_LEVEL, WIP_MAX_LEVEL } from '../levels.js';
 import { wipLabel } from '../services/wip.js';
 import { dealerSell } from '../services/dealers.js';
@@ -412,11 +414,64 @@ router.post('/users/:userId/grant', requireSuperAdmin, async (req, res) => {
      VALUES($1,$2,$3,$4, CASE WHEN $5::int IS NULL THEN NULL ELSE NOW() + ($5::int * INTERVAL '1 day') END, $6) RETURNING id`,
     [userId, category, key, name, days, JSON.stringify({ assetUrl: asset, grantedBy: req.user.id })],
   );
+  await equipIfNone(query, userId, category, r.rows[0].id);
   await query(
     `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, reference_id, metadata) VALUES($1,$2,'admin_inventory_grant','inventory',$3,$4)`,
     [req.user.id, userId, r.rows[0].id, JSON.stringify({ category, key, days })],
   );
   res.status(201).json({ id: r.rows[0].id, name });
+  announceUserChange(userId);
+});
+
+// Test örnekleri: her görünüm türünden birer örnek ürün (mağazada satılmaz) oluşturur ve yöneticinin kendisine
+// 30 günlüğüne verip takar. Odaya girince araç, sohbette balon, mikrofonda dalga, profil/oda kartı denenebilir.
+const SAMPLE_ITEMS = [
+  ['vehicle', 'Örnek Araç', 'vehicle.png'],
+  ['chat_bubble', 'Örnek Sohbet Balonu', 'chat_bubble.png'],
+  ['mic_wave', 'Örnek Mikrofon Dalgası', 'mic_wave.png'],
+  ['frame', 'Örnek Çerçeve', 'frame.png'],
+  ['mini_card', 'Örnek Profil Kartı', 'profile_card.png'],
+  ['room_card', 'Örnek Oda Kartı', 'room_card.png'],
+];
+const SAMPLE_DIR = new URL('../samples/', import.meta.url);
+router.post('/store/samples', requireSuperAdmin, async (req, res) => {
+  const made = [];
+  for (const [category, name, file] of SAMPLE_ITEMS) {
+    let item = (await query(`SELECT * FROM store_items WHERE category = $1 AND name = $2 AND is_active = TRUE LIMIT 1`, [category, name])).rows[0];
+    if (!item) {
+      const buf = fs.readFileSync(new URL(file, SAMPLE_DIR));
+      const m = await query(
+        `INSERT INTO media_files(kind, mime, ext, size_bytes, data, meta, created_by) VALUES('png','image/png','png',$1,$2,$3,$4) RETURNING id`,
+        [buf.length, buf, JSON.stringify({ purpose: 'store_sample' }), req.user.id],
+      );
+      const url = `/media/${m.rows[0].id}.png`;
+      const refId = category === 'frame' ? (await query(`INSERT INTO frames(name, image_url) VALUES($1,$2) RETURNING id`, [name, url])).rows[0].id : null;
+      item = (await query(
+        `INSERT INTO store_items(category, name, image_url, ref_id, price_coins, duration_days, for_sale) VALUES($1,$2,$3,$4,0,30,FALSE) RETURNING *`,
+        [category, name, url, refId],
+      )).rows[0];
+    }
+    const key = category === 'frame' && item.ref_id ? String(item.ref_id) : String(item.id);
+    await tx(async (c) => {
+      // Aynı türdeki diğer öğeler çıkarılır, örnek takılır (deneme için).
+      await c.query(`UPDATE inventory_items SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"equipped": false}'::jsonb WHERE user_id = $1 AND item_type = $2`, [req.user.id, category]);
+      const ex = (await c.query(
+        `SELECT id FROM inventory_items WHERE user_id = $1 AND item_type = $2 AND item_key = $3 AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`,
+        [req.user.id, category, key],
+      )).rows[0];
+      if (ex) {
+        await c.query(`UPDATE inventory_items SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"equipped": true}'::jsonb WHERE id = $1`, [ex.id]);
+      } else {
+        await c.query(
+          `INSERT INTO inventory_items(user_id, item_type, item_key, item_name, expires_at, metadata) VALUES($1,$2,$3,$4, NOW() + INTERVAL '30 days', $5)`,
+          [req.user.id, category, key, name, JSON.stringify({ assetUrl: item.image_url, storeItemId: item.id, grantedBy: req.user.id, equipped: true })],
+        );
+      }
+    });
+    made.push(name);
+  }
+  res.status(201).json({ ok: true, items: made });
+  announceUserChange(req.user.id);
 });
 
 router.post('/media', requireSuperAdmin, express.raw({ type: () => true, limit: MEDIA_MAX_BYTES }), async (req, res) => {
@@ -459,9 +514,9 @@ router.post('/entrance-effects', requireSuperAdmin, async (req, res) => {
     req.body?.durationMs === undefined ? 4000 : positiveInt(req.body.durationMs, 'Süre', 20000)]);
   res.status(201).json({ id: r.rows[0].id });
 });
-const STORE_CATS = ['frame', 'chat_bubble', 'entrance_effect', 'mini_card', 'mic_wave', 'vehicle', 'badge'];
+const STORE_CATS = ['frame', 'chat_bubble', 'entrance_effect', 'mini_card', 'mic_wave', 'vehicle', 'badge', 'room_card'];
 // Yönetimden ayrı ayrı verilebilen WIP öğeleri (kategori → ad eki).
-const WIP_GRANT_KIND = { frame: 'çerçevesi', chat_bubble: 'sohbet balonu', badge: 'rozeti', entrance_effect: 'giriş efekti' };
+const WIP_GRANT_KIND = { frame: 'çerçevesi', chat_bubble: 'sohbet balonu', badge: 'rozeti', entrance_effect: 'giriş efekti', vehicle: 'aracı' };
 router.get('/store/items', requireSuperAdmin, async (_req, res) => {
   const r = await query(`SELECT * FROM store_items ORDER BY is_active DESC, category, sort_order, created_at DESC LIMIT 500`);
   res.json({ items: r.rows.map((x) => ({ id: x.id, category: x.category, name: x.name, imageUrl: x.image_url, priceCoins: String(x.price_coins), durationDays: x.duration_days, isActive: x.is_active, forSale: x.for_sale })) });
@@ -587,6 +642,38 @@ router.get('/agencies', async (req, res) => {
     id: a.id, name: a.name, ownerId: a.owner_id, ownerUsername: a.owner_username, status: a.status,
     commissionBps: a.commission_bps, overrideBps: a.commission_override_bps, agencyCode: a.agency_code, broadcasterCount: a.broadcaster_count, createdAt: a.created_at,
   })) });
+});
+
+// Yönetici bir kullanıcıyı (ID / kullanıcı adı ile seçilir) ajans sahibi yapar; ajans doğrudan aktif açılır.
+router.post('/agencies', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.body?.userId, 'Kullanıcı');
+  const name = cleanPublic(text(req.body?.name, 'Ajans adı', { min: 3, max: 60, required: true }), 'Ajans adı');
+  const description = text(req.body?.description, 'Açıklama', { max: 500 });
+  let agency;
+  try {
+    agency = await tx(async (c) => {
+      const u = (await c.query(`SELECT id, account_status FROM users WHERE id = $1 FOR UPDATE`, [userId])).rows[0];
+      if (!u || u.account_status !== 'active') throw fail('Kullanıcı bulunamadı veya hesabı aktif değil.', 404);
+      if ((await c.query(`SELECT 1 FROM agencies WHERE owner_id = $1 AND status <> 'rejected'`, [userId])).rowCount) {
+        throw fail('Bu kullanıcının zaten bir ajansı var.', 409);
+      }
+      const row = (await c.query(
+        `INSERT INTO agencies(name, owner_id, description, status, approved_by, approved_at) VALUES($1,$2,$3,'active',$4,NOW()) RETURNING *`,
+        [name, userId, description, req.user.id],
+      )).rows[0];
+      await c.query(
+        `INSERT INTO financial_audit_logs(admin_id, user_id, action, reference_type, reference_id, metadata) VALUES($1,$2,'agency_create','agency',$3,$4)`,
+        [req.user.id, userId, row.id, JSON.stringify({ name })],
+      );
+      return row;
+    });
+  } catch (error) {
+    if (error.code === '23505') throw fail(error.constraint === 'idx_agencies_owner' ? 'Bu kullanıcının zaten bir ajansı var.' : 'Bu ajans adı kullanılıyor.', 409);
+    throw error;
+  }
+  const code = await ensureAgencyCode(agency.id);
+  hub.sendToUser(userId, { type: 'agency_created', agency: { id: agency.id, name: agency.name } });
+  res.status(201).json({ agency: { id: agency.id, name: agency.name, status: agency.status, agencyCode: code } });
 });
 
 // Komisyon para etkisi taşıdığı için yalnızca yönetici.

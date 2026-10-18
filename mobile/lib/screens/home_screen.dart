@@ -46,6 +46,11 @@ class _HomeScreenState extends State<HomeScreen> {
         toast(context, '$a seni yayıncı olarak davet etti (Mesajlar → Ajans daveti)');
         return;
       }
+      if (e['type'] == 'agency_created') {
+        final a = (mapOf(e['agency'])?['name'] ?? 'Ajans').toString();
+        toast(context, '"$a" ajansının sahibi oldun 🎉 (Profil → Ajans Merkezi)');
+        return;
+      }
       if (e['type'] != 'cp_request') return;
       final name = (mapOf(e['from'])?['displayName'] ?? 'Biri').toString();
       toast(context, '$name seni ${e['kind'] == 'cp' ? 'CP' : 'Arkadaş'} olarak seçti ❤ (Mesajlar → Arkadaşlık isteği)');

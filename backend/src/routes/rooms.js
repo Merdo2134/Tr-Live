@@ -352,11 +352,19 @@ router.post('/:roomId/join', requireAuth, userLimit('room_join', 40, 60e3), asyn
     `INSERT INTO room_members(room_id, user_id, role) VALUES($1,$2,$3) ON CONFLICT (room_id, user_id) DO NOTHING RETURNING user_id`,
     [roomId, userId, room.owner_id === userId ? 'owner' : (staffRole ?? 'user')],
   );
+  // Giren kişi kendi aracını da görsün: duyuru, uygulama odaya abone olmadan önce gittiği için yanıtla da döner.
+  let myEntrance = null;
   if (ins.rowCount && !(await isGhost(userId))) {
     const row = await loadPublicRow(userId);
     // Gizli kullanıcı odaya giriş efektiyle duyurulmaz. Hayalet (SWIP) kullanıcı hiç duyurulmaz.
     const effect = row.is_hidden ? null : await activeEntranceEffect(userId);
     hub.broadcastRoom(roomId, { type: 'room_member_joined', roomId, user: publicUser(row, null), entranceEffect: effect });
+    if (effect) myEntrance = { user: publicUser(row, userId), effect };
+  } else if (!(await isGhost(userId))) {
+    // Zaten üyeydi (ör. uygulama kapanıp açıldı): başkalarına tekrar duyurulmaz ama kişi kendi aracını görür.
+    const row = await loadPublicRow(userId);
+    const effect = row && !row.is_hidden ? await activeEntranceEffect(userId) : null;
+    if (effect) myEntrance = { user: publicUser(row, userId), effect };
   }
   if (room.owner_id !== userId && !room.is_hidden) {
     await query(
@@ -375,6 +383,7 @@ router.post('/:roomId/join', requireAuth, userLimit('room_join', 40, 60e3), asyn
     room: { ...roomJson(room, { showCode: ['owner', 'cohost'].includes(me.role) }), totalDiamonds: await roomDiamonds(room) },
     me: { role: me.role, microphone: me.microphone, seatIndex: me.seat_index },
     joined: ins.rowCount > 0,
+    entrance: myEntrance,
   });
 });
 
@@ -813,7 +822,8 @@ router.post('/:roomId/members/:userId/role', requireAuth, userLimit('moderate', 
   const { actor, target } = await moderationContext(roomId, req.user.id, targetId);
   if (!target) throw fail('Kullanıcı odada değil.', 404);
   if (!canManage(actor.role, target.role, 'role', role)) throw fail('Bu işlem için yetkiniz yok.', 403);
-  await assertStaffShield(req.user, targetId);
+  // Rol vermek/almak bir yaptırım değil: yönetim hesabı ve yardımcı adminler de oda yöneticisi yapılabilir.
+  // (Atma, susturma, mikrofondan indirme gibi komutlarda dokunulmazlık aynen sürer.)
   await query(`UPDATE room_members SET role = $3 WHERE room_id = $1 AND user_id = $2`, [roomId, targetId, role]);
   // Yöneticiler oda kapanıp yeniden açılsa da korunur.
   const roomRow = await activeRoom(roomId);

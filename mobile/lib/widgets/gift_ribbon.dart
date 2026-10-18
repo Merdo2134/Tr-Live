@@ -7,6 +7,7 @@ import '../services/session.dart';
 import '../services/socket_service.dart';
 import 'anim_asset.dart';
 import 'common.dart';
+import 'wip_items.dart';
 
 /// Hediye şeridi ve giriş efektleri için üst katman.
 /// [roomId] verilirse o odanın hediyeleri ve girişleri, verilmezse yalnızca global şeritler gösterilir.
@@ -69,7 +70,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       if (!_mergeCombo(e)) _enqueue(e);
     } else if (type == 'lucky_bag_claimed' && widget.roomId != null && e['roomId'] == widget.roomId && e['user'] != null) {
       _enqueue(e); // çantadan kim ne kadar aldı: odanın ortasından geçen kısa şerit
-    } else if (type == 'room_member_joined' && widget.roomId != null && e['roomId'] == widget.roomId) {
+    } else if ((type == 'room_member_joined' || type == 'local_entrance') && widget.roomId != null && e['roomId'] == widget.roomId) {
       final effect = mapOf(e['entranceEffect']);
       if (effect != null) _showEntrance(e, effect);
     }
@@ -546,16 +547,21 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     final user = mapOf(_entrance!['user']);
     final effect = mapOf(_entrance!['effect']) ?? {};
     final url = Api.absoluteUrl(effect['animationUrl'] as String?);
-    final vehicle = effect['kind'] == 'vehicle';
+    final wipVehicle = effect['kind'] == 'wip_vehicle';
+    final wipLevel = wipVehicle ? wipLevelOf(effect['level']) : null;
+    final vehicle = effect['kind'] == 'vehicle' || wipVehicle;
     final ext = url == null ? '' : AnimAsset.extOf(url);
     final still = const {'png', 'jpg', 'jpeg', 'webp'}.contains(ext);
     final ms = ((effect['durationMs'] as num?)?.toInt() ?? 4000).clamp(1000, 10000);
     final name = (user?['displayName'] ?? 'Biri').toString();
-    final itemName = (effect['itemName'] ?? '').toString();
+    final itemName = wipVehicle ? (WipStyle.of(wipLevel)?.vehicleName ?? '') : (effect['itemName'] ?? '').toString();
     return Positioned.fill(
       child: IgnorePointer(
         child: Stack(alignment: Alignment.center, children: [
-          if (url != null && vehicle && still)
+          // WIP aracı: kodla çizilir (dosya gerekmez).
+          if (wipVehicle && wipLevel != null)
+            WipVehicleDrive(key: ValueKey('wipveh-${_entrance!['seq']}'), level: wipLevel, durationMs: ms)
+          else if (url != null && vehicle && still)
             _VehicleDrive(key: ValueKey('veh-${_entrance!['seq']}'), url: url, durationMs: ms)
           else if (url != null)
             AnimAsset(key: ValueKey('ent-${_entrance!['seq']}'), url: url, cache: false),

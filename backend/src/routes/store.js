@@ -5,11 +5,12 @@ import { userLimit } from '../firewall.js';
 import { fail, uuid } from '../http.js';
 import { hub } from '../realtime.js';
 import { idempotent } from '../idempotency.js';
+import { equipIfNone, announceUserChange } from '../services/users.js';
 
 export const router = Router();
 router.use(requireAuth);
 
-export const STORE_CATEGORIES = ['frame', 'chat_bubble', 'entrance_effect', 'mini_card', 'mic_wave', 'vehicle'];
+export const STORE_CATEGORIES = ['frame', 'chat_bubble', 'entrance_effect', 'mini_card', 'mic_wave', 'vehicle', 'room_card'];
 
 const view = (x) => ({
   id: x.id, category: x.category, name: x.name, imageUrl: x.image_url, priceCoins: String(x.price_coins), durationDays: x.duration_days,
@@ -62,11 +63,12 @@ router.post('/buy', userLimit('store_buy', 30, 3600e3), idempotent('store_buy'),
     if (existing) {
       await c.query(`UPDATE inventory_items SET expires_at = expires_at + ($2::int * INTERVAL '1 day') WHERE id = $1`, [existing.id, item.duration_days]);
     } else {
-      await c.query(
+      const ins = await c.query(
         `INSERT INTO inventory_items(user_id, item_type, item_key, item_name, expires_at, metadata)
-         VALUES($1,$2,$3,$4, NOW() + ($5::int * INTERVAL '1 day'), $6)`,
+         VALUES($1,$2,$3,$4, NOW() + ($5::int * INTERVAL '1 day'), $6) RETURNING id`,
         [toUserId, item.category, key, item.name, item.duration_days, JSON.stringify({ assetUrl: item.image_url, storeItemId: item.id, fromUserId: req.user.id })],
       );
+      await equipIfNone((q, p) => c.query(q, p), toUserId, item.category, ins.rows[0].id);
     }
     await c.query(
       `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'store_purchase',$2,$3,$4)`,
@@ -81,4 +83,5 @@ router.post('/buy', userLimit('store_buy', 30, 3600e3), idempotent('store_buy'),
   });
   if (toUserId !== req.user.id) hub.sendToUser(toUserId, { type: 'friend_update' });
   res.json({ ok: true, balance: result.balance, gifted: toUserId !== req.user.id });
+  announceUserChange(toUserId);
 });

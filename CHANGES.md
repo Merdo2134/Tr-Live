@@ -1,3 +1,40 @@
+## v2.47.0 — WIP öğeleri Görünüm'de, WIP araçları oynuyor
+- **Görünüm sayfası:** WIP üyeliğinin verdiği araç, çerçeve, sohbet balonu, giriş efekti ve rozet ("WIP üyeliği"
+  etiketiyle) ilgili sekmelerde listelenir; her biri ayrı ayrı **Kaldır / Etkinleştir** yapılabilir. Kaldırılan öğe
+  odada, sohbette ve profilde görünmez. Yeni **Rozet** sekmesi. WIP öğeleri kodla çizilen önizlemeyle gösterilir.
+- **WIP araçları** (Scooter → Hayalet UFO) artık odaya girişte oynar: araç renkli iz bırakarak geçer, altında kademe
+  ve araç adı. Yönetim → Öğe ver → Araç sekmesinden WIP araçları ayrıca da verilebilir.
+- Sıra: takılı mağaza aracı → WIP aracı → takılı özel giriş efekti → diğerleri.
+- Yeni migration: `037_wip_hidden.sql`.
+
+## v2.46.0 — Mağaza görünümleri çalışıyor, anında güncelleme, test örnekleri
+- **Giriş aracı:** odaya giren kişi kendi aracını/giriş efektini de görür (önceden yalnızca diğerleri görüyordu;
+  uygulama odaya bağlanmadan duyuru gittiği için kişiye hiç oynamıyordu). Uygulama kapanıp aynı odaya dönünce de oynar.
+- **Sohbet balonu:** takılı mağaza balonu, odadaki mesajların arka planı olur.
+- **Mikrofon dalgası:** konuşurken koltuktaki avatarın çevresinde nabız gibi oynar (yeşil halkanın yerine).
+- **Profil Kartı** (eski adı Mini Kart): odada birine dokununca açılan kartın arka planı olur.
+- **Oda Kartı** (yeni kategori): oda sahibinin takılı kartı, oda bilgisi kartının arka planı olur.
+- Satın alınan / yöneticinin verdiği öğe, o türden takılı bir şey yoksa kendiliğinden takılır.
+- **Anında değişim:** çerçeve, balon, mikrofon dalgası takıp çıkarınca ya da profil fotoğrafı değişince odadakiler
+  çıkıp girmeden yeni görünümü görür.
+- **Yönetim → Katalog → "Test örneklerini bana ekle ve tak":** araç, sohbet balonu, mikrofon dalgası, çerçeve,
+  profil kartı ve oda kartı örneklerini (mağazada satılmaz) yöneticiye 30 günlüğüne verir ve takar.
+- Yeni migration: `036_room_card.sql`.
+
+## v2.45.0 — Kullanıcı adıyla kayıt geri geldi, ajans/yayıncı davet usulü
+- **Giriş ekranı:** "Kullanıcı adı ile" düğmesi; kullanıcı adı + şifre ile hem giriş hem kayıt (görünen ad isteğe bağlı).
+  Google, Facebook ve telefon seçenekleri aynen duruyor.
+- **Ajans:** kullanıcılar artık kendileri ajans kuramaz. Yönetici, Yönetim → Ajans/Yayıncı → **"Ajans aç"** ile kişiyi
+  ID ya da kullanıcı adıyla seçip ajans adını yazar; ajans doğrudan aktif açılır, kişi ajans sahibi olur ve profilinde
+  **Ajans Merkezi** görünür.
+- **Yayıncı:** "Yayıncı ol" başvurusu, ajans koduyla ve listeden başvuru kaldırıldı. Ajans sahibi, Ajans paneli →
+  davet ile kişiyi **ID ya da kullanıcı adıyla** bulup davet eder; davet Mesajlar'a düşer, kabul edilince kişi onaylı
+  yayıncı olur ve **Yayıncı Merkezi** görünür.
+- Yayıncı olmayanlar Gelir Merkezi'nde **Canlı Kayıt** ve **Para Çekme**'yi görmez (Elmas Bozdurma herkese açık).
+- **Ajans sahipleri de yayıncı olabilir:** Ajans Merkezi → "Ajansımda yayıncı ol" (ya da başka bir ajansın davetini kabul ederek).
+- Yönetim hesabı ve yardımcı adminler de odada **Moderatör / Yardımcı sahip** yapılabilir (önceden "Yönetim hesabına
+  komut uygulanamaz" hatası veriyordu). Atma, susturma gibi komutlara karşı dokunulmazlıkları sürüyor.
+
 ## v2.44.1 — Oracle Cloud'a taşıma paketi
 - `deploy/oracle/`: tek sunucuda PostgreSQL + uygulama sunucusu + LiveKit + HTTPS (Caddy, sslip.io adresi) + yönetim
   paneli. Oracle'da sunucu açarken `cloud-init.sh` yapıştırılır, gerisi kendiliğinden kurulur (komut yok).

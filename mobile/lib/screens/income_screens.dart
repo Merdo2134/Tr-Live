@@ -33,13 +33,26 @@ class IncomeCenterScreen extends StatefulWidget {
 
 class _IncomeCenterScreenState extends State<IncomeCenterScreen> {
   int _version = 0;
+  // Canlı Kayıt ve Para Çekme yalnızca onaylı yayıncılara görünür.
+  final _host = ValueNotifier<bool>(false);
+
+  @override
+  void dispose() {
+    _host.dispose();
+    super.dispose();
+  }
 
   Future<Map<String, dynamic>> _load() async {
     final me = mapOf((await Api.get('/api/me'))['user']) ?? {};
     Session.me.value = me;
     final w = await Api.get('/api/me/wallet', query: {'limit': '60'});
     final recent = listOf(w['transactions']).where((t) => t['type'] == 'gift_received').take(8).toList();
-    return {'me': me, 'recent': recent};
+    var host = false;
+    try {
+      host = mapOf((await Api.get('/api/broadcaster/me'))['broadcaster'])?['status'] == 'approved';
+    } catch (_) {}
+    if (mounted) _host.value = host;
+    return {'me': me, 'recent': recent, 'host': host};
   }
 
   @override
@@ -48,13 +61,18 @@ class _IncomeCenterScreenState extends State<IncomeCenterScreen> {
       appBar: AppBar(
         title: const Text('Gelir Merkezi'),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00A8FF), shape: const StadiumBorder()),
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BroadcastSummaryScreen())),
-              child: const Text('Canlı Kayıt'),
-            ),
+          ValueListenableBuilder<bool>(
+            valueListenable: _host,
+            builder: (context, host, _) => !host
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00A8FF), shape: const StadiumBorder()),
+                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BroadcastSummaryScreen())),
+                      child: const Text('Canlı Kayıt'),
+                    ),
+                  ),
           ),
         ],
       ),
@@ -90,8 +108,10 @@ class _IncomeCenterScreenState extends State<IncomeCenterScreen> {
                     await WalletScreen.exchange(context, diamonds, () async => setState(() => _version++));
                   }),
                 ),
-                const SizedBox(width: 12),
-                Expanded(child: _bigBtn('Para Çekme', const [Color(0xFF05C150), Color(0xFF22E85F)], () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WithdrawScreen())))),
+                if (data['host'] == true) ...[
+                  const SizedBox(width: 12),
+                  Expanded(child: _bigBtn('Para Çekme', const [Color(0xFF05C150), Color(0xFF22E85F)], () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WithdrawScreen())))),
+                ],
               ]),
               const SizedBox(height: 20),
               Row(children: [
@@ -323,7 +343,7 @@ class WithdrawScreen extends StatelessWidget {
         builder: (context, d, reload) {
           final b = mapOf(d['broadcaster']);
           if (b == null || b['status'] != 'approved') {
-            return const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('Para çekme yalnızca onaylı yayıncılar içindir. Yayıncı Merkezi\'nden başvurabilirsin.\n\nElmaslarını Gelir Merkezi\'ndeki "Elmas Bozdurma" ile coin\'e çevirebilirsin.', textAlign: TextAlign.center, style: TextStyle(color: Pal.textDim, height: 1.4))));
+            return const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('Para çekme yalnızca onaylı yayıncılar içindir. Yayıncı olmak için bir ajansın seni davet etmesi gerekir.\n\nElmaslarını Gelir Merkezi\'ndeki "Elmas Bozdurma" ile coin\'e çevirebilirsin.', textAlign: TextAlign.center, style: TextStyle(color: Pal.textDim, height: 1.4))));
           }
           final p = mapOf(b['progress']) ?? {};
           final cur = (p['currency'] ?? 'USD').toString();

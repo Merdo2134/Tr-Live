@@ -6,7 +6,7 @@ import '../widgets/common.dart';
 const _statusText = {
   'pending': 'İnceleniyor',
   'approved': 'Onaylı',
-  'rejected': 'Reddedildi (tekrar başvurabilirsiniz)',
+  'rejected': 'Reddedildi',
   'suspended': 'Askıya alındı',
   'active': 'Aktif',
 };
@@ -21,7 +21,7 @@ String periodTitle(String key) {
 double _ratio(num value, num target) => target <= 0 ? 1 : (value / target).clamp(0, 1).toDouble();
 
 class AgencyScreen extends StatefulWidget {
-  /// 'broadcaster' → Yayıncı Merkezi (yayıncı başvurusu, ajansa katılma, maaş); 'agency' → Ajans Merkezi (yalnızca ajans sahibi).
+  /// 'broadcaster' → Yayıncı Merkezi (ajans daveti, maaş); 'agency' → Ajans Merkezi (yalnızca ajans sahibi).
   final String mode;
   const AgencyScreen({super.key, this.mode = 'broadcaster'});
 
@@ -52,52 +52,6 @@ class _AgencyScreenState extends State<AgencyScreen> {
     _reload();
   }
 
-  Future<void> _createAgency() async {
-    final name = await askText(context, 'Ajans adı');
-    if (name == null || !mounted) return;
-    final desc = await askText(context, 'Kısa açıklama (isteğe bağlı)');
-    if (!mounted) return;
-    await _act(null, () => Api.post('/api/agencies', {'name': name, if (desc != null) 'description': desc}), done: 'Ajans başvurunuz alındı; yönetici onayı bekleniyor.');
-  }
-
-  Future<void> _applyByCode() async {
-    final code = await askText(context, 'Ajans kodu (8 hane)', keyboard: TextInputType.number);
-    if (code == null || !mounted) return;
-    final info = await guard(context, () => Api.get('/api/agencies/by-code/${code.trim()}'));
-    if (info == null || !mounted) return;
-    final a = mapOf(info['agency']) ?? {};
-    if (!await confirm(context, '"${a['name']}" ajansına başvurulsun mu?', action: 'Başvur')) return;
-    if (!mounted) return;
-    await _act(null, () => Api.post('/api/agencies/apply-by-code', {'code': code.trim()}), done: 'Başvurunuz ajansa iletildi.');
-  }
-
-  Future<void> _browseAgencies() async {
-    final picked = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (c) => SizedBox(
-        height: MediaQuery.of(context).size.height * 0.7,
-        child: AsyncBody<List<Map<String, dynamic>>>(
-          load: () async => listOf((await Api.get('/api/agencies'))['agencies']),
-          builder: (c, list, reload) => list.isEmpty
-              ? const Center(child: Text('Aktif ajans yok.'))
-              : ListView(children: [
-                  for (final a in list)
-                    ListTile(
-                      leading: const Icon(Icons.business),
-                      title: Text(a['name'].toString()),
-                      subtitle: Text('${a['broadcasterCount'] ?? 0} yayıncı${(a['description'] ?? '').toString().isEmpty ? '' : '\n${a['description']}'}'),
-                      trailing: FilledButton.tonal(onPressed: () => Navigator.pop(c, a), child: const Text('Başvur')),
-                    ),
-                ]),
-        ),
-      ),
-    );
-    if (picked == null || !mounted) return;
-    await _act(null, () => Api.post('/api/agencies/${picked['id']}/apply'), done: 'Başvurunuz ajansa iletildi.');
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -111,52 +65,50 @@ class _AgencyScreenState extends State<AgencyScreen> {
           final requests = listOf(data['requests']);
           final agency = mapOf(b?['agency']);
           final bStatus = b?['status']?.toString();
-          final canBeBroadcaster = owned == null && (b == null || bStatus == 'rejected');
+          final isHost = bStatus == 'approved';
+          final ownerIsHost = owned != null && isHost && agency?['id'] == owned['id'];
           return RefreshIndicator(
             onRefresh: reload,
             child: ListView(padding: const EdgeInsets.all(12), children: widget.mode == 'agency'
               ? [
-                  if (owned != null) _ownerCard(owned) else ...[
-                    const Padding(padding: EdgeInsets.all(16), child: Text('Henüz bir ajansınız yok. Ajans kurmak için Yayıncı Merkezi\'ni kullanın.')),
-                  ],
+                  if (owned != null) ...[
+                    _ownerCard(owned),
+                    if (owned['status'] == 'active' && !ownerIsHost && bStatus != 'suspended')
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.podcasts, color: Colors.pinkAccent),
+                          title: const Text('Ajansımda yayıncı ol'),
+                          subtitle: Text(agency != null ? 'Şu an "${agency['name']}" ajansına bağlısınız; önce oradan ayrılmalısınız.' : 'Kendi ajansınızda yayıncı olarak maaş ve canlı kayıtlarınızı görürsünüz.'),
+                          trailing: agency != null
+                              ? null
+                              : FilledButton(
+                                  onPressed: () => _act('Kendi ajansınızda yayıncı olmak istiyor musunuz?', () => Api.post('/api/agencies/${owned['id']}/self-join'), done: 'Artık ajansınızın yayıncısısınız.'),
+                                  child: const Text('Katıl'),
+                                ),
+                        ),
+                      ),
+                  ] else
+                    const Padding(padding: EdgeInsets.all(16), child: Text('Bir ajansınız yok. Ajanslar yönetici tarafından açılır.')),
                 ]
               : [
-              if (owned != null) const Padding(padding: EdgeInsets.all(12), child: Text('Ajans sahibisiniz. Ajansınızı Ajans Merkezi\'nden yönetebilirsiniz.', style: TextStyle(color: Colors.white60))),
-              if (canBeBroadcaster)
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Yayıncı ol', style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 6),
-                      Text(bStatus == 'rejected' ? 'Önceki başvurunuz reddedildi. Yeniden başvurabilirsiniz.' : 'Yayıncı başvurunuz yönetici tarafından incelenir. Onaylanınca bir ajansa katılabilirsiniz.'),
-                      const SizedBox(height: 10),
-                      FilledButton.icon(onPressed: () => _act(null, () => Api.post('/api/broadcaster/apply'), done: 'Başvurunuz alındı.'), icon: const Icon(Icons.podcasts), label: const Text('Yayıncı olarak başvur')),
-                    ]),
-                  ),
-                ),
-              if (b != null && bStatus != 'rejected') _broadcasterCard(b, bStatus, agency),
-              for (final r in requests)
+              for (final r in requests.where((r) => r['direction'] == 'invite'))
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.mail_outline),
-                    title: Text(r['direction'] == 'invite' ? '${mapOf(r['agency'])?['name']} sizi davet etti' : '${mapOf(r['agency'])?['name']} ajansına başvurunuz bekliyor'),
-                    trailing: r['direction'] == 'invite'
-                        ? Row(mainAxisSize: MainAxisSize.min, children: [
-                            IconButton(icon: const Icon(Icons.check, color: Colors.greenAccent), onPressed: () => _act(null, () => Api.post('/api/agency-requests/${r['id']}/respond', {'accept': true}), done: 'Ajansa katıldınız.')),
-                            IconButton(icon: const Icon(Icons.close, color: Colors.redAccent), onPressed: () => _act(null, () => Api.post('/api/agency-requests/${r['id']}/respond', {'accept': false}))),
-                          ])
-                        : const Text('Bekliyor'),
+                    title: Text('${mapOf(r['agency'])?['name']} sizi yayıncı olarak davet etti'),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton(icon: const Icon(Icons.check, color: Colors.greenAccent), onPressed: () => _act(null, () => Api.post('/api/agency-requests/${r['id']}/respond', {'accept': true}), done: 'Ajansa katıldınız.')),
+                      IconButton(icon: const Icon(Icons.close, color: Colors.redAccent), onPressed: () => _act(null, () => Api.post('/api/agency-requests/${r['id']}/respond', {'accept': false}))),
+                    ]),
                   ),
                 ),
-              if (b != null && agency == null && (bStatus == 'pending' || bStatus == 'approved')) ...[
-                FilledButton.tonalIcon(onPressed: _applyByCode, icon: const Icon(Icons.pin), label: const Text('Ajans koduyla başvur')),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(onPressed: _browseAgencies, icon: const Icon(Icons.business), label: const Text('Ajanslara göz at ve başvur')),
-              ],
-              const SizedBox(height: 12),
-              if (owned == null && (b == null || bStatus == 'rejected'))
-                OutlinedButton.icon(onPressed: _createAgency, icon: const Icon(Icons.add_business), label: const Text('Ajans kur')),
+              if (isHost)
+                _broadcasterCard(b!, bStatus, agency)
+              else
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Yayıncı değilsiniz. Yayıncı olmak için bir ajans sahibinin sizi davet etmesi gerekir; davet Mesajlar sayfanıza gelir.', style: TextStyle(color: Colors.white70)),
+                ),
             ]),
           );
         },
@@ -290,7 +242,7 @@ class _AgencyScreenState extends State<AgencyScreen> {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.pin),
                 title: Text('Ajans kodu: $code', style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-                subtitle: const Text('Yayıncılar bu kodla ajansınıza başvurur.'),
+                subtitle: const Text('Ajans numaranız. Yayıncıları Ajans paneli → davet ile eklersiniz.'),
                 trailing: IconButton(
                   icon: const Icon(Icons.copy),
                   onPressed: () {
@@ -485,17 +437,15 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
                       leading: UserAvatar(user: mapOf(r['user'])),
                       title: Text((mapOf(r['user'])?['displayName'] ?? '').toString()),
                       subtitle: Text(r['direction'] == 'apply' ? 'Ajansa başvurdu' : 'Davetiniz bekliyor'),
+                      // Eski başvurular yalnızca reddedilebilir (yayıncılık artık davetle).
                       trailing: r['direction'] == 'apply'
-                          ? Row(mainAxisSize: MainAxisSize.min, children: [
-                              IconButton(icon: const Icon(Icons.check, color: Colors.greenAccent), onPressed: () => _act(() => Api.post('/api/agency-requests/${r['id']}/respond', {'accept': true}), done: 'Yayıncı ajansa eklendi.')),
-                              IconButton(icon: const Icon(Icons.close, color: Colors.redAccent), onPressed: () => _act(() => Api.post('/api/agency-requests/${r['id']}/respond', {'accept': false}))),
-                            ])
+                          ? IconButton(icon: const Icon(Icons.close, color: Colors.redAccent), onPressed: () => _act(() => Api.post('/api/agency-requests/${r['id']}/respond', {'accept': false})))
                           : null,
                     ),
                   ),
               ],
               Padding(padding: const EdgeInsets.only(top: 8, bottom: 4), child: Text('Yayıncılar (${broadcasters.length})', style: Theme.of(context).textTheme.titleMedium)),
-              if (broadcasters.isEmpty) const Padding(padding: EdgeInsets.all(12), child: Text('Henüz yayıncı yok. Sağ üstten davet gönderebilir veya ajans kodunuzu paylaşabilirsiniz.')),
+              if (broadcasters.isEmpty) const Padding(padding: EdgeInsets.all(12), child: Text('Henüz yayıncı yok. Sağ üstten davet gönderebilirsiniz.')),
               for (final x in broadcasters)
                 Card(
                   child: ListTile(

@@ -123,6 +123,12 @@ export async function loadProfile(viewerId, targetId) {
       features: { ...BASE_FEATURES, ...u.wip_features },
     } : null,
     equipped: items,
+    // Profil başlığındaki WIP çerçevesi: ayrıca verilmiş takılı WIP çerçevesi; üyelik çerçevesi kapatıldıysa 0.
+    wipFrame: (() => {
+      const f = items.find((i) => i.itemType === 'frame' && String(i.itemKey).startsWith('wip:'));
+      if (f) return Number(String(f.itemKey).slice(4)) || null;
+      return u.wip_hidden?.frame === true ? 0 : null;
+    })(),
     cp,
     // Çevrimiçi / son görülme (kişi gizlemediyse). Kendi profilinde gösterilmez.
     presence: isSelf || blocked.rowCount ? null : presenceView(u),

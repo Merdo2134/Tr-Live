@@ -13,6 +13,11 @@ class SocketService {
   final _controller = StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get events => _controller.stream;
 
+  /// Sunucudan gelmeyen, uygulama içinde üretilen olay (ör. kendi giriş aracım) dinleyicilere iletilir.
+  void emitLocal(Map<String, dynamic> event) {
+    if (!_controller.isClosed) _controller.add(event);
+  }
+
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
   Timer? _retry;

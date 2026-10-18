@@ -4,8 +4,7 @@ import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import 'home_screen.dart';
 
-/// Giriş / kayıt: Google, Facebook ya da telefon numarası. Eski hesaplar kullanıcı adıyla da girebilir
-/// (yeni kayıt yalnızca Google, Facebook ve telefonla).
+/// Giriş / kayıt: Google, Facebook, telefon numarası ya da kullanıcı adı + şifre.
 enum _Mode { start, phone, username }
 
 class LoginScreen extends StatefulWidget {
@@ -60,8 +59,11 @@ class _LoginScreenState extends State<LoginScreen> {
       final digits = id.replaceAll(RegExp(r'[^0-9]'), '');
       if (digits.length < 10) return 'Telefon numaranızı girin (ör. 0555 123 45 67).';
       if (_register && _displayName.text.trim().isEmpty) return 'Görünen adınızı yazın.';
-    } else if (id.length < 3) {
-      return 'Kullanıcı adınızı girin.';
+    } else {
+      if (id.length < 3) return 'Kullanıcı adınızı girin.';
+      if (_register && !RegExp(r'^[a-zA-Z0-9._]{3,30}$').hasMatch(id)) {
+        return 'Kullanıcı adı 3-30 karakter olmalı; yalnızca harf, rakam, nokta ve alt çizgi kullanılabilir.';
+      }
     }
     if (_password.text.length < 6) return 'Şifre en az 6 karakter olmalı.';
     return null;
@@ -79,6 +81,9 @@ class _LoginScreenState extends State<LoginScreen> {
       final id = _id.text.trim();
       if (_mode == _Mode.phone && _register) {
         await AuthService.registerPhone(id, _password.text, _displayName.text.trim());
+      } else if (_mode == _Mode.username && _register) {
+        final name = _displayName.text.trim();
+        await AuthService.register(id.toLowerCase(), _password.text, name.isEmpty ? id : name);
       } else {
         // Sunucu girilen değerin telefon mu kullanıcı adı mı olduğunu kendisi ayırır.
         await AuthService.login(_mode == _Mode.username ? id.replaceAll('İ', 'i').toLowerCase() : id, _password.text);
@@ -194,18 +199,19 @@ class _LoginScreenState extends State<LoginScreen> {
           fg: Colors.white,
           onTap: _busy ? null : () => _setMode(_Mode.phone),
         ),
-        const SizedBox(height: 4),
-        TextButton(
-          onPressed: _busy ? null : () => _setMode(_Mode.username),
-          child: const Text('Kullanıcı adıyla giriş (eski hesaplar)', style: TextStyle(color: Pal.textDim)),
+        _bigButton(
+          icon: const Icon(Icons.person_outline, color: Colors.white),
+          text: 'Kullanıcı adı ile',
+          bg: Pal.purple,
+          fg: Colors.white,
+          onTap: _busy ? null : () => _setMode(_Mode.username),
         ),
       ]);
 
   Widget _form() {
     final phone = _mode == _Mode.phone;
     return Column(mainAxisSize: MainAxisSize.min, children: [
-      if (phone)
-        Container(
+      Container(
           padding: const EdgeInsets.all(4),
           margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(24)),
@@ -237,12 +243,12 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
       const SizedBox(height: 12),
-      if (phone && _register) ...[
+      if (_register) ...[
         TextField(
           controller: _displayName,
           textInputAction: TextInputAction.next,
           maxLength: 60,
-          decoration: const InputDecoration(labelText: 'Görünen ad', prefixIcon: Icon(Icons.badge_outlined)),
+          decoration: InputDecoration(labelText: phone ? 'Görünen ad' : 'Görünen ad (isteğe bağlı)', prefixIcon: const Icon(Icons.badge_outlined)),
         ),
         const SizedBox(height: 4),
       ],
@@ -310,7 +316,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Text('TR LIVE', style: TextStyle(fontSize: 38, fontWeight: FontWeight.w800, letterSpacing: 4, color: Pal.text, fontFamily: 'serif')),
                   const SizedBox(height: 8),
                   Text(
-                    _mode == _Mode.start ? 'Hoş geldin' : (_mode == _Mode.username ? 'Kullanıcı adıyla giriş' : (_register ? 'Telefonla kayıt' : 'Telefonla giriş')),
+                    _mode == _Mode.start ? 'Hoş geldin' : (_mode == _Mode.username ? (_register ? 'Kullanıcı adıyla kayıt' : 'Kullanıcı adıyla giriş') : (_register ? 'Telefonla kayıt' : 'Telefonla giriş')),
                     style: const TextStyle(fontSize: 18, color: Pal.textDim),
                   ),
                   const SizedBox(height: 28),

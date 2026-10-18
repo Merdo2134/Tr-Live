@@ -4,13 +4,15 @@ import '../services/session.dart';
 import '../widgets/anim_asset.dart';
 import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
+import '../widgets/wip_items.dart';
 
 /// Kategoriler: [anahtar, Mağaza adı, Görünüm adı]
 const _cats = [
   ['frame', 'Çerçeve', 'Çerçeve'],
   ['chat_bubble', 'Sohbet Balonu', 'Sohbet Balonu'],
   ['entrance_effect', 'Özel Giriş', 'Giriş Etkisi'],
-  ['mini_card', 'Mini Kart', 'Mini Kart'],
+  ['mini_card', 'Profil Kartı', 'Profil Kartı'],
+  ['room_card', 'Oda Kartı', 'Oda Kartı'],
   ['mic_wave', 'Mikrofon Dalgası', 'Mikrofon Dalgası'],
   ['vehicle', 'Araç', 'Araç'],
 ];
@@ -53,7 +55,7 @@ Widget _itemImage(String? url, String category) {
 }
 
 /// Önizleme: çerçeve ise kendi avatarının üstünde göster.
-void _preview(BuildContext context, String category, String name, String? url) {
+void _preview(BuildContext context, String category, String name, String? url, {Widget? art}) {
   final u = Api.absoluteUrl(url);
   showDialog<void>(
     context: context,
@@ -67,7 +69,9 @@ void _preview(BuildContext context, String category, String name, String? url) {
           SizedBox(
             width: 260,
             height: 260,
-            child: category == 'frame'
+            child: art != null
+                ? Center(child: art)
+                : category == 'frame'
                 ? Stack(alignment: Alignment.center, children: [
                     UserAvatar(user: Session.me.value, radius: 60),
                     if (u != null) AnimAsset(url: u, repeat: true, cache: false),
@@ -89,7 +93,11 @@ class _Tile extends StatelessWidget {
   final String topLeft;
   final Widget middle;
   final Widget buttons;
-  const _Tile({required this.category, required this.url, required this.name, required this.topLeft, required this.middle, required this.buttons});
+  /// Kodla çizilen görsel (WIP öğeleri); varsa dosya görseli yerine kullanılır.
+  final Widget? art;
+  /// Önizleme penceresinde gösterilecek büyük hâli.
+  final Widget? previewArt;
+  const _Tile({required this.category, required this.url, required this.name, required this.topLeft, required this.middle, required this.buttons, this.art, this.previewArt});
 
   @override
   Widget build(BuildContext context) {
@@ -101,9 +109,9 @@ class _Tile extends StatelessWidget {
           const Icon(Icons.schedule, size: 11, color: Pal.textDim),
           const SizedBox(width: 2),
           Expanded(child: Text(topLeft, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: Pal.textDim))),
-          InkWell(onTap: () => _preview(context, category, name, url), child: const Text('Önizleme', style: TextStyle(fontSize: 10, color: Colors.greenAccent, fontWeight: FontWeight.w700))),
+          InkWell(onTap: () => _preview(context, category, name, url, art: previewArt), child: const Text('Önizleme', style: TextStyle(fontSize: 10, color: Colors.greenAccent, fontWeight: FontWeight.w700))),
         ]),
-        Expanded(child: Padding(padding: const EdgeInsets.all(4), child: _itemImage(url, category))),
+        Expanded(child: Padding(padding: const EdgeInsets.all(4), child: art ?? _itemImage(url, category))),
         middle,
         const SizedBox(height: 6),
         buttons,
@@ -274,8 +282,12 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final order = ['vehicle', 'frame', 'chat_bubble', 'entrance_effect', 'mic_wave', 'mini_card'];
-    final cats = [for (final k in order) _cats.firstWhere((c) => c[0] == k)];
+    final order = ['vehicle', 'frame', 'chat_bubble', 'entrance_effect', 'badge', 'mic_wave', 'mini_card', 'room_card'];
+    // Rozet mağazada satılmaz (yalnızca WIP / yönetim); Görünüm'de ayrı sekme.
+    const extra = [
+      ['badge', 'Rozet', 'Rozet'],
+    ];
+    final cats = [for (final k in order) [..._cats, ...extra].firstWhere((c) => c[0] == k)];
     return Scaffold(
       appBar: AppBar(
         title: const Text('Görünüm'),
@@ -310,13 +322,21 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
                   itemBuilder: (_, i) {
                     final it = items[i];
                     final on = it['equipped'] == true;
+                    // WIP öğeleri (üyelikten ya da ayrıca verilmiş) dosyasızdır: kodla çizilir.
+                    final wipLvl = wipLevelOf(it['wipLevel']);
                     return Stack(children: [
                       Positioned.fill(
                         child: _Tile(
                           category: _cat,
                           url: it['assetUrl'] as String?,
+                          art: wipLvl == null ? null : LayoutBuilder(builder: (_, box) => Center(child: FittedBox(child: wipItemArt(_cat, wipLvl, box.biggest.shortestSide.clamp(40, 160).toDouble())))),
+                          previewArt: wipLvl == null
+                              ? null
+                              : _cat == 'vehicle'
+                                  ? ClipRect(child: SizedBox(width: 260, height: 260, child: WipVehicleDrive(key: UniqueKey(), level: wipLvl)))
+                                  : FittedBox(child: wipItemArt(_cat, wipLvl, 200)),
                           name: (it['itemName'] ?? '').toString(),
-                          topLeft: it['expiresAt'] == null ? 'Süresiz' : 'Son tarih',
+                          topLeft: it['membership'] == true ? 'WIP üyeliği' : (it['expiresAt'] == null ? 'Süresiz' : 'Son tarih'),
                           middle: Text(it['expiresAt'] == null ? '' : _fmtDate(it['expiresAt']), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: Pal.textDim)),
                           buttons: Row(children: [_greenBtn(on ? 'Kaldır' : 'Etkinleştir', () => _toggle(it), color: on ? Colors.black : const Color(0xFF12C84A))]),
                         ),

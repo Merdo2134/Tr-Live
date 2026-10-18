@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../widgets/anim_asset.dart';
 import 'family_screen.dart';
+import '../widgets/cosmetics.dart';
 import '../widgets/entrance_strip.dart';
 import '../widgets/fly_text.dart';
 import '../widgets/lucky_bag.dart';
@@ -228,6 +229,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       final meRow = _members.where((m) => m['userId']?.toString() == Session.id);
       final meUser = meRow.isEmpty ? null : mapOf(meRow.first['user']);
       if (meUser != null && GiftRibbonOverlay.effectsOn) _entrance.add(meUser);
+      // Kendi giriş aracım / efektim: sunucunun odaya duyurusu bize abone olmadan önce gittiği için yanıttan oynatılır.
+      final myEntrance = mapOf(r['entrance']);
+      final myEffect = mapOf(myEntrance?['effect']);
+      if (myEffect != null && GiftRibbonOverlay.effectsOn) {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) SocketService.instance.emitLocal({'type': 'local_entrance', 'roomId': widget.roomId, 'user': myEntrance?['user'], 'entranceEffect': myEffect});
+        });
+      }
       _connectLivekit();
       _loadMessages();
       _loadExtras();
@@ -576,6 +585,19 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             if (_messages.length > 200) _messages.removeAt(0);
           });
           _scrollChatToEnd();
+        }
+        break;
+      case 'room_member_updated':
+        // Görünüm değişti (çerçeve, balon, mikrofon dalgası, fotoğraf): çıkıp girmeden hemen yansır.
+        final nu = mapOf(e['user']);
+        if (nu != null && nu['id']?.toString() == Session.id) {
+          // Kendi görünümüm: gizli kullanıcıysam duyuru maskeli gelir; kendi gerçek hâlim listeden yeniden alınır.
+          _loadMembers().catchError((_) {});
+        } else if (nu != null) {
+          setState(() {
+            final i = _members.indexWhere((m) => m['userId'] == nu['id']);
+            if (i >= 0) _members[i] = {..._members[i], 'user': nu};
+          });
         }
         break;
       case 'room_member_left':
@@ -929,10 +951,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     final managers = listOf(res?['managers']);
     final owner = _members.where((m) => m['role'] == 'owner');
+    // Oda sahibi şu an odada değilse bilgisi yönetici listesinden alınır (oda kartı arka planı için).
+    final ownerUser = owner.isNotEmpty ? mapOf(owner.first['user']) : mapOf(managers.where((x) => x['role'] == 'owner').firstOrNull?['user']);
     showRoomCard(
       context,
       room: _room ?? const {},
-      owner: owner.isEmpty ? null : mapOf(owner.first['user']),
+      owner: ownerUser,
       managers: managers,
       canEdit: canEdit,
       onEdit: () => _roomEdit(managers),
@@ -1634,6 +1658,18 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 5),
                   if (overlay)
                     Container(constraints: BoxConstraints(maxWidth: maxW - 44), child: text)
+                  else if (Api.absoluteUrl(u?['chatBubbleUrl'] as String?) != null)
+                    // Mağazadan alınıp takılan sohbet balonu.
+                    StoreBubble(
+                      url: Api.absoluteUrl(u?['chatBubbleUrl'] as String?)!,
+                      constraints: BoxConstraints(maxWidth: maxW - 44),
+                      child: m['fly'] == true
+                          ? Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.send_rounded, size: 14, color: Color(0xFFFF80AB))),
+                              Flexible(child: text),
+                            ])
+                          : text,
+                    )
                   else
                     // WIP sohbet balonu (kademeye göre renk, ışık ve köşe süsü); WIP yoksa seviye rengi.
                     WipBubble(
@@ -1891,7 +1927,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                   child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
                     Container(
                       constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
-                      decoration: const BoxDecoration(color: Color(0xFF26262B), borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+                      // Takılı profil kartı (mağaza) varsa kartın arka planı olur.
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF26262B),
+                        image: cardBackground(Api.absoluteUrl(user?['profileCardUrl'] as String?)),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+                      ),
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(16, 52, 16, 0),
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -2204,6 +2245,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final speaking = _isSpeaking(userId);
     final isMe = userId == Session.id;
     final frameUrl = Api.absoluteUrl(user?['frameUrl'] as String?);
+    final waveUrl = video == null ? Api.absoluteUrl(user?['micWaveUrl'] as String?) : null;
     final nameColor = parseColor(user?['nameColor'] as String?);
     return _seatFrame(
       slotSize: slotSize,
@@ -2211,6 +2253,15 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       slot: KeyedSubtree(
         key: _seatKeys.putIfAbsent(userId, () => GlobalKey()),
         child: Stack(alignment: Alignment.center, clipBehavior: Clip.none, children: [
+        // Mağazadan alınan mikrofon dalgası: konuşurken avatarın çevresinde (yeşil halkanın yerine) oynar (avatarın arkasında).
+        if (speaking && waveUrl != null)
+          Positioned(
+            left: (slotSize - seatR * 2 * 1.5) / 2,
+            top: (slotSize - seatR * 2 * 1.5) / 2,
+            width: seatR * 2 * 1.5,
+            height: seatR * 2 * 1.5,
+            child: MicWave(url: waveUrl),
+          ),
         if (video != null)
           SizedBox(width: seatR * 2, height: seatR * 2, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: video))
         else
@@ -2223,7 +2274,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
               decoration: BoxDecoration(
                 shape: video != null ? BoxShape.rectangle : BoxShape.circle,
                 borderRadius: video != null ? BorderRadius.circular(14) : null,
-                border: Border.all(color: speaking ? Colors.greenAccent : Colors.transparent, width: 2.5),
+                border: Border.all(color: speaking && waveUrl == null ? Colors.greenAccent : Colors.transparent, width: 2.5),
               ),
             ),
           ),

@@ -5,7 +5,7 @@ import { cpLevelFor } from './levels.js';
 export const HIDDEN_NAME = 'Gizli Kullanıcı';
 
 // "u" takma adlı users tablosu ile kullanılır.
-export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.public_id, u.display_name, u.avatar_url, u.is_hidden,
+export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.public_id, u.display_name, u.avatar_url, u.is_hidden, u.wip_hidden,
   u.coin_level, u.gift_level, u.created_at AS u_created_at, u.kyc_status AS u_kyc_status, uw.level AS wip_level, wt.features AS wip_features,
   (SELECT COALESCE(fr.image_url, fi.metadata->>'assetUrl') FROM inventory_items fi
      LEFT JOIN frames fr ON fr.id::text = fi.item_key
@@ -13,6 +13,12 @@ export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.public_id, u.display_nam
       AND (fi.expires_at IS NULL OR fi.expires_at > NOW()) AND COALESCE(fi.metadata->>'equipped' = 'true', FALSE)
     ORDER BY fi.created_at DESC LIMIT 1) AS frame_url,
   u.cp_partner_id,
+  (SELECT jsonb_object_agg(c.item_type, c.url) FROM (
+     SELECT DISTINCT ON (ci.item_type) ci.item_type, ci.metadata->>'assetUrl' AS url FROM inventory_items ci
+      WHERE ci.user_id = u.id AND ci.item_type IN ('chat_bubble', 'mic_wave', 'mini_card', 'room_card')
+        AND ci.item_key NOT LIKE 'wip:%' AND ci.is_active = TRUE AND (ci.expires_at IS NULL OR ci.expires_at > NOW())
+        AND COALESCE(ci.metadata->>'equipped' = 'true', FALSE) AND ci.metadata->>'assetUrl' IS NOT NULL
+      ORDER BY ci.item_type, ci.created_at DESC) c) AS cosmetics,
   (SELECT jsonb_object_agg(wi.item_type, (wi.metadata->>'wipLevel')::int) FROM inventory_items wi
     WHERE wi.user_id = u.id AND wi.item_key LIKE 'wip:%' AND wi.is_active = TRUE
       AND (wi.expires_at IS NULL OR wi.expires_at > NOW()) AND COALESCE(wi.metadata->>'equipped' = 'true', FALSE)) AS wip_items,
@@ -21,6 +27,9 @@ export const USER_PUBLIC_COLUMNS = `u.id, u.username, u.public_id, u.display_nam
 export const USER_PUBLIC_JOINS = `LEFT JOIN user_wip uw ON uw.user_id = u.id AND uw.is_active = TRUE AND uw.expires_at > NOW()
   LEFT JOIN wip_tiers wt ON wt.level = uw.level`;
 
+/** Takılı (ayrıca verilmiş) WIP öğesi; yoksa üyelik öğesi kapatıldıysa 0, değilse null (uygulama üyelik kademesini kullanır). */
+const wipItem = (row, type) => row.wip_items?.[type] ?? (row.wip_hidden?.[type] === true ? 0 : null);
+
 export function publicUser(row, viewerId = null) {
   if (!row) return null;
   const hidden = Boolean(row.is_hidden) && row.id !== viewerId;
@@ -28,6 +37,7 @@ export function publicUser(row, viewerId = null) {
     return {
       id: row.id, publicId: null, username: HIDDEN_NAME, displayName: HIDDEN_NAME, avatarUrl: null,
       coinLevel: row.coin_level, giftLevel: row.gift_level, wipLevel: null, nameColor: null, frameUrl: null, isHidden: true,
+      chatBubbleUrl: null, micWaveUrl: null, profileCardUrl: null, roomCardUrl: null,
     };
   }
   return {
@@ -41,12 +51,19 @@ export function publicUser(row, viewerId = null) {
     wipLevel: row.wip_level ?? null,
     nameColor: row.wip_features?.nameColor ?? null,
     frameUrl: row.frame_url ?? null,
+    // Mağazadan alınıp takılan görünüm öğeleri: sohbet balonu, mikrofon dalgası, profil kartı, oda kartı.
+    chatBubbleUrl: row.cosmetics?.chat_bubble ?? null,
+    micWaveUrl: row.cosmetics?.mic_wave ?? null,
+    profileCardUrl: row.cosmetics?.mini_card ?? null,
+    roomCardUrl: row.cosmetics?.room_card ?? null,
     isHidden: Boolean(row.is_hidden),
     // Yönetimden ayrı verilen ve takılı WIP öğeleri (WIP üyeliğinden bağımsız): çerçeve, sohbet balonu, rozet, giriş efekti.
-    wipFrame: row.wip_items?.frame ?? null,
-    wipBubble: row.wip_items?.chat_bubble ?? null,
-    wipBadge: row.wip_items?.badge ?? null,
-    wipEntrance: row.wip_items?.entrance_effect ?? null,
+    // Kullanıcı üyeliğin verdiği öğeyi Görünüm'den çıkardıysa 0 gelir (uygulama 0'ı "yok" sayar, üyelik
+    // kademesine geri düşmez).
+    wipFrame: wipItem(row, 'frame'),
+    wipBubble: wipItem(row, 'chat_bubble'),
+    wipBadge: wipItem(row, 'badge'),
+    wipEntrance: wipItem(row, 'entrance_effect'),
     // CP: odada yan yana oturunca kalp efekti için (yalnızca onaylı CP ilişkisi).
     cpPartnerId: row.cp_exp != null ? row.cp_partner_id : null,
     cpLevel: row.cp_exp != null ? cpLevelFor(row.cp_exp) : null,

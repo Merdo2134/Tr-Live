@@ -8,6 +8,7 @@ import '../services/api.dart';
 import '../services/session.dart';
 import '../widgets/anim_asset.dart';
 import '../widgets/common.dart';
+import '../widgets/wip_items.dart';
 import 'admin_content.dart';
 import 'admin_dashboard.dart';
 import 'admin_payouts.dart';
@@ -500,6 +501,18 @@ class _AgenciesTabState extends State<_AgenciesTab> {
     setState(() => _v++);
   }
 
+  /// Ajansı yönetici açar: kullanıcı ID ya da kullanıcı adıyla seçilir, o kişi ajans sahibi olur.
+  Future<void> _createAgency() async {
+    final u = await pickUser(context, admin: true);
+    if (u == null || !mounted) return;
+    final name = await askText(context, 'Ajans adı (@${u['username']} sahibi olacak)');
+    if (name == null || name.trim().length < 3 || !mounted) {
+      if (name != null && mounted) toast(context, 'Ajans adı en az 3 karakter olmalı.', error: true);
+      return;
+    }
+    await _run(() => Api.post('/api/admin/agencies', {'userId': u['id'], 'name': name.trim()}), done: '${u['displayName'] ?? u['username']} artık "${name.trim()}" ajansının sahibi.');
+  }
+
   Future<void> _overrideCommission(Map<String, dynamic> a) async {
     final f = await formDialog(context, 'Ajansa özel komisyon', ['Komisyon % (boş = genel kademe tablosu)'],
         initial: {'Komisyon % (boş = genel kademe tablosu)': a['overrideBps'] == null ? '' : '${(a['overrideBps'] as num) / 100}'});
@@ -525,6 +538,10 @@ class _AgenciesTabState extends State<_AgenciesTab> {
         return RefreshIndicator(
           onRefresh: reload,
           child: ListView(padding: const EdgeInsets.all(12), children: [
+            if (Session.isAdmin) ...[
+              FilledButton.icon(onPressed: _createAgency, icon: const Icon(Icons.add_business), label: const Text('Ajans aç (kullanıcı ID / adı ile)')),
+              const SizedBox(height: 12),
+            ],
             Text('Ajanslar (${agencies.length})', style: Theme.of(context).textTheme.titleMedium),
             for (final a in agencies)
               Card(
@@ -807,7 +824,8 @@ class _CatalogTab extends StatelessWidget {
                   DropdownMenuItem(value: 'frame', child: Text('Çerçeve')),
                   DropdownMenuItem(value: 'chat_bubble', child: Text('Sohbet Balonu')),
                   DropdownMenuItem(value: 'entrance_effect', child: Text('Özel Giriş')),
-                  DropdownMenuItem(value: 'mini_card', child: Text('Mini Kart')),
+                  DropdownMenuItem(value: 'mini_card', child: Text('Profil Kartı')),
+                  DropdownMenuItem(value: 'room_card', child: Text('Oda Kartı')),
                   DropdownMenuItem(value: 'mic_wave', child: Text('Mikrofon Dalgası')),
                   DropdownMenuItem(value: 'vehicle', child: Text('Araç')),
                   DropdownMenuItem(value: 'badge', child: Text('Rozet (yalnızca yönetici verir)')),
@@ -1060,6 +1078,19 @@ class _CatalogTab extends StatelessWidget {
         onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StoreItemsPage())),
       ),
       const SizedBox(height: 8),
+      // Deneme: her türden birer örnek (araç, balon, mikrofon dalgası, çerçeve, profil/oda kartı) yöneticinin kendisine
+      // 30 günlüğüne verilip takılır; mağazada satılmaz.
+      FilledButton.tonalIcon(
+        icon: const Icon(Icons.science_outlined),
+        label: const Text('Test örneklerini bana ekle ve tak'),
+        onPressed: () async {
+          final r = await guard(context, () => Api.post('/api/admin/store/samples'));
+          if (r != null && context.mounted) {
+            toast(context, 'Takıldı: ${((r['items'] as List?) ?? const []).join(', ')}. Bir odaya girip dene (araç girişte oynar).');
+          }
+        },
+      ),
+      const SizedBox(height: 8),
       FilledButton.icon(
         icon: const Icon(Icons.storefront),
         label: const Text('Mağaza ürünü ekle'),
@@ -1231,7 +1262,8 @@ class _GrantItemPageState extends State<GrantItemPage> {
     ['badge', 'Rozet'],
     ['chat_bubble', 'Sohbet Balonu'],
     ['entrance_effect', 'Giriş Efekti'],
-    ['mini_card', 'Mini Kart'],
+    ['mini_card', 'Profil Kartı'],
+    ['room_card', 'Oda Kartı'],
     ['mic_wave', 'Mikrofon Dalgası'],
     ['vehicle', 'Araç'],
   ];
@@ -1259,32 +1291,8 @@ class _GrantItemPageState extends State<GrantItemPage> {
     if (r != null) toast(context, '"${item['name']}" ${widget.user['displayName']} kullanıcısına verildi.');
   }
 
-  /// WIP öğelerinin önizlemesi (kodla çizilir): çerçeve, rozet, sohbet balonu, giriş efekti rengi.
-  Widget _wipPreview(int level, double size) {
-    final s = WipStyle.of(level);
-    switch (_cat) {
-      case 'frame':
-        final r = size * 0.28;
-        return SizedBox(
-          width: size * 0.8,
-          height: size * 0.8,
-          child: Stack(alignment: Alignment.center, clipBehavior: Clip.none, children: [
-            CircleAvatar(radius: r, backgroundColor: Colors.white12, child: Icon(Icons.person, size: r, color: Colors.white54)),
-            WipFrame.around(level, r),
-          ]),
-        );
-      case 'badge':
-        return WipChip(level: level);
-      case 'chat_bubble':
-        return WipBubble(level: level, fallback: const Color(0x8C13285A), child: const Text('Merhaba', style: TextStyle(fontSize: 12)));
-      default:
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(gradient: LinearGradient(colors: s?.gradient ?? const [Colors.purple, Colors.pink]), borderRadius: BorderRadius.circular(10)),
-          child: Text(wipLabel(level), style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white)),
-        );
-    }
-  }
+  /// WIP öğelerinin önizlemesi (kodla çizilir): çerçeve, rozet, sohbet balonu, giriş efekti, araç.
+  Widget _wipPreview(int level, double size) => wipItemArt(_cat, level, size);
 
   @override
   Widget build(BuildContext context) {

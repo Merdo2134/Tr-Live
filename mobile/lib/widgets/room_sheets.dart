@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'common.dart';
+import 'cosmetics.dart';
 import 'image_pick.dart';
 import 'room_categories.dart';
 
@@ -244,9 +245,11 @@ void showRoomCard(
     builder: (c) => SafeArea(
       child: Container(
         constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(c).height * 0.85),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF3A3A3F), Color(0xFF111114)]),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        // Oda sahibinin takılı oda kartı (mağaza) varsa kartın arka planı olur.
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF3A3A3F), Color(0xFF111114)]),
+          image: cardBackground(Api.absoluteUrl(owner?['roomCardUrl'] as String?)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
         ),
         child: ListView(shrinkWrap: true, padding: const EdgeInsets.all(14), children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

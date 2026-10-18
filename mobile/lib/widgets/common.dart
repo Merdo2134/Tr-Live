@@ -473,7 +473,7 @@ Future<Map<String, dynamic>?> pickUser(BuildContext context, {bool admin = false
             TextField(
               controller: controller,
               autofocus: true,
-              decoration: InputDecoration(hintText: admin ? 'ID, kullanıcı adı veya ad' : 'Kullanıcı adı (en az 2 harf)'),
+              decoration: InputDecoration(hintText: admin ? 'ID, kullanıcı adı veya ad' : 'ID veya kullanıcı adı'),
               onChanged: (v) async {
                 if (v.trim().length < 2) return;
                 try {

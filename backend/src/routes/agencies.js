@@ -1,4 +1,3 @@
-import { cleanPublic } from '../safe_text.js';
 import { Router } from 'express';
 import { hub } from '../realtime.js';
 import { query, tx } from '../database.js';
@@ -66,28 +65,9 @@ router.get('/agencies', async (req, res) => {
   res.json({ agencies: r.rows.map(publicAgencyJson) });
 });
 
-router.post('/agencies', async (req, res) => {
-  const name = cleanPublic(text(req.body?.name, 'Ajans adı', { min: 3, max: 60, required: true }), 'Ajans adı');
-  const description = text(req.body?.description, 'Açıklama', { max: 500 });
-  const logoUrl = httpsUrl(req.body?.logoUrl, 'Logo adresi');
-  try {
-    const agency = await tx(async (c) => {
-      await c.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [req.user.id]);
-      const b = (await c.query(`SELECT status FROM broadcasters WHERE user_id = $1`, [req.user.id])).rows[0];
-      if (b && b.status !== 'rejected') throw fail('Yayıncılar ajans kuramaz.', 409);
-      if ((await c.query(`SELECT 1 FROM agencies WHERE owner_id = $1 AND status <> 'rejected'`, [req.user.id])).rowCount) {
-        throw fail('Zaten bir ajansınız var.', 409);
-      }
-      return (await c.query(
-        `INSERT INTO agencies(name, owner_id, logo_url, description) VALUES($1,$2,$3,$4) RETURNING *`,
-        [name, req.user.id, logoUrl, description],
-      )).rows[0];
-    });
-    res.status(201).json({ agency: publicAgencyJson(agency), message: 'Ajans başvurunuz alındı; yönetici onayı bekleniyor.' });
-  } catch (error) {
-    if (error.code === '23505') throw fail('Bu ajans adı kullanılıyor veya zaten bir ajansınız var.', 409);
-    throw error;
-  }
+// Ajansı yalnızca yönetici açar (Yönetim → Ajans/Yayıncı → "Ajans aç"); kullanıcı başvurusu kapalı.
+router.post('/agencies', async () => {
+  throw fail('Ajanslar yönetici tarafından açılır. Ajans kurmak için destek ile iletişime geçin.', 403);
 });
 
 router.get('/agencies/mine', async (req, res) => {
@@ -179,22 +159,9 @@ router.get('/agencies/by-code/:code', async (req, res) => {
   res.json({ agency: publicAgencyJson(a) });
 });
 
-router.post('/agencies/apply-by-code', async (req, res) => {
-  const code = String(req.body?.code ?? '').trim();
-  if (!/^\d{8}$/.test(code)) throw fail('Ajans kodu 8 haneli olmalı.');
-  const a = (await query(`SELECT id FROM agencies WHERE agency_code = $1 AND status = 'active'`, [code])).rows[0];
-  if (!a) throw fail('Bu koda ait ajans bulunamadı.', 404);
-  const b = (await query(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1`, [req.user.id])).rows[0];
-  if (!b || b.status === 'rejected' || b.status === 'suspended') throw fail('Önce yayıncı başvurusu yapmalısınız.', 409);
-  if (b.agency_id) throw fail('Zaten bir ajansa bağlısınız.', 409);
-  try {
-    const r = await query(`INSERT INTO agency_requests(agency_id, user_id, direction) VALUES($1,$2,'apply') RETURNING id`, [a.id, req.user.id]);
-    res.status(201).json({ ok: true, requestId: r.rows[0].id });
-  } catch (error) {
-    if (error.code === '23505') throw fail('Bu ajansa zaten bekleyen bir isteğiniz var.', 409);
-    throw error;
-  }
-});
+// Yayıncılık yalnızca ajans daveti ile: başvuru yolları kapalı.
+const INVITE_ONLY = 'Yayıncı olmak için bir ajans sahibinin sizi davet etmesi gerekir.';
+router.post('/agencies/apply-by-code', async () => { throw fail(INVITE_ONLY, 403); });
 
 router.get('/agencies/:agencyId/requests', async (req, res) => {
   const a = await assertAgencyOwner(uuid(req.params.agencyId, 'Ajans'), req.user);
@@ -216,7 +183,7 @@ router.post('/agencies/:agencyId/invite', async (req, res) => {
   if (!target || target.account_status !== 'active') throw fail('Kullanıcı bulunamadı.', 404);
   // Davet, henüz yayıncı olmayan kullanıcıya da gönderilebilir: kabul ederse ajansın yayıncısı olur.
   const b = (await query(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1`, [userId])).rows[0];
-  if (b && (b.status === 'rejected' || b.status === 'suspended')) throw fail('Bu kullanıcı yayıncı olarak davet edilemez.', 409);
+  if (b?.status === 'suspended') throw fail('Bu kullanıcının yayıncılığı askıya alınmış; davet edilemez.', 409);
   if (b?.agency_id) throw fail('Yayıncı zaten bir ajansa bağlı.', 409);
   try {
     const r = await query(`INSERT INTO agency_requests(agency_id, user_id, direction) VALUES($1,$2,'invite') RETURNING id`, [a.id, userId]);
@@ -229,21 +196,7 @@ router.post('/agencies/:agencyId/invite', async (req, res) => {
   }
 });
 
-router.post('/agencies/:agencyId/apply', async (req, res) => {
-  const agencyId = uuid(req.params.agencyId, 'Ajans');
-  const a = (await query(`SELECT * FROM agencies WHERE id = $1 AND status = 'active'`, [agencyId])).rows[0];
-  if (!a) throw fail('Ajans bulunamadı.', 404);
-  const b = (await query(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1`, [req.user.id])).rows[0];
-  if (!b || b.status === 'rejected' || b.status === 'suspended') throw fail('Ajansa başvurmak için önce yayıncı başvurusu yapmalısınız.', 409);
-  if (b.agency_id) throw fail('Zaten bir ajansa bağlısınız.', 409);
-  try {
-    const r = await query(`INSERT INTO agency_requests(agency_id, user_id, direction) VALUES($1,$2,'apply') RETURNING id`, [agencyId, req.user.id]);
-    res.status(201).json({ ok: true, requestId: r.rows[0].id });
-  } catch (error) {
-    if (error.code === '23505') throw fail('Bu ajansa zaten bekleyen bir isteğiniz var.', 409);
-    throw error;
-  }
-});
+router.post('/agencies/:agencyId/apply', async () => { throw fail(INVITE_ONLY, 403); });
 
 // Davet eden değil, karşı taraf yanıtlar: davete kullanıcı, başvuruya ajans sahibi.
 router.post('/agency-requests/:requestId/respond', async (req, res) => {
@@ -255,13 +208,19 @@ router.post('/agency-requests/:requestId/respond', async (req, res) => {
     const agency = (await c.query(`SELECT * FROM agencies WHERE id = $1`, [q.agency_id])).rows[0];
     const allowed = q.direction === 'apply' ? agency.owner_id === req.user.id : q.user_id === req.user.id;
     if (!allowed) throw fail('Bu isteği yanıtlama yetkiniz yok.', 403);
+    // Eski (davet sisteminden önceki) başvurular artık kabul edilemez; yalnızca reddedilir.
+    if (accept && q.direction === 'apply') throw fail(INVITE_ONLY, 403);
     if (accept) {
       if (agency.status !== 'active') throw fail('Ajans aktif değil.', 409);
       const b = (await c.query(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1 FOR UPDATE`, [q.user_id])).rows[0];
-      if (!b && q.direction === 'invite') {
-        // Ajans davetini kabul eden kullanıcı (yayıncı değilse) ajansın onaylı yayıncısı olur.
+      if (q.direction === 'invite') {
+        // Ajans davetini kabul eden kullanıcı ajansın onaylı yayıncısı olur (eski başvuru durumu ne olursa olsun).
+        if (b?.status === 'suspended') throw fail('Yayıncılığınız askıya alınmış. Destek ile iletişime geçin.', 409);
+        if (b?.agency_id) throw fail('Zaten bir ajansa bağlısınız. Önce mevcut ajanstan ayrılın.', 409);
         await c.query(
-          `INSERT INTO broadcasters(user_id, agency_id, status, approved_at, joined_agency_at) VALUES($1,$2,'approved',NOW(),NOW())`,
+          `INSERT INTO broadcasters(user_id, agency_id, status, approved_at, joined_agency_at) VALUES($1,$2,'approved',NOW(),NOW())
+           ON CONFLICT (user_id) DO UPDATE SET agency_id = EXCLUDED.agency_id, status = 'approved',
+             approved_at = COALESCE(broadcasters.approved_at, NOW()), joined_agency_at = NOW()`,
           [q.user_id, agency.id],
         );
       } else {
@@ -276,6 +235,27 @@ router.post('/agency-requests/:requestId/respond', async (req, res) => {
   res.json({ ok: true, accepted: accept });
 });
 
+// Ajans sahibi kendi ajansında yayıncı olabilir (davet beklemeden).
+router.post('/agencies/:agencyId/self-join', async (req, res) => {
+  const a = await assertAgencyOwner(uuid(req.params.agencyId, 'Ajans'), req.user);
+  if (a.owner_id !== req.user.id) throw fail('Yalnızca ajans sahibi.', 403);
+  if (a.status !== 'active') throw fail('Ajans henüz aktif değil.', 409);
+  await tx(async (c) => {
+    const b = (await c.query(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1 FOR UPDATE`, [req.user.id])).rows[0];
+    if (b?.status === 'suspended') throw fail('Yayıncılığınız askıya alınmış. Destek ile iletişime geçin.', 409);
+    if (b?.agency_id === a.id && b.status === 'approved') throw fail('Zaten bu ajansın yayıncısısınız.', 409);
+    if (b?.agency_id && b.agency_id !== a.id) throw fail('Başka bir ajansa bağlısınız. Önce o ajanstan ayrılın.', 409);
+    await c.query(
+      `INSERT INTO broadcasters(user_id, agency_id, status, approved_at, joined_agency_at) VALUES($1,$2,'approved',NOW(),NOW())
+       ON CONFLICT (user_id) DO UPDATE SET agency_id = EXCLUDED.agency_id, status = 'approved',
+         approved_at = COALESCE(broadcasters.approved_at, NOW()), joined_agency_at = NOW()`,
+      [req.user.id, a.id],
+    );
+    await c.query(`UPDATE agency_requests SET status = 'cancelled', responded_at = NOW() WHERE user_id = $1 AND status = 'pending'`, [req.user.id]);
+  });
+  res.json({ ok: true });
+});
+
 router.post('/agencies/:agencyId/broadcasters/:userId/remove', async (req, res) => {
   const a = await assertAgencyOwner(uuid(req.params.agencyId, 'Ajans'), req.user);
   const userId = uuid(req.params.userId, 'Kullanıcı');
@@ -285,19 +265,7 @@ router.post('/agencies/:agencyId/broadcasters/:userId/remove', async (req, res) 
 });
 
 // ---------------- Yayıncı ----------------
-router.post('/broadcaster/apply', async (req, res) => {
-  if (await ownedAgency(req.user.id)) throw fail('Ajans sahipleri yayıncı olamaz.', 409);
-  const b = (await query(`SELECT status FROM broadcasters WHERE user_id = $1`, [req.user.id])).rows[0];
-  if (b?.status === 'pending') throw fail('Başvurunuz zaten inceleniyor.', 409);
-  if (b?.status === 'approved') throw fail('Zaten onaylı bir yayıncısınız.', 409);
-  if (b?.status === 'suspended') throw fail('Yayıncı hesabınız askıya alınmış. Destek ile iletişime geçin.', 403);
-  await query(
-    `INSERT INTO broadcasters(user_id, status) VALUES($1,'pending')
-     ON CONFLICT (user_id) DO UPDATE SET status = 'pending', applied_at = NOW()`,
-    [req.user.id],
-  );
-  res.status(201).json({ ok: true, status: 'pending' });
-});
+router.post('/broadcaster/apply', async () => { throw fail(INVITE_ONLY, 403); });
 
 router.get('/broadcaster/me', async (req, res) => {
   const b = (await query(

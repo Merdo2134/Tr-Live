@@ -124,7 +124,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   Positioned(left: -24, top: -24, right: -24, bottom: -24, child: IgnorePointer(child: WipAura(level: wipLevelOf(wip?['level'])!))),
                 UserAvatar(user: p, radius: 46),
                 // Takılı çerçeve yoksa WIP kademesinin çerçevesi.
-                if (frame == null) WipFrame.around(wipLevelOf(wip?['level']), 46),
+                if (frame == null) WipFrame.around(wipLevelOf(p['wipFrame'] ?? wip?['level']), 46),
                 if (frame != null) IgnorePointer(child: SizedBox(width: 46 * 2 * kFrameScale, height: 46 * 2 * kFrameScale, child: AnimAsset(url: frame, repeat: true, cache: false))),
               ]),
             ),

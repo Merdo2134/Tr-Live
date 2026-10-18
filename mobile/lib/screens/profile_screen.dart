@@ -332,7 +332,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _menu(Map<String, dynamic> p, bool isDealer) {
     final agencyOwned = mapOf(p['agencyOwned']);
     final broadcasterStatus = p['broadcasterStatus']?.toString();
-    final isBroadcaster = broadcasterStatus == 'approved' || broadcasterStatus == 'pending';
+    final isBroadcaster = broadcasterStatus == 'approved';
     Widget row(IconData icon, Color color, String title, VoidCallback onTap, {String? sub}) => ListTile(
           leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: color.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: color, size: 20)),
           title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
@@ -346,11 +346,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       decoration: BoxDecoration(color: Pal.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: Pal.outline)),
       child: Column(children: [
         row(Icons.storefront, Colors.orangeAccent, 'Mağaza', () => _open(const StoreScreen())),
-        // Yayıncı Merkezi: ajans sahibi dışındaki herkeste (yayıncılar ve başvuracaklar)
-        if (agencyOwned == null)
-          row(Icons.podcasts, Colors.pinkAccent, isBroadcaster ? 'Yayıncı Merkezi' : 'Yayıncı Ol', () => _open(const AgencyScreen(mode: 'broadcaster')),
-              sub: isBroadcaster ? (broadcasterStatus == 'pending' ? 'Başvurunuz inceleniyor' : null) : 'Başvur veya ajans kur'),
-        // Ajans Merkezi: yalnızca ajans sahibi
+        // Yayıncı Merkezi: yalnızca ajans davetini kabul etmiş (onaylı) yayıncılar. Başvuru yok; davet Mesajlar'a düşer.
+        if (isBroadcaster) row(Icons.podcasts, Colors.pinkAccent, 'Yayıncı Merkezi', () => _open(const AgencyScreen(mode: 'broadcaster'))),
+        // Ajans Merkezi: yalnızca ajans sahibi (ajansı yönetici açar). Ajans sahibi aynı zamanda yayıncı da olabilir.
         if (agencyOwned != null) row(Icons.business, Colors.lightBlueAccent, 'Ajans Merkezi', () => _open(const AgencyScreen(mode: 'agency')), sub: '${agencyOwned['name']} · ${const {'pending': 'İnceleniyor', 'active': 'Aktif', 'suspended': 'Askıda', 'rejected': 'Reddedildi'}[agencyOwned['status']] ?? agencyOwned['status']}'),
         row(Icons.task_alt, Colors.greenAccent, 'Günlük Görevler', () => showDailySheet(context)),
         if (isDealer) row(Icons.store_mall_directory, Colors.tealAccent, 'Bayi paneli', () => _open(const DealerScreen())),

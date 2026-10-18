@@ -391,27 +391,37 @@ test('WIP: kademeler, satın alma, uzatma, düşük seviye engeli, oda sınırı
 
 let agencyId; let agencyCode;
 test('ajans/yayıncı: başvuru, kod, onay, katılma, hedef/maaş, komisyon kademesi, dönem kapatma, KYC, ödeme', { skip, timeout: 90000 }, async () => {
-  status(await api('POST', '/api/broadcaster/apply', { token: U.f.token }), 201);
-  status(await api('POST', '/api/broadcaster/apply', { token: U.f.token }), 409, 'tekrar başvuru');
-  ok(await api('POST', `/api/admin/broadcasters/${U.f.id}/status`, { token: U.d.token, body: { status: 'approved' } }));
-  status(await api('POST', `/api/admin/broadcasters/${U.f.id}/status`, { token: U.a.token, body: { status: 'approved' } }), 403, 'yetkisiz');
-  const ag = await api('POST', '/api/agencies', { token: U.e.token, body: { name: `Ajans ${tag}`, description: 'test ajansı' } });
+  // Başvuru yolları kapalı: ajansı yönetici açar, yayıncılık yalnızca davetle.
+  status(await api('POST', '/api/broadcaster/apply', { token: U.f.token }), 403, 'yayıncı başvurusu kapalı');
+  status(await api('POST', '/api/agencies', { token: U.e.token, body: { name: `Ajans ${tag}` } }), 403, 'kullanıcı ajans kuramaz');
+  status(await api('POST', '/api/admin/agencies', { token: U.a.token, body: { userId: U.e.id, name: `Ajans ${tag}` } }), 403, 'yetkisiz ajans açma');
+  const ag = await api('POST', '/api/admin/agencies', { token: U.d.token, body: { userId: U.e.id, name: `Ajans ${tag}`, description: 'test ajansı' } });
   status(ag, 201);
   agencyId = ag.body.agency.id;
-  status(await api('POST', `/api/agencies/${agencyId}/apply`, { token: U.f.token }), 404, 'onaysız ajansa başvurulamaz');
-  ok(await api('POST', `/api/admin/agencies/${agencyId}/status`, { token: U.d.token, body: { status: 'active' } }));
-  status(await api('POST', `/api/admin/agencies/${agencyId}/status`, { token: U.a.token, body: { status: 'active' } }), 403);
+  assert.equal(ag.body.agency.status, 'active');
+  status(await api('POST', '/api/admin/agencies', { token: U.d.token, body: { userId: U.e.id, name: `Ajans2 ${tag}` } }), 409, 'ikinci ajans');
+  status(await api('POST', `/api/agencies/${agencyId}/apply`, { token: U.f.token }), 403, 'ajansa başvuru kapalı');
 
   const mine = await api('GET', '/api/agencies/mine', { token: U.e.token });
   agencyCode = mine.body.owned.agencyCode;
   assert.match(agencyCode, /^\d{8}$/, '8 haneli ajans kodu');
-  status(await api('GET', '/api/agencies/by-code/123', { token: U.f.token }), 400);
-  status(await api('GET', '/api/agencies/by-code/00000000', { token: U.f.token }), 404);
-  ok(await api('GET', `/api/agencies/by-code/${agencyCode}`, { token: U.f.token }));
-  const ap = await api('POST', '/api/agencies/apply-by-code', { token: U.f.token, body: { code: agencyCode } });
-  status(ap, 201);
-  status(await api('POST', `/api/agency-requests/${ap.body.requestId}/respond`, { token: U.f.token, body: { accept: true } }), 403, 'başvuruyu başvuran onaylayamaz');
-  ok(await api('POST', `/api/agency-requests/${ap.body.requestId}/respond`, { token: U.e.token, body: { accept: true } }));
+  status(await api('POST', '/api/agencies/apply-by-code', { token: U.f.token, body: { code: agencyCode } }), 403, 'kodla başvuru kapalı');
+  // Kullanıcı ID'si ile bulunur ve davet edilir.
+  const fPub = (await sql(`SELECT public_id FROM users WHERE id = $1`, [U.f.id])).rows[0].public_id;
+  const found = await api('GET', `/api/users/search?q=${encodeURIComponent(fPub)}`, { token: U.e.token });
+  ok(found);
+  assert.equal(found.body.users[0].id, U.f.id, 'ID ile arama');
+  const inv = await api('POST', `/api/agencies/${agencyId}/invite`, { token: U.e.token, body: { userId: U.f.id } });
+  status(inv, 201);
+  status(await api('POST', `/api/agency-requests/${inv.body.requestId}/respond`, { token: U.e.token, body: { accept: true } }), 403, 'daveti davet eden kabul edemez');
+  ok(await api('POST', `/api/agency-requests/${inv.body.requestId}/respond`, { token: U.f.token, body: { accept: true } }));
+  assert.equal((await sql(`SELECT status, agency_id FROM broadcasters WHERE user_id = $1`, [U.f.id])).rows[0].status, 'approved');
+  // Ajans sahibi kendi ajansında yayıncı olabilir.
+  status(await api('POST', `/api/agencies/${agencyId}/self-join`, { token: U.f.token }), 403, 'sahibi olmayan katılamaz');
+  ok(await api('POST', `/api/agencies/${agencyId}/self-join`, { token: U.e.token }));
+  status(await api('POST', `/api/agencies/${agencyId}/self-join`, { token: U.e.token }), 409, 'tekrar katılma');
+  ok(await api('POST', '/api/broadcaster/leave-agency', { token: U.e.token }));
+  await sql(`DELETE FROM broadcasters WHERE user_id = $1`, [U.e.id]);
 
   // Ayarlar: yalnızca yönetici; geçersiz kademeler reddedilir.
   status(await api('PUT', '/api/admin/agency-config', { token: U.a.token, body: { settings: { cycle: 'monthly' } } }), 403);
