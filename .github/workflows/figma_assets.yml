@@ -7,6 +7,11 @@ name: Figma görsellerini indir
 # Gerekli gizli anahtar: FIGMA_TOKEN (Figma > Settings > Security > Personal access tokens, "File content: Read").
 on:
   workflow_dispatch:
+    inputs:
+      screens:
+        description: "Görüntüsü alınacak ekranlar (virgülle düğüm id)"
+        required: false
+        default: "445:14920,2434:1955,2434:2896,2420:2258,2420:2994,2438:3708,2442:4354,2442:4196,2434:2129,2434:2547,2442:4995,2442:4564,2434:2273,2434:2679,2438:3280,2438:3519,2442:5183,2438:3839,2438:3945,2438:3610,2420:2910,2420:3045,2562:2009,2562:4480,2582:6870,2562:2693,2562:2171,2562:3026,2562:3150,2562:3198,2562:3246,2562:3293,2582:6606,2582:6712,2582:10937,2139:2115,2139:2482,2582:7601,2562:5900,2562:6020,2562:3361,2562:3424,2576:6090,2576:6262,2576:6281,2582:11009,2582:11021,2687:3194,2687:3406,2687:4298,2965:2219,2965:2390,2965:2447,2965:2617,2965:2674,2965:2844,2965:2901,2965:3071,2965:3128,2965:3380,2965:3437,2965:3618,2576:6305,2582:11034,2839:2196,2841:2447,2841:2582,2842:2718,2843:2848,2899:2203,2919:2204,2919:2333,2919:2594,2921:2727,2924:2845,2928:2219,2931:2359,2933:2506"
 
 permissions:
   contents: write
@@ -23,27 +28,36 @@ jobs:
         env:
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
           FIGMA_FILE: N8aBk1e0Shr9FbPFP6Z23M
+          SCREENS: ${{ inputs.screens }}
         shell: bash
         run: |
           set -euo pipefail
           if [ -z "${FIGMA_TOKEN:-}" ]; then echo "HATA: FIGMA_TOKEN gizli anahtarı eklenmemiş."; exit 1; fi
           pip install --quiet pillow
           mkdir -p /tmp/out/img /tmp/out/render
-          python3 - <<'PY'
+          python3 -u - <<'PY'
           import io, json, os, time, urllib.request, urllib.parse
           from concurrent.futures import ThreadPoolExecutor
           from PIL import Image
           tok = os.environ['FIGMA_TOKEN']; key = os.environ['FIGMA_FILE']
+          import urllib.error
           def get(url, auth=True):
-              for i in range(6):
+              for i in range(8):
                   try:
                       req = urllib.request.Request(url, headers={'X-Figma-Token': tok} if auth else {})
-                      with urllib.request.urlopen(req, timeout=300) as r: return r.read()
+                      with urllib.request.urlopen(req, timeout=600) as r: return r.read()
+                  except urllib.error.HTTPError as e:
+                      wait = int(e.headers.get('Retry-After') or 0) or 15 * (i + 1)
+                      print(f'HTTP {e.code} ({url[:60]}), {wait} sn bekleniyor', flush=True)
+                      if e.code in (400, 403, 404): raise SystemExit(f'Figma hata {e.code}: ' + e.read()[:300].decode('utf-8', 'ignore'))
+                      if wait > 900: raise SystemExit('Figma istek sınırı: çok uzun bekleme (' + str(wait) + ' sn)')
+                      time.sleep(wait)
                   except Exception as e:
-                      print('tekrar deneniyor:', str(e)[:120]); time.sleep(8 * (i + 1))
+                      print('tekrar deneniyor:', str(e)[:120], flush=True); time.sleep(10 * (i + 1))
               raise SystemExit('Figma yanıt vermedi: ' + url[:120])
 
           # 1) Dosya ağacı: hangi görsel hangi katmanda / hangi ekranda
+          print('dosya ağacı indiriliyor...', flush=True)
           doc = json.loads(get(f'https://api.figma.com/v1/files/{key}'))
           index = {}
           def walk(n, top):
@@ -58,7 +72,7 @@ jobs:
           for page in doc['document']['children']:
               for fr in page.get('children') or []:
                   walk(fr, f"{fr['id']} {fr.get('name')}")
-          print('görsel sayısı:', len(index))
+          print('görsel sayısı:', len(index), flush=True)
 
           # 2) Orijinal görseller (webp, en fazla 1600 px)
           urls = json.loads(get(f'https://api.figma.com/v1/files/{key}/images'))['meta']['images']
@@ -80,12 +94,13 @@ jobs:
 
           # 2b) Ekran görüntüleri: telefon boyutundaki her ekran (jpg, 2x) ve ekran listesi
           os.makedirs('/tmp/out/screens', exist_ok=True)
+          want = [x.strip() for x in (os.environ.get('SCREENS') or '').split(',') if x.strip()]
           screens = []
           for page in doc['document']['children']:
               for fr in page.get('children') or []:
                   bb = fr.get('absoluteBoundingBox') or {}
-                  if fr.get('type') in ('FRAME', 'COMPONENT', 'INSTANCE', 'GROUP', 'SECTION') and 300 <= (bb.get('width') or 0) <= 450 and (bb.get('height') or 0) >= 500:
-                      screens.append({'id': fr['id'], 'name': fr.get('name'), 'x': bb.get('x'), 'y': bb.get('y'), 'w': bb.get('width'), 'h': bb.get('height')})
+                  if 300 <= (bb.get('width') or 0) <= 450 and (bb.get('height') or 0) >= 500:
+                      screens.append({'id': fr['id'], 'name': fr.get('name'), 'x': bb.get('x'), 'y': bb.get('y'), 'w': bb.get('width'), 'h': bb.get('height'), 'shot': fr['id'] in want})
           json.dump(screens, open('/tmp/out/screens.json', 'w'), ensure_ascii=False, indent=0)
           print('ekran sayısı:', len(screens))
           def shot(chunk):
@@ -102,8 +117,9 @@ jobs:
                       im.save('/tmp/out/screens/' + s['id'].replace(':', '-') + '.jpg', 'JPEG', quality=80)
                   except BaseException as e:
                       print('ekran atlandı', s['id'], str(e)[:60])
-          with ThreadPoolExecutor(4) as ex:
-              list(ex.map(shot, [screens[i:i + 10] for i in range(0, len(screens), 10)]))
+          with ThreadPoolExecutor(1) as ex:
+              todo = [{'id': i} for i in want]
+              list(ex.map(shot, [todo[i:i + 25] for i in range(0, len(todo), 25)]))
 
           # 3) İsteğe bağlı hazır görüntüler
           if os.path.exists('deploy/figma/nodes.txt'):
