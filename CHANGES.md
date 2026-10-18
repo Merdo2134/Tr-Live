@@ -1,3 +1,28 @@
+## v2.52.0 — Profil, İlişki Duvarı ve Koruyucu (Figma tasarımı)
+- Kullanıcı profili Figma'daki beyaz tasarıma geçti: tam genişlik kapak, çerçeveli avatar, sağda koruyucu rozeti,
+  madalyalar, Profil / Başarılar / Paylaşım / İlişkiler sekmeleri, aile kartı, Top Destekçiler, seviye kartları.
+- İlişkiler: CP (tek), En İyi Arkadaş ve Kanka (birden çok). Davet Coin ile (CP 2500, En İyi Arkadaş 1500, Kanka 1000);
+  24 saat içinde kabul edilmezse, reddedilir ya da geri çekilirse Coin iade edilir. Seviye şartı kalktı.
+- İlişki Duvarı (profil → İlişkiler): CP sahnesi, En İyi Arkadaş ve Kanka kartları, "Diğerleri" listesi (kendi
+  listende düzenle ile çıkarma), CP İptali penceresi, ilişkisi olmayanlarda "İlişki Kur".
+- Yakınlık penceresi: özel mesajdaki kalp ya da profildeki "İlişki Kur" ile açılır; 5 seviye kalbi, görevler ve
+  "İlişki Türünü Seç" (CP / En İyi Arkadaş / Kanka) penceresi.
+- Koruyucu: 3000 Coin ile bir kullanıcının koruyucusu olunur. O kişiye gönderilen hediyelerde 1 Coin = 1 koruyucu
+  puanı. Hediye gönderilmeyen haftanın ardından Pazartesi 00:00'da puan düşer (250+ ise %20, altında 50), sıfırlanınca
+  koruyuculuk biter; ilk hafta muaf. Koruyucular sayfası, Koruyucu Ol penceresi, kurallar, Koruyuculuğum (Koruyucum /
+  Koruduğum; düzenle ile Seç / Kaldır / Sonlandır), "Koruyucu kabul et" ayarı. Profilde ve odadaki mini kartta
+  seçilen (yoksa en yüksek puanlı) koruyucu görünür.
+- Figma'daki süs görselleri (kanat, şato, çerçeve süsleri, madalyalar, simgeler) uygulamaya eklendi.
+- Figma görsellerini indiren iş akışı (figma_assets.yml) eklendi.
+- Test: gizli kullanıcının kendini de gizli görmesine göre eski birim testi güncellendi.
+
+## v2.51.7 — Telefon araması ve hediye penceresi
+- Telefon araması: zil çalınca ve görüşme sürerken oda sesi, oda müziği ve mikrofon artık kesin kapanır; arama bitince
+  geri açılır. (Önceki yöntem ses odağı sinyaline dayanıyordu; oda sesi odağı kendisi aldığı için çoğu telefonda sinyal
+  gelmiyordu. Artık telefonun ses modu doğrudan okunuyor.)
+- Hediye penceresinin yüksekliği içeriğe göre hesaplanır: alttaki boşluk kalktı, pencere daha kısa ve aşağıda;
+  hediye kutuları biraz küçüldü.
+
 ## v2.51.6 — Hediye penceresi düzeni
 - Hediye penceresi sabit yükseklikte: kaymaz; hediyeye dokununca alt satır aşağı inmez, Coin / adet / Gönder satırı
   her zaman görünür.

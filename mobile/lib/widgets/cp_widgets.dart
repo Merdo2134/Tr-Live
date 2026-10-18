@@ -3,9 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/socket_service.dart';
-import 'app_theme.dart';
 import 'common.dart';
 import 'level_badge.dart';
+import '../screens/relations_screens.dart';
+import '../services/session.dart';
 
 /// CP (yakınlık) sistemi: iki kişi arasındaki puan, 5 kademe, 3. kademeden itibaren Arkadaş / CP ilişkisi,
 /// 5. kademede odada yan yana oturan CP'ler arasında kalp efekti.
@@ -14,7 +15,7 @@ const kCpRose = Color(0xFFFF7EB3);
 const kCpMaxLevel = 5;
 const kCpEffectLevel = 5; // odada kalp efekti
 
-String cpRelationLabel(String? r) => switch (r) { 'cp' => 'CP', 'friend' => 'Arkadaş', _ => '' };
+String cpRelationLabel(String? r) => switch (r) { 'cp' => 'CP', 'friend' => 'En İyi Arkadaş', 'kanka' => 'Kanka', _ => '' };
 
 /// Kalp şekli: [c] merkez, [s] genişlik.
 Path heartPath(Offset c, double s) {
@@ -49,7 +50,9 @@ class CpHearts extends StatelessWidget {
 class CpPanel extends StatefulWidget {
   final String userId;
   final String? displayName;
-  const CpPanel({super.key, required this.userId, this.displayName});
+  /// Kişinin kullanıcı bilgisi (davet penceresinde fotoğraf için).
+  final Map<String, dynamic>? user;
+  const CpPanel({super.key, required this.userId, this.displayName, this.user});
 
   @override
   State<CpPanel> createState() => _CpPanelState();
@@ -97,14 +100,23 @@ class _CpPanelState extends State<CpPanel> {
     if (r != null && done != null) toast(context, done);
   }
 
-  Future<void> _choose(String kind) async {
-    final name = widget.displayName ?? 'Bu kişi';
-    final ok = await confirm(
-      context,
-      kind == 'cp' ? '$name kişisine CP isteği gönderilsin mi? Kabul ederse CP olursunuz (herkesin tek CP\'si olur).' : '$name kişisine Arkadaş ilişkisi isteği gönderilsin mi?',
-      action: 'Gönder',
+  /// İlişki daveti (CP / En İyi Arkadaş / Kanka, Coin ile; 24 saatte kabul edilmezse iade).
+  Future<void> _invite() async {
+    final s = _s;
+    if (s == null) return;
+    final sent = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => RelationPickSheet(
+        other: {...?widget.user, 'id': widget.userId, 'displayName': widget.displayName ?? widget.user?['displayName']},
+        costs: mapOf(s['costs']) ?? {},
+      ),
     );
-    if (ok) await _post('request', {'kind': kind}, 'İstek gönderildi.');
+    if (sent == true) {
+      await _load();
+      await Session.refresh().catchError((_) {});
+    }
   }
 
   Future<void> _end(String relation) async {
@@ -124,8 +136,6 @@ class _CpPanelState extends State<CpPanel> {
     final progress = maxed ? 1.0 : ((exp - start) / math.max(1, next - start)).clamp(0.0, 1.0).toDouble();
     final relation = (s['relation'] ?? 'none').toString();
     final req = mapOf(s['request']);
-    final canChoose = s['canChoose'] == true;
-    final chooseLevel = (s['chooseLevel'] as num?)?.toInt() ?? 3;
 
     Widget btn(String label, IconData icon, VoidCallback? onTap, {bool primary = false, Color color = kCpPink}) => Expanded(
           child: primary
@@ -157,29 +167,21 @@ class _CpPanelState extends State<CpPanel> {
     } else if (req != null) {
       actions = [
         Row(children: [
-          Expanded(child: Text('${cpRelationLabel(req['kind'] as String?)} isteği gönderildi, yanıt bekleniyor', style: const TextStyle(color: Colors.white70, fontSize: 13))),
-          TextButton(onPressed: _busy ? null : () => _post('decline', null, 'İstek geri çekildi.'), child: const Text('Geri çek')),
+          Expanded(child: Text('${cpRelationLabel(req['kind'] as String?)} daveti gönderildi, yanıt bekleniyor', style: const TextStyle(color: Colors.white70, fontSize: 13))),
+          TextButton(onPressed: _busy ? null : () => _post('decline', null, 'Davet geri çekildi, Coin iade edildi.'), child: const Text('Geri çek')),
         ]),
       ];
     } else if (relation != 'none') {
       actions = [
         Row(children: [
-          if (relation == 'friend' && canChoose) ...[btn('CP olarak seç', Icons.favorite, () => _choose('cp'), primary: true), const SizedBox(width: 8)],
-          if (relation == 'cp' && canChoose) ...[btn('Arkadaş yap', Icons.people_alt_outlined, () => _choose('friend')), const SizedBox(width: 8)],
-          btn('İlişkiyi bitir', Icons.heart_broken_outlined, () => _end(relation), color: Colors.white60),
-        ]),
-      ];
-    } else if (canChoose) {
-      actions = [
-        Row(children: [
-          btn('Arkadaş olarak seç', Icons.people_alt_outlined, () => _choose('friend'), color: Pal.cyan),
+          btn('Değiştir', Icons.swap_horiz, _invite, primary: true),
           const SizedBox(width: 8),
-          btn('CP olarak seç', Icons.favorite, () => _choose('cp'), primary: true),
+          btn('İlişkiyi bitir', Icons.heart_broken_outlined, () => _end(relation), color: Colors.white60),
         ]),
       ];
     } else {
       actions = [
-        Text('Seviye $chooseLevel olunca Arkadaş ya da CP olarak seçebilirsiniz.', style: const TextStyle(color: Colors.white60, fontSize: 12.5)),
+        Row(children: [btn('İlişki kur (CP / En İyi Arkadaş / Kanka)', Icons.favorite, _invite, primary: true)]),
       ];
     }
 
@@ -211,7 +213,7 @@ class _CpPanelState extends State<CpPanel> {
           Text(maxed ? '${fmtNumber(s['exp'])} exp · en yüksek' : '${fmtNumber(s['exp'])} / ${fmtNumber(s['nextLevelExp'])} exp', style: const TextStyle(fontSize: 12, color: Colors.white70)),
         ]),
         const SizedBox(height: 4),
-        const Text('Günde 10 mesaj 100 exp · hediyeler Coin değeri kadar · CP hediyesi 1,5 kat', style: TextStyle(fontSize: 11, color: Colors.white54)),
+        const Text('Günde 10 mesaj 100 puan · hediyeler Coin değeri kadar · CP hediyesi 1,5 kat', style: TextStyle(fontSize: 11, color: Colors.white54)),
         const SizedBox(height: 10),
         ...actions,
       ]),

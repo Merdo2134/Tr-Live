@@ -18,6 +18,7 @@ import { drawLucky, LUCKY_BASE } from '../lucky.js';
 import { getConfig } from '../services/app_config.js';
 import { featuresFor, minLevelFor, wipLabel } from '../services/wip.js';
 import { addGiftExp } from '../services/cp.js';
+import { addGuardianPoints } from '../services/guardian.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -168,6 +169,8 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
       );
       // CP yakınlığı: iki kişi arasındaki hediye Coin değeri kadar exp (CP hediyesi 1,5 kat).
       await addGiftExp((t, p) => c.query(t, p), senderId, item.userId, coinAmount, gift.category === 'cp');
+      // Koruyucu puanı: gönderen alıcının koruyucusuysa 1 Coin = 1 puan.
+      await addGuardianPoints((t, p) => c.query(t, p), senderId, item.userId, coinAmount);
       const pkId = await scorePk(c, roomId, item.userId, senderId, credit, coinAmount);
       if (pkId) pkIds.add(pkId);
       await c.query(

@@ -92,6 +92,17 @@ export async function loadProfile(viewerId, targetId) {
       cp = { partner: publicUser(partner, viewerId), level: cpLevelFor(pair.rows[0].exp), exp: String(pair.rows[0].exp), since: pair.rows[0].relation_since };
     }
   }
+  // Koruyucu: sahibin seçtiği (yoksa en çok puanlı) koruyucu profilde görünür (kişi koruyucuyu kapattıysa görünmez).
+  let guardian = null;
+  if (u.guardian_enabled !== false) {
+    const g = (await query(
+      `SELECT g.guardian_id, g.points FROM guardians g JOIN users gu ON gu.id = g.guardian_id AND gu.account_status = 'active'
+       WHERE g.owner_id = $1 ORDER BY (g.guardian_id = $2) DESC, g.points DESC, g.created_at ASC LIMIT 1`,
+      [targetId, u.guardian_shown_id ?? null],
+    )).rows[0];
+    const gRow = g ? await loadPublicRow(g.guardian_id) : null;
+    if (gRow) guardian = { user: publicUser(gRow, viewerId), points: String(g.points) };
+  }
   const profile = {
     id: u.id,
     publicId: u.public_id ?? null,
@@ -132,6 +143,8 @@ export async function loadProfile(viewerId, targetId) {
       return u.wip_hidden?.frame === true ? 0 : null;
     })(),
     cp,
+    guardian,
+    guardianEnabled: u.guardian_enabled !== false,
     // Çevrimiçi / son görülme (kişi gizlemediyse). Kendi profilinde gösterilmez.
     presence: isSelf || blocked.rowCount ? null : presenceView(u),
     family: f ? { id: f.id, name: f.name, logoUrl: f.logo_url, level: f.level, role: f.role } : null,

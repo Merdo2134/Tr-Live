@@ -1396,7 +1396,14 @@ test('CP: mesaj/hediye puanı, kademe, ilişki isteği, tek CP, bitirme', { skip
   let st = (await api('GET', `/api/cp/with/${q.id}`, { token: p.token })).body;
   assert.equal(st.exp, '20', 'iki mesaj = 20 exp');
   assert.equal(st.level, 0);
-  status(await api('POST', `/api/cp/with/${q.id}/request`, { token: p.token, body: { kind: 'cp' } }), 400, 'seviye 3 olmadan seçilemez');
+  await sql(`UPDATE users SET coins = 0 WHERE id = $1`, [p.id]);
+  status(await api('POST', `/api/cp/with/${q.id}/request`, { token: p.token, body: { kind: 'cp' } }), 400, 'Coin yoksa davet gönderilemez');
+  await sql(`UPDATE users SET coins = 10000 WHERE id = ANY($1::uuid[])`, [[p.id, q.id, r.id]]);
+  // Davet Coin alır; reddedilince iade edilir.
+  ok(await api('POST', `/api/cp/with/${q.id}/request`, { token: p.token, body: { kind: 'kanka' } }));
+  assert.equal((await sql(`SELECT coins FROM users WHERE id = $1`, [p.id])).rows[0].coins, '9000', 'kanka daveti 1000 Coin');
+  ok(await api('POST', `/api/cp/with/${p.id}/decline`, { token: q.token }));
+  assert.equal((await sql(`SELECT coins FROM users WHERE id = $1`, [p.id])).rows[0].coins, '10000', 'reddedilince iade');
   // Günlük sınır: 10 mesajdan sonrası puan getirmez
   await sql(`UPDATE cp_pairs SET msg_count = 10 WHERE user_a = LEAST($1::uuid, $2::uuid) AND user_b = GREATEST($1::uuid, $2::uuid)`, [p.id, q.id]);
   status(await api('POST', `/api/messages/with/${q.id}`, { token: p.token, body: { text: 'bir daha' } }), 201);
@@ -1404,8 +1411,9 @@ test('CP: mesaj/hediye puanı, kademe, ilişki isteği, tek CP, bitirme', { skip
   assert.equal((await api('GET', `/api/cp/with/${q.id}`, { token: p.token })).body.exp, '20', 'günlük 10 mesaj sınırı');
   await sql(`UPDATE cp_pairs SET exp = 1500000 WHERE user_a = LEAST($1::uuid, $2::uuid) AND user_b = GREATEST($1::uuid, $2::uuid)`, [p.id, q.id]);
   st = (await api('GET', `/api/cp/with/${p.id}`, { token: q.token })).body;
-  assert.equal(st.level, 5); assert.equal(st.canChoose, true);
+  assert.equal(st.level, 5); assert.equal(st.costs.cp, '2500');
   ok(await api('POST', `/api/cp/with/${q.id}/request`, { token: p.token, body: { kind: 'cp' } }));
+  assert.equal((await sql(`SELECT coins FROM users WHERE id = $1`, [p.id])).rows[0].coins, '7500', 'CP daveti 2500 Coin');
   const inc = (await api('GET', '/api/cp/requests', { token: q.token })).body.requests;
   assert.equal(inc.length, 1); assert.equal(inc[0].kind, 'cp'); assert.equal(inc[0].user.id, p.id);
   assert.equal((await api('GET', '/api/me/badges', { token: q.token })).body.friends, 1, 'rozet CP isteğini sayar');
@@ -1426,4 +1434,34 @@ test('CP: mesaj/hediye puanı, kademe, ilişki isteği, tek CP, bitirme', { skip
   const ids = (await sql(`SELECT cp_partner_id FROM users WHERE id = ANY($1::uuid[])`, [[p.id, q.id]])).rows;
   assert.ok(ids.every((x) => x.cp_partner_id === null), 'bitince CP bağı kalkar');
   assert.equal((await api('GET', `/api/cp/with/${q.id}`, { token: p.token })).body.exp, '1500000', 'puan korunur');
+  // İlişki Duvarı
+  const wall = (await api('GET', `/api/cp/wall/${p.id}`, { token: q.token })).body;
+  assert.equal(wall.cp, null); assert.equal(wall.friend.count, 1); assert.equal(wall.friend.items[0].user.id, r.id);
+  // Süresi dolan davet iade edilir
+  ok(await api('POST', `/api/cp/with/${q.id}/request`, { token: r.token, body: { kind: 'friend' } }));
+  await sql(`UPDATE cp_pairs SET request_at = NOW() - INTERVAL '25 hours' WHERE request_from = $1`, [r.id]);
+  // Süresi dolan davet yerine yenisi gönderilince eskisinin Coin'i iade edilir.
+  ok(await api('POST', `/api/cp/with/${q.id}/request`, { token: r.token, body: { kind: 'friend' } }));
+  const refunds = (await sql(`SELECT COUNT(*)::int AS n FROM wallet_transactions WHERE user_id = $1 AND transaction_type = 'relation_refund'`, [r.id])).rows[0].n;
+  assert.equal(refunds, 1, 'süresi dolan davet iade edildi');
+});
+
+test('koruyucu: Coin ile koruyucu olunur, profilde görünür, kapatılabilir', { skip, timeout: 60000 }, async () => {
+  const o = await register('gown'); const g = await register('gguard');
+  await sql(`UPDATE users SET coins = 5000 WHERE id = $1`, [g.id]);
+  status(await api('POST', `/api/guardians/of/${o.id}/join`, { token: o.token }), 400, 'kendine koruyucu olunmaz');
+  const j = (await api('POST', `/api/guardians/of/${o.id}/join`, { token: g.token })).body;
+  assert.equal(j.coins, '2000', 'koruyucu kartı 3000 Coin');
+  status(await api('POST', `/api/guardians/of/${o.id}/join`, { token: g.token }), 400, 'iki kez olunmaz');
+  let d = (await api('GET', `/api/guardians/of/${o.id}`, { token: g.token })).body;
+  assert.equal(d.guardians.length, 1); assert.equal(d.myPoints, '0');
+  const prof = (await api('GET', `/api/users/${o.id}`, { token: g.token })).body.profile;
+  assert.equal(prof.guardian.user.id, g.id, 'profilde koruyucu');
+  await sql(`UPDATE guardians SET points = 800 WHERE owner_id = $1`, [o.id]);
+  d = (await api('GET', `/api/guardians/of/${o.id}`, { token: g.token })).body;
+  assert.equal(d.myPoints, '800'); assert.equal(d.top.user.id, g.id);
+  // Kapatılınca kimse koruyucu olamaz
+  ok(await api('PUT', '/api/guardians/settings', { token: o.token, body: { enabled: false } }));
+  ok(await api('POST', `/api/guardians/of/${o.id}/leave`, { token: g.token }));
+  status(await api('POST', `/api/guardians/of/${o.id}/join`, { token: g.token }), 400, 'kapalıyken olunmaz');
 });

@@ -306,8 +306,9 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
     final mq = MediaQuery.of(context);
     return SafeArea(
       child: Container(
-        // Sabit yükseklik (ekranın ~%45'i): içerik kaymaz, alttaki Coin / Gönder satırı her zaman görünür.
-        height: (mq.size.height * 0.45).clamp(330.0, mq.size.height * 0.6).toDouble() + mq.viewInsets.bottom,
+        // Sabit yükseklik, içeriğe göre hesaplanır (boşluk kalmaz): kişi satırı + sekmeler + 2 satır hediye + alt satır.
+        // İçerik kaymaz, alttaki Coin / Gönder satırı her zaman görünür.
+        height: _sheetHeight(mq) + mq.viewInsets.bottom,
         padding: EdgeInsets.fromLTRB(12, 10, 12, 8 + mq.viewInsets.bottom),
         decoration: const BoxDecoration(color: Color(0xFF0D1626), borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
         child: _loading
@@ -318,6 +319,20 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
       ),
     );
   }
+
+  /// Pencere yüksekliği: üst/alt boşluk 18 + kişi satırı 52 + 6 + sekmeler 34 + 6 + ızgara + 4 + alt satır 36 (+ birkaç px pay).
+  double _sheetHeight(MediaQueryData mq) {
+    const gap = 8.0;
+    final tileW = (mq.size.width - 24 - gap * 3) / 4;
+    final grid = tileW * _tileRatio * 2 + gap + 14;
+    // Kişi listesi açıldıysa (en fazla 112 px) fazlası kadar uzar; yatay ekranda üst sınır alt sınırın altına düşebilir.
+    final maxH = mq.size.height * 0.6;
+    final want = 162 + grid + (_expanded ? 60 : 0);
+    return want.clamp(math.min(280.0, maxH), maxH).toDouble();
+  }
+
+  /// Hediye kutusu yüksekliği / genişliği.
+  static const _tileRatio = 0.92;
 
   Widget _body() {
     // Kaydırma yok: kişi satırı, sekmeler ve alt satır sabit; hediye ızgarası kalan alanı doldurur.
@@ -341,7 +356,7 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
         ),
         // Şanslı hediye sonucu ızgaranın üstünde belirir (pencereyi büyütmez).
         Expanded(child: Stack(children: [
-          Positioned.fill(child: _giftPages()),
+          Positioned.fill(child: ClipRect(child: _giftPages())),
           Positioned(
             left: 0,
             right: 0,
@@ -476,8 +491,8 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
       const gap = 8.0;
       final tileW = (box.maxWidth - gap * 3) / 4;
       // Kare görünüm; kalan yükseklik azsa (küçük ekran) satırlar sığacak kadar basıklaşır.
-      final fitH = box.maxHeight.isFinite ? (box.maxHeight - 14 - gap) / 2 : tileW * 1.05;
-      final tileH = math.min(tileW * 1.05, fitH).clamp(40.0, 400.0).toDouble();
+      final fitH = box.maxHeight.isFinite ? (box.maxHeight - 14 - gap) / 2 : tileW * _tileRatio;
+      final tileH = math.min(tileW * _tileRatio, fitH).clamp(20.0, 400.0).toDouble();
       // Her sayfa ve sekme 2 satırlık yer kaplar (hediye az da olsa yok da olsa yükseklik aynı); sayfa noktaları için de yer ayrılır.
       if (gifts.isEmpty) {
         return SizedBox(height: tileH * 2 + gap + 14, child: const Center(child: Text('Bu sekmede hediye yok.', style: TextStyle(color: Colors.white54))));

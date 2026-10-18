@@ -126,7 +126,7 @@ test('publicUser: bakiye sızdırmaz, gizli kullanıcıyı maskeler', () => {
   assert.equal(hidden.displayName, 'Gizli Kullanıcı');
   assert.equal(hidden.avatarUrl, null);
   assert.equal(hidden.wipLevel, null);
-  assert.equal(publicUser({ ...row, is_hidden: true }, A).displayName, 'Ali'); // kendini görür
+  assert.equal(publicUser({ ...row, is_hidden: true }, A).displayName, 'Gizli Kullanıcı'); // gizli kişi kendini de gizli görür
   assert.equal(selfUser({ ...row, total_sent_coins: '1', total_received_diamonds: '2' }).coins, '999');
 });
 

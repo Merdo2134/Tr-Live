@@ -403,7 +403,7 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
     if (!mounted) return;
     setState(() => _busy.remove(key));
     if (r != null) {
-      if (accept) toast(context, rel == 'cp' ? 'Artık CP\'siniz! ❤' : 'Artık arkadaşsınız.');
+      if (accept) toast(context, rel == 'cp' ? 'Artık CP\'siniz! ❤' : rel == 'kanka' ? 'Artık kankasınız!' : rel == 'friend' ? 'Artık en iyi arkadaşsınız!' : 'Artık arkadaşsınız.');
       setState(() => _v++);
       Inbox.refreshBadges();
     }
@@ -465,7 +465,7 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
                             title: UserName(user: u, style: const TextStyle(fontWeight: FontWeight.w700)),
                             subtitle: rel == null
                                 ? Text(yohoTime(r['createdAt'], withClock: true), style: const TextStyle(color: Pal.textDim, fontSize: 12))
-                                : Text('${rel == 'cp' ? '❤ CP' : '🤝 Arkadaş'} olarak seçti · ${yohoTime(r['createdAt'], withClock: true)}',
+                                : Text('${rel == 'cp' ? '❤ CP' : rel == 'kanka' ? '🤜 Kanka' : '🤝 En İyi Arkadaş'} olarak seçti · ${yohoTime(r['createdAt'], withClock: true)}',
                                     maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFFF7EB3), fontSize: 12)),
                             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                               FilledButton(

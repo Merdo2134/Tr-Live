@@ -703,7 +703,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   // ---------- LiveKit ----------
   void _onLkChanged() {
-    if (_roomMuted) _applyRoomSound();
+    if (_roomMuted || CallGuard.instance.inCall.value) _applyRoomSound();
     final r = _lk;
     // Ses sunucusu bağlantısı koptuysa (ağ değişimi, sunucudan çıkarılma sonrası yeniden katılma) yeniden kur.
     if (r != null && r.connectionState == lk.ConnectionState.disconnected && !_lkConnecting && !_closing && mounted) {
@@ -810,15 +810,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   /// Telefon araması başladı / bitti: odadakilerin sesi ve kendi mikrofonum kapanır, arama bitince eski hâline döner.
   void _onPhoneCall() {
     final call = CallGuard.instance.inCall.value;
+    _applyRoomSound();
     final room = _lk;
     if (room != null) {
-      for (final p in room.remoteParticipants.values) {
-        for (final pub in p.audioTrackPublications) {
-          final t = pub.track;
-          if (t == null) continue;
-          _quiet(call ? t.disable() : t.enable());
-        }
-      }
       if (call) {
         final lp = room.localParticipant;
         if (lp != null) _quiet(lp.setMicrophoneEnabled(false));
@@ -2042,6 +2036,17 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                             if (seat != null) _pill('${seat + 1}. koltuk', Colors.white24),
                             if (mapOf(profile?['cp'])?['partner'] != null)
                               _pill('CP: ${mapOf(mapOf(profile?['cp'])?['partner'])?['displayName'] ?? ''}', kCpPink, icon: Icons.favorite),
+                            // Koruyucu ayrıcalığı: en yüksek puanlı koruyucu mini kartta görünür.
+                            if (mapOf(mapOf(profile?['guardian'])?['user']) != null)
+                              Container(
+                                padding: const EdgeInsets.fromLTRB(2, 2, 8, 2),
+                                decoration: BoxDecoration(color: const Color(0xFFFF4FA8), borderRadius: BorderRadius.circular(12)),
+                                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  UserAvatar(user: mapOf(mapOf(profile?['guardian'])?['user']), radius: 9),
+                                  const SizedBox(width: 4),
+                                  Text('Koruyucu: ${mapOf(mapOf(profile?['guardian'])?['user'])?['displayName'] ?? ''}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                                ]),
+                              ),
                           ]),
                           const SizedBox(height: 8),
                           if (username.isNotEmpty)
@@ -2106,7 +2111,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                             ]),
                           ),
                           // CP / yakınlık: iki kişi arasındaki seviye ve ilişki seçimi (3. kademeden itibaren).
-                          if (!isSelf) CpPanel(userId: userId, displayName: (user?['displayName'] ?? '').toString()),
+                          if (!isSelf) CpPanel(userId: userId, displayName: (user?['displayName'] ?? '').toString(), user: user),
                           // Yönetim düğmeleri: yalnızca yetkili olana görünür.
                           if (canMod || canRole) ...[
                             const SizedBox(height: 10),
@@ -3122,13 +3127,15 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   }
 
   /// Uzaktaki konuşmacıların sesini bu cihazda kapatır / açar.
+  /// Oda sesi: kullanıcı kapattıysa ya da telefon araması sürüyorsa diğerlerinin sesi kapalı.
   void _applyRoomSound() {
     final room = _lk;
     if (room == null) return;
+    final on = !_roomMuted && !CallGuard.instance.inCall.value;
     for (final p in room.remoteParticipants.values) {
       for (final pub in p.audioTrackPublications) {
         try {
-          pub.track?.mediaStreamTrack.enabled = !_roomMuted;
+          pub.track?.mediaStreamTrack.enabled = on;
         } catch (_) {/* iz henüz hazır değil */}
       }
     }

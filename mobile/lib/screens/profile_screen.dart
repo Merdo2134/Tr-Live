@@ -22,6 +22,7 @@ import 'income_screens.dart';
 import 'login_screen.dart';
 import 'misc_screens.dart';
 import 'support_screens.dart';
+import 'guardian_screens.dart';
 import 'user_screens.dart';
 import 'wip_screen.dart';
 
@@ -399,6 +400,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (isBroadcaster) row(Icons.podcasts, Colors.pinkAccent, 'Yayıncı Merkezi', () => _open(const AgencyScreen(mode: 'broadcaster'))),
         // Ajans Merkezi: yalnızca ajans sahibi (ajansı yönetici açar). Ajans sahibi aynı zamanda yayıncı da olabilir.
         if (agencyOwned != null) row(Icons.business, Colors.lightBlueAccent, 'Ajans Merkezi', () => _open(const AgencyScreen(mode: 'agency')), sub: '${agencyOwned['name']} · ${const {'pending': 'İnceleniyor', 'active': 'Aktif', 'suspended': 'Askıda', 'rejected': 'Reddedildi'}[agencyOwned['status']] ?? agencyOwned['status']}'),
+        row(Icons.shield_outlined, const Color(0xFFFF4FA8), 'Koruyuculuğum', () => _open(MyGuardianScreen(profileBuilder: (id) => UserProfileScreen(userId: id))), sub: 'Koruyucuların ve koruduğun kişiler'),
         row(Icons.task_alt, Colors.greenAccent, 'Günlük Görevler', () => showDailySheet(context)),
         if (isDealer) row(Icons.store_mall_directory, Colors.tealAccent, 'Bayi paneli', () => _open(const DealerScreen())),
         if (Session.isStaff) row(Icons.admin_panel_settings, Colors.redAccent, Session.isAdmin ? 'Yönetim paneli' : 'Yardımcı admin paneli', () => _open(const AdminScreen())),

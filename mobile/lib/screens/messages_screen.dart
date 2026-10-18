@@ -12,6 +12,7 @@ import '../widgets/image_pick.dart';
 import '../widgets/presence_widgets.dart';
 import '../widgets/safety_actions.dart';
 import 'inbox_screens.dart';
+import 'relations_screens.dart';
 import 'user_screens.dart';
 
 /// Mesajlar sekmesi (Yoho düzeni): kategori kartları + sohbet listesi. İçerik [MessagesHome]'dadır; oda içindeki
@@ -380,6 +381,12 @@ class _ChatScreenState extends State<ChatScreen> {
             PresenceLine(userId: _peerId, fontSize: 11),
         ]),
         actions: [
+          // Yakınlık: seviye, görevler ve ilişki daveti (CP / En İyi Arkadaş / Kanka).
+          IconButton(
+            tooltip: 'Yakınlık',
+            onPressed: () => showIntimacySheet(context, _peerId),
+            icon: const Icon(Icons.favorite, color: Color(0xFFFF6FB5), size: 28),
+          ),
           GestureDetector(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfileScreen(userId: _peerId))),
             child: PresenceAvatar(userId: _peerId, dotSize: 10, child: UserAvatar(user: peer, radius: 17)),

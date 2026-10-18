@@ -14,10 +14,43 @@ class CallGuard {
   StreamSubscription<AudioInterruptionEvent>? _sub;
   // Açık oda sayısı: oda değiştirirken yeni oda eskisi kapanmadan açılabilir; son oda kapanınca bırakılır.
   int _users = 0;
+  Timer? _poll;
+  bool _focusPaused = false; // ses odağı "geçici kesinti" dedi
+  bool _phoneMode = false; // telefonun ses modu: çalıyor / görüşmede
+
+  void _update() => inCall.value = _focusPaused || _phoneMode;
+
+  /// Android'in ses modunu saniyede bir okur: zil çalıyorsa ya da normal telefon görüşmesi sürüyorsa arama var.
+  /// (Oda sesi sistemi ses odağını kendisi aldığı için odak sinyali bazı telefonlarda hiç gelmiyor; bu yol her zaman çalışır.)
+  void _startPoll() {
+    if (_poll != null || defaultTargetPlatform != TargetPlatform.android) return;
+    final am = AndroidAudioManager();
+    var busy = false;
+    _poll = Timer.periodic(const Duration(milliseconds: 800), (_) async {
+      if (busy) return;
+      busy = true;
+      try {
+        final m = await am.getMode();
+        if (_poll != null) {
+          _phoneMode = m == AndroidAudioHardwareMode.ringtone || m == AndroidAudioHardwareMode.inCall;
+          _update();
+        }
+      } catch (_) {
+        // Okunamayan mod (yeni Android sürümlerindeki yönlendirme modları): arama sayılmaz, ses takılı kalmasın.
+        if (_poll != null) {
+          _phoneMode = false;
+          _update();
+        }
+      } finally {
+        busy = false;
+      }
+    });
+  }
 
   /// Oda açılınca çağrılır.
   Future<void> start() async {
     _users++;
+    _startPoll();
     if (_sub != null) return;
     try {
       final s = await AudioSession.instance;
@@ -28,9 +61,9 @@ class CallGuard {
         androidWillPauseWhenDucked: false,
       ));
       _sub ??= s.interruptionEventStream.listen((e) {
-        // Yalnızca geçici kesinti (gelen/giden arama, zil): kalıcı kesintide (başka uygulama müzik açtı) dokunulmaz.
-        if (e.type != AudioInterruptionType.pause) return;
-        inCall.value = e.begin;
+        // Bitiş olayı ya da kalıcı / kısma türü kesinti bayrağı temizler (ses takılı kalmasın).
+        _focusPaused = e.begin && e.type == AudioInterruptionType.pause;
+        _update();
       });
       // Sinyalleri alabilmek için uygulama ses odağını ister.
       await s.setActive(true);
@@ -43,6 +76,10 @@ class CallGuard {
     if (_users > 0) return;
     await _sub?.cancel();
     _sub = null;
+    _poll?.cancel();
+    _poll = null;
+    _focusPaused = false;
+    _phoneMode = false;
     inCall.value = false;
     try {
       await (await AudioSession.instance).setActive(false);

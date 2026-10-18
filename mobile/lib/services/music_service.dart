@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'api.dart';
+import 'call_guard.dart';
 
 /// Odadaki ortak müziği her cihazda yerel olarak, sunucu konumuna senkron çalar.
 /// Sunucu "positionMs" (alındığı andaki konum) gönderir; şimdiki konum = positionMs + (şimdi - alındığıAn).
@@ -22,6 +23,10 @@ class MusicService {
   int _gen = 0; // her yeni durum/odadan çıkış sayacı artırır; eski (geç gelen) işlemler sonucu ezmesin
 
   AudioPlayer get _p => _player ??= AudioPlayer();
+  bool _callHooked = false;
+
+  /// Çalınacak ses düzeyi: kullanıcı kıstıysa ya da telefon araması sürüyorsa 0.
+  double get _vol => muted.value || CallGuard.instance.inCall.value ? 0 : volume.value;
 
   /// Panelde ilerleme çubuğu için şimdiki konum (ms).
   int currentPositionMs() {
@@ -36,6 +41,10 @@ class MusicService {
 
   Future<void> bind(String roomId) async {
     _roomId = roomId;
+    if (!_callHooked) {
+      _callHooked = true;
+      CallGuard.instance.inCall.addListener(() => _player?.setVolume(_vol).catchError((_) {}));
+    }
     await refresh();
     _resync?.cancel();
     // Sapmayı düzeltmek için 30 sn'de bir sunucu durumuyla yeniden eşitle.
@@ -76,7 +85,7 @@ class MusicService {
         _trackId = track['id'] as String?;
       }
       error.value = null;
-      await _p.setVolume(muted.value ? 0 : volume.value);
+      await _p.setVolume(_vol);
       if (stale()) return;
       final position = (s['positionMs'] as num?)?.toInt() ?? 0;
       await _p.seek(Duration(milliseconds: position + (status == 'playing' ? 150 : 0)));
@@ -93,12 +102,12 @@ class MusicService {
 
   Future<void> setVolume(double v) async {
     volume.value = v;
-    if (!muted.value) await _player?.setVolume(v);
+    await _player?.setVolume(_vol);
   }
 
   Future<void> setMuted(bool m) async {
     muted.value = m;
-    await _player?.setVolume(m ? 0 : volume.value);
+    await _player?.setVolume(_vol);
   }
 
   Future<void> unbind() async {

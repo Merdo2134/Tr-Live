@@ -12,6 +12,7 @@ import '../services/push_service.dart';
 import '../services/room_dock.dart';
 import '../services/socket_service.dart';
 import '../widgets/common.dart';
+import '../widgets/cp_widgets.dart';
 import '../widgets/gift_ribbon.dart';
 import 'feed_screen.dart';
 import 'go_live_screen.dart';
@@ -69,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       if (e['type'] != 'cp_request') return;
       final name = (mapOf(e['from'])?['displayName'] ?? 'Biri').toString();
-      toast(context, '$name seni ${e['kind'] == 'cp' ? 'CP' : 'Arkadaş'} olarak seçti ❤ (Mesajlar → Arkadaşlık isteği)');
+      toast(context, '$name seni ${cpRelationLabel(e['kind']?.toString())} olarak seçti ❤ (Mesajlar → Arkadaşlık isteği, 24 saat içinde yanıtla)');
     });
   }
 
