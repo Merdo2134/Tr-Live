@@ -125,6 +125,10 @@ button.red{background:#f43f5e;color:#fff}pre{white-space:pre-wrap;background:#0b
 <button class="red" ${importing() ? 'disabled' : ''}>${importing() ? 'Aktarılıyor…' : 'Verileri aktar'}</button></form>
 <pre>${tail('import.log', 40) || 'Henüz aktarma yapılmadı.'}</pre></section>
 
+<section><h2>Ses sunucusu testi</h2>
+<p>5 dakikada bir kendiliğinden yenilenir. ❌ olan satır varsa ekran görüntüsünü gönderin.</p>
+<pre>${tail('diag.txt', 80) || 'Henüz test yapılmadı (en geç 5 dakika içinde görünür).'}</pre></section>
+
 <section><h2>Kurulum kaydı (son satırlar)</h2><pre>${tail('install.log', 25) || '-'}</pre></section>
 </main></body></html>`;
 }

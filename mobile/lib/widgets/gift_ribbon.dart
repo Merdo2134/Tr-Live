@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
+import '../services/effect_prefs.dart';
 import '../services/error_log.dart';
 import '../services/room_dock.dart';
 import '../services/session.dart';
@@ -14,8 +15,6 @@ import 'wip_items.dart';
 class GiftRibbonOverlay extends StatefulWidget {
   final Widget child;
   final String? roomId;
-  /// Bu cihazda hediye / giriş efektleri gösterilsin mi (oda araçlarındaki "Efekt ve Ses").
-  static bool effectsOn = true;
   const GiftRibbonOverlay({super.key, required this.child, this.roomId});
 
   @override
@@ -54,9 +53,10 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   }
 
   void _onEvent(Map<String, dynamic> e) {
-    if (!GiftRibbonOverlay.effectsOn) return;
+    // Her efekt türü "Efekt ve Ses" ayarlarından ayrı ayrı kapatılabilir (EffectPrefs).
     final type = e['type'];
     if (type == 'lucky_bag_global' || type == 'lucky_gift_win' || type == 'global_gift_ribbon') {
+      if (!EffectPrefs.globalNotice) return;
       // Global duyurular (büyük hediye, süper çanta, büyük şanslı kazanç): yalnızca açık odalarda (hediyenin atıldığı
       // oda dahil), odanın üstünden geçen ayrı şeritte. Ana ekranda ve oda küçültülmüşken gösterilmez.
       if (widget.roomId == null || RoomDock.minimized.value) return;
@@ -64,15 +64,19 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     } else if (type == 'room_gift' && widget.roomId != null && e['roomId'] == widget.roomId) {
       // Önce ikon koltuğa uçar (oda ekranı), sonra tam ekran animasyon başlar.
       final g = mapOf(e['gift']);
-      Future.delayed(const Duration(milliseconds: 1300), () {
-        if (mounted) _enqueueAnim(g);
-      });
-      if (!_mergeCombo(e)) _enqueue(e);
+      if (EffectPrefs.giftAnim) {
+        Future.delayed(const Duration(milliseconds: 1300), () {
+          if (mounted) _enqueueAnim(g);
+        });
+      }
+      if (EffectPrefs.giftRibbon && !_mergeCombo(e)) _enqueue(e);
     } else if (type == 'lucky_bag_claimed' && widget.roomId != null && e['roomId'] == widget.roomId && e['user'] != null) {
-      _enqueue(e); // çantadan kim ne kadar aldı: odanın ortasından geçen kısa şerit
+      if (EffectPrefs.giftRibbon) _enqueue(e); // çantadan kim ne kadar aldı: odanın ortasından geçen kısa şerit
     } else if ((type == 'room_member_joined' || type == 'local_entrance') && widget.roomId != null && e['roomId'] == widget.roomId) {
       final effect = mapOf(e['entranceEffect']);
-      if (effect != null) _showEntrance(e, effect);
+      // SWIP araçları kapatılamaz (Yoho'daki gibi en üst kademe her zaman görünür).
+      final swip = effect?['kind'] == 'wip_vehicle' && (wipLevelOf(effect?['level']) ?? 0) >= 11;
+      if (effect != null && (EffectPrefs.entranceFx || swip)) _showEntrance(e, effect);
     }
   }
 
@@ -114,6 +118,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
           url: a['url'] as String,
           format: a['format'] as String,
           key: ValueKey(a['seq']),
+          sound: true,
           onDone: _nextAnim,
           onFail: (m) {
             ErrorLog.add('Hediye animasyonu oynatılamadı', '$m ${a['url']}');
@@ -163,7 +168,17 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   int _gSeq = 0;
   Timer? _gTimer;
 
+  // Son gösterilen global duyurular: aynı duyuru iki kez gelirse (ör. iki bağlantıdan) bir kez gösterilir.
+  final Map<String, DateTime> _gSeen = {};
+
   void _enqueueGlobal(Map<String, dynamic> e) {
+    final now = DateTime.now();
+    _gSeen.removeWhere((_, t) => now.difference(t).inSeconds > 30);
+    final key = (e['eventId'] ??
+            '${e['type']}|${mapOf(e['sender'])?['id']}|${mapOf(e['gift'])?['id']}|${e['quantity']}|${e['totalCoins']}|${e['bagId']}|${e['win']}')
+        .toString();
+    if (_gSeen.containsKey(key)) return;
+    _gSeen[key] = now;
     if (_gQueue.length < 8) _gQueue.add(e);
     if (_gCurrent == null) _nextGlobal();
   }
@@ -312,25 +327,32 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
                 child: Row(children: [
                   UserAvatar(user: sender, radius: h * 0.15),
                   SizedBox(width: w * 0.02),
+                  // Gönderen ve alıcı alt alta; sağda hediyenin görseli ve adedi.
                   Expanded(
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(
-                        '${sender?['displayName'] ?? 'Biri'}',
+                      Text.rich(
+                        TextSpan(children: [
+                          TextSpan(text: 'Gönderen ', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: fs * 0.85)),
+                          TextSpan(text: '${sender?['displayName'] ?? 'Biri'}', style: TextStyle(color: const Color(0xFFFFE082), fontWeight: FontWeight.w900, fontSize: fs)),
+                        ]),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: const Color(0xFFFFE082), fontWeight: FontWeight.w900, fontSize: fs, height: 1.15, shadows: const [Shadow(color: Colors.black54, blurRadius: 3)]),
+                        style: const TextStyle(height: 1.2, shadows: [Shadow(color: Colors.black54, blurRadius: 3)]),
                       ),
-                      Text(
-                        '→ ${names.isEmpty ? 'herkes' : names.join(', ')}',
+                      Text.rich(
+                        TextSpan(children: [
+                          TextSpan(text: 'Alıcı ', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: fs * 0.85)),
+                          TextSpan(text: names.isEmpty ? 'herkes' : names.join(', '), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: fs)),
+                        ]),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: fs * 0.9, height: 1.15, shadows: const [Shadow(color: Colors.black54, blurRadius: 3)]),
+                        style: const TextStyle(height: 1.2, shadows: [Shadow(color: Colors.black54, blurRadius: 3)]),
                       ),
                     ]),
                   ),
-                  if (icon != null) NetImg(icon, width: h * 0.34, height: h * 0.34, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard, color: Colors.white)),
+                  if (icon != null) NetImg(icon, width: h * 0.4, height: h * 0.4, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard, color: Colors.white)),
                   SizedBox(width: w * 0.01),
-                  Text('x${e['quantity'] ?? 1}', style: TextStyle(color: const Color(0xFFFFD54F), fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, fontSize: fs * 1.25, shadows: const [Shadow(color: Color(0xFFFF6D00), blurRadius: 6)])),
+                  Text('x${e['quantity'] ?? 1}', style: TextStyle(color: const Color(0xFFFFD54F), fontWeight: FontWeight.w900, fontStyle: FontStyle.italic, fontSize: fs * 1.3, shadows: const [Shadow(color: Color(0xFFFF6D00), blurRadius: 6)])),
                 ]),
               ),
             ]),
@@ -564,7 +586,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
           else if (url != null && vehicle && still)
             _VehicleDrive(key: ValueKey('veh-${_entrance!['seq']}'), url: url, durationMs: ms)
           else if (url != null)
-            AnimAsset(key: ValueKey('ent-${_entrance!['seq']}'), url: url, cache: false),
+            AnimAsset(key: ValueKey('ent-${_entrance!['seq']}'), url: url, cache: false, sound: true),
           Positioned(
             bottom: 140,
             child: Material(

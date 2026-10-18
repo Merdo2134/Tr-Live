@@ -1,7 +1,7 @@
 name: tr_live
 description: TR Live - canlı sesli/görüntülü odalar, aile, WIP, ajans/yayıncı, hediyeler ve yönetim
 publish_to: none
-version: 2.49.0+1
+version: 2.50.2+1
 environment:
   sdk: '>=3.8.0 <4.0.0'
   flutter: '>=3.32.0'
@@ -23,6 +23,8 @@ dependencies:
   image: ^4.2.0
   # livekit_client zaten bu paketi kullanıyor; 'any' aynı sürümü seçer (yeni yerel kod eklenmez).
   device_info_plus: any
+  # Telefon araması gelince oda sesini kapatmak için. just_audio zaten bu paketi kullanıyor (yeni yerel kod eklenmez).
+  audio_session: any
   cupertino_icons: ^1.0.8
   # Yönetimden herkese telefon bildirimi (Firebase gerektirmez). Sürüm sabit: API'si bu sürüme göre yazıldı.
   flutter_local_notifications: 19.5.0

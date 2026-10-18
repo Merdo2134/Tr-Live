@@ -15,6 +15,8 @@ import 'services/session.dart';
 import 'services/socket_service.dart';
 import 'widgets/app_theme.dart';
 import 'widgets/common.dart';
+import 'services/effect_prefs.dart';
+import 'widgets/nav_guard.dart';
 import 'widgets/tr_localizations.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -46,6 +48,8 @@ Future<void> _boot() async {
     ErrorWidget.builder = (details) => const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white24, size: 28));
   }
   // Açılış hiçbir koşulda takılmasın: hazırlık adımları hata verse / gecikse de uygulama ekranı açılır.
+  // Efekt ayarları (hediye animasyonu, araç, şerit, global bildirim) telefondan okunur.
+  await EffectPrefs.load().timeout(const Duration(seconds: 2), onTimeout: () {});
   try {
     BackgroundService.instance.init();
   } catch (e, s) {
@@ -100,6 +104,8 @@ class TRLiveApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
+      // Aynı sayfanın art arda iki kez açılmasını engeller.
+      navigatorObservers: [DuplicateRouteGuard()],
       debugShowCheckedModeBanner: false,
       title: 'TR Live',
       theme: buildAppTheme(),

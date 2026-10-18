@@ -145,6 +145,10 @@ EOF
 printf "POSTGRES_PASSWORD='%s'\nDOMAIN='%s'\nSSLIP='%s'\n" "$POSTGRES_PASSWORD" "$DOMAIN" "$SSLIP" > "$ENVD/compose.env"
 chmod 600 "$ENVD"/*.env
 
+# Sunucunun genel IP'si (sslip adından): LiveKit telefonlara bu adresi bildirir. Dış IP'yi her açılışta STUN ile
+# aramak yerine sabit yazmak, "Ses/görüntü bağlanamadı (Timeout)" hatasının sık bir sebebini ortadan kaldırır.
+PUBIP=$(echo "$SSLIP" | sed -e 's/\.sslip\.io$//' -e 's/-/./g')
+LK_OLD=$(md5sum "$ENVD/livekit.yaml" 2>/dev/null | cut -d' ' -f1)
 cat > "$ENVD/livekit.yaml" <<EOF
 port: 7880
 bind_addresses: ["0.0.0.0"]
@@ -152,7 +156,8 @@ rtc:
   tcp_port: 7881
   # Tüm medya tek UDP portundan (7882): güvenlik duvarında tek kural yeter.
   udp_port: 7882
-  use_external_ip: true
+  node_ip: ${PUBIP}
+  use_external_ip: false
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
 logging:
@@ -180,9 +185,15 @@ EOF
 log "Servisler derleniyor ve başlatılıyor (ilk seferde birkaç dakika sürer)"
 $COMPOSE up -d --build --remove-orphans
 if [ "$MODE" = --apply ]; then
-  # Ayar dosyası değişince Caddy yeniden okusun; sunucu yeniden başlasın (migration'lar da çalışır).
+  # Ayar dosyası değişince Caddy yeniden okusun. Uygulama sunucusu yalnızca panelden "Kaydet ve uygula" ile yeniden
+  # başlatılır; GitHub güncellemesinde imaj değiştiyse compose zaten yeniler (her yüklemede gereksiz kesinti olmasın).
   $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || $COMPOSE restart caddy
-  $COMPOSE restart backend
+  if [ "${TRLIVE_FROM_PANEL:-0}" = 1 ]; then $COMPOSE restart backend; fi
+fi
+# LiveKit ayarı değiştiyse ses sunucusu yeniden okusun.
+if [ -n "$LK_OLD" ] && [ "$(md5sum "$ENVD/livekit.yaml" | cut -d' ' -f1)" != "$LK_OLD" ]; then
+  log "LiveKit ayarı değişti, ses sunucusu yeniden başlatılıyor"
+  $COMPOSE restart livekit
 fi
 docker image prune -f >/dev/null 2>&1 || true
 

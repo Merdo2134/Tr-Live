@@ -27,12 +27,15 @@ fi
 
 if [ "$changed" = true ] || [ "${1:-}" = --from-panel ]; then
   note "uygulanıyor (yeni sürüm: $changed)"
-  if bash "$SRC/deploy/oracle/install.sh" --apply; then
+  FROM_PANEL=0; [ "${1:-}" = --from-panel ] && FROM_PANEL=1
+  if TRLIVE_FROM_PANEL=$FROM_PANEL bash "$SRC/deploy/oracle/install.sh" --apply; then
     note "tamam · sürüm $(git -C "$SRC" rev-parse --short HEAD)"
   else
     note "HATA: kurulum tamamlanamadı (ayrıntı: kurulum kaydı)"
   fi
 fi
+# Ses sunucusu testi (panelde "Ses sunucusu testi" bölümünde görünür).
+bash "$SRC/deploy/oracle/diag.sh" >/dev/null 2>&1 || true
 tail -n 200 "$STATE/update.log" > "$STATE/update.log.tmp" 2>/dev/null && mv "$STATE/update.log.tmp" "$STATE/update.log"
 tail -n 2000 "$STATE/install.log" > "$STATE/install.log.tmp" 2>/dev/null && mv "$STATE/install.log.tmp" "$STATE/install.log"
 exit 0

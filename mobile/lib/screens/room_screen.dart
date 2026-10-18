@@ -14,6 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api.dart';
 import '../widgets/music_bubble.dart';
 import '../services/background_service.dart';
+import '../services/call_guard.dart';
+import '../services/effect_prefs.dart';
 import '../services/inbox_service.dart';
 import '../services/media_cache.dart';
 import '../services/music_service.dart';
@@ -121,6 +123,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     super.initState();
     _sub = SocketService.instance.events.listen(_onEvent);
     RoomDock.exitHandler = _onBack;
+    // Telefon araması gelince oda sesi ve mikrofon kapanır, bitince açılır.
+    CallGuard.instance.inCall.addListener(_onPhoneCall);
+    CallGuard.instance.start();
     WidgetsBinding.instance.addObserver(this);
     MediaCache.warmGifts();
     Api.get('/api/families/mine').then((r) {
@@ -173,6 +178,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    CallGuard.instance.inCall.removeListener(_onPhoneCall);
+    CallGuard.instance.stop();
     _beat?.cancel();
     _lkTick?.cancel();
     for (final t in _micEmojiTimers.values) {
@@ -230,11 +237,11 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       // Kendi giriş şeridim (WIP seviyeme göre) de odaya girerken görünür.
       final meRow = _members.where((m) => m['userId']?.toString() == Session.id);
       final meUser = meRow.isEmpty ? null : mapOf(meRow.first['user']);
-      if (meUser != null && GiftRibbonOverlay.effectsOn) _entrance.add(meUser);
+      if (meUser != null && EffectPrefs.entranceFx) _entrance.add(meUser);
       // Kendi giriş aracım / efektim: sunucunun odaya duyurusu bize abone olmadan önce gittiği için yanıttan oynatılır.
       final myEntrance = mapOf(r['entrance']);
       final myEffect = mapOf(myEntrance?['effect']);
-      if (myEffect != null && GiftRibbonOverlay.effectsOn) {
+      if (myEffect != null) {
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) SocketService.instance.emitLocal({'type': 'local_entrance', 'roomId': widget.roomId, 'user': myEntrance?['user'], 'entranceEffect': myEffect});
         });
@@ -580,7 +587,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           setState(() => _members.add({'userId': u['id'], 'role': 'user', 'microphone': false, 'seatIndex': null, 'user': u}));
         }
         // Hayalet (SWIP) üye mikrofona çıkınca "sessiz" gelir: giriş şeridi gösterilmez.
-        if (u != null && e['silent'] != true && u['id']?.toString() != Session.id && GiftRibbonOverlay.effectsOn) _entrance.add(u);
+        if (u != null && e['silent'] != true && u['id']?.toString() != Session.id && EffectPrefs.entranceFx) _entrance.add(u);
         // Sohbete "odaya girdi" satırı.
         if (u != null && e['silent'] != true) {
           setState(() {
@@ -777,11 +784,49 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         room.removeListener(_onLkChanged);
         room.disconnect().whenComplete(() => room!.dispose()).catchError((_) {});
       }
-      if (mounted) setState(() => _lkError = errorText(e));
+      // İlk denemelerde hata gösterilmez: 2, 4, 8 sn sonra kendiliğinden yeniden denenir. Üçü de olmazsa uyarı çıkar
+      // ("Tekrar" ile elle denenir).
+      if (_lkRetries < 3) {
+        final wait = Duration(seconds: 2 << _lkRetries);
+        _lkRetries++;
+        Future.delayed(wait, () {
+          if (mounted && !_closing && _joined && _lk == null) _connectLivekit();
+        });
+      } else {
+        _lkRetries = 0;
+        final raw = errorText(e);
+        final msg = raw.contains('Timeout') ? 'Ses sunucusuna ulaşılamadı. İnternetinizi kontrol edip Tekrar\'a dokunun.' : raw;
+        if (mounted) setState(() => _lkError = msg);
+      }
     } finally {
       _lkConnecting = false;
       if (mounted) setState(() {});
     }
+  }
+
+  /// Sonucu beklenmeyen ses işlemi: hata verse de sessizce geçilir.
+  void _quiet(Future<Object?> f) => f.then((_) {}, onError: (_) {});
+
+  /// Telefon araması başladı / bitti: odadakilerin sesi ve kendi mikrofonum kapanır, arama bitince eski hâline döner.
+  void _onPhoneCall() {
+    final call = CallGuard.instance.inCall.value;
+    final room = _lk;
+    if (room != null) {
+      for (final p in room.remoteParticipants.values) {
+        for (final pub in p.audioTrackPublications) {
+          final t = pub.track;
+          if (t == null) continue;
+          _quiet(call ? t.disable() : t.enable());
+        }
+      }
+      if (call) {
+        final lp = room.localParticipant;
+        if (lp != null) _quiet(lp.setMicrophoneEnabled(false));
+      } else {
+        _syncPublish();
+      }
+    }
+    if (mounted) toast(context, call ? '📞 Arama: oda sesi kapatıldı' : 'Arama bitti, oda sesi açıldı');
   }
 
   /// Koltuktaysak mikrofonu (görüntülü odada kamerayı) yayına aç, değilsek kapat.
@@ -790,7 +835,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (room == null) return;
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
-        await room.localParticipant?.setMicrophoneEnabled(_onSeat && _micOn);
+        await room.localParticipant?.setMicrophoneEnabled(_onSeat && _micOn && !CallGuard.instance.inCall.value);
         if (_isVideo) await room.localParticipant?.setCameraEnabled(_onSeat && _camOn);
         BackgroundService.instance.micChanged(_onSeat); // izin verildikten sonra servis "mikrofon" türüne geçer
         return;
@@ -1091,36 +1136,68 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Efekt ve ses ayarları (yalnızca bu cihazda; uygulama kapanıp açılınca da hatırlanır).
   Future<void> _effectsAndSound() async {
-    var on = GiftRibbonOverlay.effectsOn;
     var noise = noiseCancel;
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF17172A),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
       builder: (c) => StatefulBuilder(
-        builder: (c, setS) => AlertDialog(
-          title: const Text('Efekt ve Ses'),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            SwitchListTile(
-              title: const Text('Hediye ve giriş efektleri'),
-              subtitle: const Text('Yalnızca bu cihazda geçerli.'),
-              value: on,
-              onChanged: (v) {
-                setS(() => on = v);
-                GiftRibbonOverlay.effectsOn = v;
-              },
+        builder: (c, setS) {
+          Widget section(String t) => Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                child: Align(alignment: Alignment.centerLeft, child: Text(t, style: const TextStyle(color: Colors.white54, fontSize: 14))),
+              );
+          Widget sw(String title, bool value, ValueChanged<bool> onChanged, {String? note}) => Column(mainAxisSize: MainAxisSize.min, children: [
+                SwitchListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                  title: Text(title, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
+                  subtitle: note == null ? null : Text(note, style: const TextStyle(color: Color(0xFFFFB020), fontSize: 12.5)),
+                  value: value,
+                  activeTrackColor: const Color(0xFF12C84A),
+                  onChanged: (v) {
+                    setS(() {});
+                    onChanged(v);
+                  },
+                ),
+                const Divider(height: 1, indent: 20, endIndent: 20, color: Colors.white10),
+              ]);
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(c).height * 0.8),
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 16, bottom: 4),
+                    child: Text('Efekt ve ses', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  ),
+                  section('Efekt ayarları'),
+                  sw('Hediye görsel efekti', EffectPrefs.giftAnim, (v) => EffectPrefs.set('fx_gift_anim', v)),
+                  sw('Araç ve giriş efektleri', EffectPrefs.entranceFx, (v) => EffectPrefs.set('fx_entrance', v), note: 'SWIP araçları gizlenemez.'),
+                  sw('Hediye kanalı', EffectPrefs.giftRibbon, (v) => EffectPrefs.set('fx_gift_ribbon', v)),
+                  sw('Global bildirim', EffectPrefs.globalNotice, (v) => EffectPrefs.set('fx_global_notice', v)),
+                  section('Ses ayarları'),
+                  sw('Hediye ve araç sesleri', EffectPrefs.giftSound, (v) => EffectPrefs.set('fx_gift_sound', v)),
+                  sw('Mikrofon gürültüsü engelleme', noise, (v) {
+                    noise = v;
+                    _setNoiseCancel(v);
+                  }),
+                  const ListTile(
+                    contentPadding: EdgeInsets.symmetric(horizontal: 20),
+                    leading: Icon(Icons.phone_in_talk, color: Colors.white70),
+                    title: Text('Telefon araması gelince oda sesi ve mikrofon kendiliğinden kapanır, arama bitince açılır.', style: TextStyle(fontSize: 13.5, color: Colors.white70)),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 4, 20, 16),
+                    child: Text('Görüntüde takılma olursa görsel efektleri kapatmayı deneyin.', style: TextStyle(color: Colors.white38, fontSize: 12.5)),
+                  ),
+                ]),
+              ),
             ),
-            SwitchListTile(
-              title: const Text('Gürültü engelleme'),
-              subtitle: const Text('Mikrofondayken çevre sesini (uğultu, fan, sokak sesi) azaltır.'),
-              value: noise,
-              onChanged: (v) {
-                setS(() => noise = v);
-                _setNoiseCancel(v);
-              },
-            ),
-          ]),
-          actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Tamam'))],
-        ),
+          );
+        },
       ),
     );
   }

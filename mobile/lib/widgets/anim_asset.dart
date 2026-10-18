@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_vap_kit/flutter_vap_kit.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:lottie/lottie.dart';
+import '../services/call_guard.dart';
+import '../services/effect_prefs.dart';
 import '../services/media_cache.dart';
 import 'net_image.dart';
 import 'svga_lite.dart';
@@ -19,7 +22,9 @@ class AnimAsset extends StatefulWidget {
   final ValueChanged<String>? onFail;
   /// true: dosya telefon belleğine indirilir (hediyeler). false: doğrudan internetten oynar (çerçeveler).
   final bool cache;
-  const AnimAsset({super.key, required this.url, this.fit = BoxFit.contain, this.repeat = false, this.onDone, this.format, this.onFail, this.cache = true});
+  /// true: sesli MP4'lerin sesi de çalınır (hediye ve giriş efektleri; "Hediye ve araç sesleri" ayarı açıksa).
+  final bool sound;
+  const AnimAsset({super.key, required this.url, this.fit = BoxFit.contain, this.repeat = false, this.onDone, this.format, this.onFail, this.cache = true, this.sound = false});
 
   static String extOf(String url) {
     final path = url.toLowerCase().split('?').first;
@@ -44,16 +49,45 @@ class _AnimAssetState extends State<AnimAsset> {
   bool _done = false;
   Timer? _doneTimer;
 
+  AudioPlayer? _audio;
+
+  bool get _isMp4 => AnimAsset.extOf(widget.url) == 'mp4' || widget.format == 'mp4';
+
   @override
   void initState() {
     super.initState();
-    if (widget.cache) _resolve();
+    if (widget.cache) {
+      _resolve();
+    } else if (_isMp4) {
+      _startSound(null);
+    }
   }
 
   @override
   void dispose() {
     _doneTimer?.cancel();
+    _audio?.dispose();
+    _audio = null;
     super.dispose();
+  }
+
+  /// MP4 animasyon oynatıcısı (VAP) yalnızca görüntüyü çizer; dosyadaki ses ayrıca çalınır (aynı anda başlar).
+  /// Sessiz dosyada bir şey duyulmaz. Arama sürerken ya da ayar kapalıysa çalınmaz.
+  Future<void> _startSound(String? path) async {
+    if (!widget.sound || !_isMp4 || _audio != null || widget.repeat) return;
+    if (!EffectPrefs.giftSound || CallGuard.instance.inCall.value) return;
+    final p = _audio = AudioPlayer();
+    try {
+      if (path != null) {
+        await p.setFilePath(path);
+      } else {
+        await p.setUrl(widget.url);
+      }
+      if (!mounted || _audio != p) return;
+      p.play().catchError((_) {});
+    } catch (_) {
+      // Ses izi yok ya da açılamadı: animasyon sessiz oynar.
+    }
   }
 
   /// Oynatma bitti: yalnızca bir kez ve bu parça hâlâ ekrandayken bildirilir
@@ -76,7 +110,10 @@ class _AnimAssetState extends State<AnimAsset> {
   Future<void> _resolve() async {
     try {
       final f = await MediaCache.get(widget.url);
-      if (mounted) setState(() => _file = f);
+      if (mounted) {
+        setState(() => _file = f);
+        _startSound(f.path);
+      }
     } catch (e) {
       if (mounted) {
         _fail('İndirilemedi: $e');

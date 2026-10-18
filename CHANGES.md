@@ -1,3 +1,29 @@
+## v2.50.2 — Global hediye şeridi
+- Global şerit artık bir kez görünür (gönderende iki kez çıkıyordu): her duyuruya kimlik verildi, aynı duyuru
+  tekrar gelirse uygulama göstermez.
+- Şerit düzeni: "Gönderen <ad>" / "Alıcı <ad>" alt alta, sağda hediyenin görseli ve adedi (x5).
+
+## v2.50.1 — Sesli MP4 hediyeler sesli oynar
+- Sesli MP4 hediye animasyonları ve giriş efektleri artık sesiyle birlikte oynar (animasyon oynatıcısı yalnızca
+  görüntüyü çiziyordu; ses aynı dosyadan ayrıca çalınır). Sessiz dosyalarda değişiklik yok.
+- **Efekt ve ses → "Hediye ve araç sesleri"** ile kapatılabilir; telefon araması sürerken çalmaz.
+
+## v2.50.0 — Telefon aramasında oda sesi kapanır, ayrı ayrı efekt ayarları
+- **Telefon araması:** arama (zil dahil) gelince odadakilerin sesi ve mikrofonun otomatik kapanır, arama bitince
+  eski hâline döner (WhatsApp vb. aramalarda da). Oda müziği de durup devam eder.
+- **Efekt ve ses** (oda araçları): Hediye görsel efekti, Araç ve giriş efektleri (SWIP araçları gizlenemez),
+  Hediye kanalı, Global bildirim ayrı ayrı açılıp kapatılır; ayarlar telefonda hatırlanır. Mikrofon gürültü
+  engelleme aynı sayfada.
+
+## v2.49.1 — Ses bağlantısı ve üst üste açılan sayfalar
+- **Ses sunucusu (LiveKit):** sunucunun genel IP'si ayara sabit yazıldı (her açılışta dışarıdan aranmıyor);
+  ayar değişince ses sunucusu kendiliğinden yeniden başlar.
+- Ses bağlantısı kurulamazsa uygulama 2, 4, 8 sn sonra kendisi yeniden dener; ancak üçü de olmazsa uyarı çıkar.
+- **Panel → "Ses sunucusu testi":** LiveKit, sertifika, portlar ve güvenlik duvarı 5 dakikada bir kontrol edilir (✅/❌).
+- Aynı sayfa ya da aynı alt pencere art arda iki kez açılmaz (çift dokunma / yavaş yanıtta tekrar dokunma).
+- Sunucu, GitHub'dan gelen her güncellemede artık gereksiz yere yeniden başlatılmıyor (yalnızca uygulama sunucusu
+  kodu değiştiyse ya da panelden "Kaydet ve uygula" ile) — "sunucu yanıt vermedi" kesintileri azalır.
+
 ## v2.49.0 — Şanslı çanta düzenlemesi ve hızlandırma
 - **Şanslı çanta:** oda içinde en üstte, oda elmasının altında. Açtığın çanta sana bir daha görünmez; çanta tamamen
   bitince herkesten kalkar. Aynı kişi üst üste çanta atabilir (birden çok çanta varsa sayısı yazar, sıradaki açılır).

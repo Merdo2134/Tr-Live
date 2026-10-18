@@ -1,4 +1,5 @@
 import { WebSocketServer } from 'ws';
+import { randomUUID } from 'node:crypto';
 
 let wss = null;
 const OPEN = 1;
@@ -61,7 +62,9 @@ export const hub = {
     for (const ws of clients()) if (ws.userId && ws.roomId === roomId) safeSend(ws, payload);
   },
   broadcastGlobal(payload) {
-    for (const ws of clients()) if (ws.userId) safeSend(ws, payload);
+    // Her duyuruya kimlik: aynı kullanıcıya birden çok bağlantıdan ulaşsa da uygulama bir kez gösterir.
+    const p = payload.eventId ? payload : { ...payload, eventId: randomUUID() };
+    for (const ws of clients()) if (ws.userId) safeSend(ws, p);
   },
   sendToUser(userId, payload) {
     for (const ws of clients()) if (ws.userId === userId) safeSend(ws, payload);
