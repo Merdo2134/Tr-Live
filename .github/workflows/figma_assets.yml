@@ -1,0 +1,136 @@
+name: Figma görsellerini indir
+
+# Figma tasarım dosyasındaki tüm görselleri (çerçeve, kanat, arka plan, rozet...) orijinal kalitede indirir ve
+# "figma-assets" dalına koyar (ana dal ve zip güncellemesi etkilenmez). Hangi görselin hangi ekranda kullanıldığı
+# index.json'da yazar. İsteğe bağlı: deploy/figma/nodes.txt varsa ("<düğüm id> <ad> [ölçek]") o düğümler ayrıca
+# hazır görüntü olarak (render) alınır.
+# Gerekli gizli anahtar: FIGMA_TOKEN (Figma > Settings > Security > Personal access tokens, "File content: Read").
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  indir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Depoyu indir
+        uses: actions/checkout@v4
+
+      - name: Görselleri Figma'dan al
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          FIGMA_FILE: N8aBk1e0Shr9FbPFP6Z23M
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${FIGMA_TOKEN:-}" ]; then echo "HATA: FIGMA_TOKEN gizli anahtarı eklenmemiş."; exit 1; fi
+          pip install --quiet pillow
+          mkdir -p /tmp/out/img /tmp/out/render
+          python3 - <<'PY'
+          import io, json, os, time, urllib.request, urllib.parse
+          from concurrent.futures import ThreadPoolExecutor
+          from PIL import Image
+          tok = os.environ['FIGMA_TOKEN']; key = os.environ['FIGMA_FILE']
+          def get(url, auth=True):
+              for i in range(6):
+                  try:
+                      req = urllib.request.Request(url, headers={'X-Figma-Token': tok} if auth else {})
+                      with urllib.request.urlopen(req, timeout=300) as r: return r.read()
+                  except Exception as e:
+                      print('tekrar deneniyor:', str(e)[:120]); time.sleep(8 * (i + 1))
+              raise SystemExit('Figma yanıt vermedi: ' + url[:120])
+
+          # 1) Dosya ağacı: hangi görsel hangi katmanda / hangi ekranda
+          doc = json.loads(get(f'https://api.figma.com/v1/files/{key}'))
+          index = {}
+          def walk(n, top):
+              bb = n.get('absoluteBoundingBox') or {}
+              for f in (n.get('fills') or []):
+                  if f.get('type') == 'IMAGE' and f.get('imageRef'):
+                      index.setdefault(f['imageRef'], []).append({
+                          'id': n['id'], 'name': n.get('name'), 'top': top, 'w': round(bb.get('width') or 0), 'h': round(bb.get('height') or 0),
+                          'mode': f.get('scaleMode'), 'visible': n.get('visible', True)})
+              for c in n.get('children') or []:
+                  walk(c, top)
+          for page in doc['document']['children']:
+              for fr in page.get('children') or []:
+                  walk(fr, f"{fr['id']} {fr.get('name')}")
+          print('görsel sayısı:', len(index))
+
+          # 2) Orijinal görseller (webp, en fazla 1600 px)
+          urls = json.loads(get(f'https://api.figma.com/v1/files/{key}/images'))['meta']['images']
+          def save(ref):
+              u = urls.get(ref)
+              if not u: return ref, 'url yok'
+              try:
+                  im = Image.open(io.BytesIO(get(u, auth=False)))
+                  im = im.convert('RGBA') if im.mode in ('P', 'LA', 'RGBA', 'PA') or 'transparency' in im.info else im.convert('RGB')
+                  if max(im.size) > 1600: im.thumbnail((1600, 1600), Image.LANCZOS)
+                  im.save(f'/tmp/out/img/{ref}.webp', 'WEBP', quality=88, method=5)
+                  return ref, None
+              except BaseException as e:
+                  return ref, str(e)[:80]
+          with ThreadPoolExecutor(8) as ex:
+              for ref, err in ex.map(save, list(index)):
+                  if err: print('atlandı', ref, err)
+          json.dump(index, open('/tmp/out/index.json', 'w'), ensure_ascii=False, indent=0)
+
+          # 2b) Ekran görüntüleri: telefon boyutundaki her ekran (jpg, 2x) ve ekran listesi
+          os.makedirs('/tmp/out/screens', exist_ok=True)
+          screens = []
+          for page in doc['document']['children']:
+              for fr in page.get('children') or []:
+                  bb = fr.get('absoluteBoundingBox') or {}
+                  if fr.get('type') in ('FRAME', 'COMPONENT', 'INSTANCE', 'GROUP', 'SECTION') and 300 <= (bb.get('width') or 0) <= 450 and (bb.get('height') or 0) >= 500:
+                      screens.append({'id': fr['id'], 'name': fr.get('name'), 'x': bb.get('x'), 'y': bb.get('y'), 'w': bb.get('width'), 'h': bb.get('height')})
+          json.dump(screens, open('/tmp/out/screens.json', 'w'), ensure_ascii=False, indent=0)
+          print('ekran sayısı:', len(screens))
+          def shot(chunk):
+              q = urllib.parse.urlencode({'ids': ','.join(s['id'] for s in chunk), 'format': 'jpg', 'scale': '2'})
+              try:
+                  imgs = json.loads(get(f'https://api.figma.com/v1/images/{key}?{q}')).get('images') or {}
+              except SystemExit:
+                  return
+              for s in chunk:
+                  u = imgs.get(s['id'])
+                  if not u: continue
+                  try:
+                      im = Image.open(io.BytesIO(get(u, auth=False))).convert('RGB')
+                      im.save('/tmp/out/screens/' + s['id'].replace(':', '-') + '.jpg', 'JPEG', quality=80)
+                  except BaseException as e:
+                      print('ekran atlandı', s['id'], str(e)[:60])
+          with ThreadPoolExecutor(4) as ex:
+              list(ex.map(shot, [screens[i:i + 10] for i in range(0, len(screens), 10)]))
+
+          # 3) İsteğe bağlı hazır görüntüler
+          if os.path.exists('deploy/figma/nodes.txt'):
+              rows = []
+              for line in open('deploy/figma/nodes.txt', encoding='utf-8'):
+                  line = line.split('#', 1)[0].strip()
+                  if line: p = line.split(); rows.append((p[0], p[1], p[2] if len(p) > 2 else '3'))
+              by = {}
+              for nid, name, sc in rows: by.setdefault(sc, []).append((nid, name))
+              for sc, items in by.items():
+                  for i in range(0, len(items), 40):
+                      chunk = items[i:i + 40]
+                      q = urllib.parse.urlencode({'ids': ','.join(n for n, _ in chunk), 'format': 'png', 'scale': sc})
+                      imgs = json.loads(get(f'https://api.figma.com/v1/images/{key}?{q}')).get('images') or {}
+                      for nid, name in chunk:
+                          if imgs.get(nid): open(f'/tmp/out/render/{name}.png', 'wb').write(get(imgs[nid], auth=False))
+          PY
+          du -sh /tmp/out; ls /tmp/out/img | wc -l
+
+      - name: figma-assets dalına kaydet
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/out
+          git init -q -b figma-assets
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Figma görselleri"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" figma-assets
