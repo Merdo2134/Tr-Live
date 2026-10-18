@@ -1,3 +1,26 @@
+## v2.51.6 — Hediye penceresi düzeni
+- Hediye penceresi sabit yükseklikte: kaymaz; hediyeye dokununca alt satır aşağı inmez, Coin / adet / Gönder satırı
+  her zaman görünür.
+- Üstteki kişi satırı (avatarlar) ve alttaki Coin satırı küçültüldü; hediye ızgarası kalan alana sığar.
+- "Toplam … Coin" satırı yalnızca birden çok kişi / adet seçiliyken yer kaplar.
+
+## v2.51.5 — Uçan yazı sohbetin üstünde
+- Uçan yazı (ve "Hoş geldin" selamı) artık sohbet bölümünün en üstünde kayan yazı olarak geçer: tek şeritte,
+  arka arkaya sırayla (biri bitince sıradaki). Yazı geçerken sohbet bir satır aşağı kayar, mesajların üstüne binmez.
+
+## v2.51.4 — Çoklu hediye arka arkaya
+- 10'lu hediyenin animasyonu artık iç içe girmez: 10 kez arka arkaya oynar, her tekrar bir önceki bitince hemen başlar.
+
+## v2.51.3 — Çoklu hediye animasyonu
+- 10'lu atılan hediyenin tam ekran animasyonu 10 kez oynar (en fazla 10): her tekrar bir öncekinin bitmesini
+  beklemeden ~0,45 sn arayla başlar (üst üste); aynı anda en fazla 3 katman. Ses yalnızca ilkinde çalar.
+- Ortadaki şerit ve üst (global) şerit bir kez geçer, adet "x10" olarak yazar. Aynı odada üst şerit, ortadaki
+  şerit bitince yarım saniye sonra geçer.
+
+## v2.51.2 — Hediye şeritleri sırayla
+- Hediyenin atıldığı odada ortadaki oda şeridi ile üst (global) şerit artık aynı anda çıkmaz: önce ortadaki şerit
+  geçer, o bitince 1 sn sonra üst şerit bir kez geçer. Diğer odalarda üst şerit hemen geçer.
+
 ## v2.51.1 — Gizli kullanıcı ve hayalet mod tutarlılığı
 - **Gizli kullanıcı:** açıkken kişi odada, sohbette ve listelerde kendini de "Gizli Kullanıcı" olarak görür
   (başkalarının gördüğüyle aynı). Başkasının profiline girince **ziyaretçi listesine düşmez**.

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/media_cache.dart';
@@ -305,9 +306,9 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
     final mq = MediaQuery.of(context);
     return SafeArea(
       child: Container(
-        // Ekranın alttan ~%45'i: koltuk bölgesini kapatmaz, sohbetin üstüne biner.
-        constraints: BoxConstraints(maxHeight: (mq.size.height * 0.45).clamp(mq.size.height * 0.6 < 380 ? mq.size.height * 0.6 : 380.0, mq.size.height * 0.6)),
-        padding: EdgeInsets.fromLTRB(12, 14, 12, 10 + mq.viewInsets.bottom),
+        // Sabit yükseklik (ekranın ~%45'i): içerik kaymaz, alttaki Coin / Gönder satırı her zaman görünür.
+        height: (mq.size.height * 0.45).clamp(330.0, mq.size.height * 0.6).toDouble() + mq.viewInsets.bottom,
+        padding: EdgeInsets.fromLTRB(12, 10, 12, 8 + mq.viewInsets.bottom),
         decoration: const BoxDecoration(color: Color(0xFF0D1626), borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
         child: _loading
             ? const SizedBox(height: 220, child: Center(child: CircularProgressIndicator()))
@@ -319,14 +320,14 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
   }
 
   Widget _body() {
-    return SingleChildScrollView(
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+    // Kaydırma yok: kişi satırı, sekmeler ve alt satır sabit; hediye ızgarası kalan alanı doldurur.
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _recipientRow(),
-        const SizedBox(height: 10),
+        const SizedBox(height: 6),
         _tabRow(),
-        const SizedBox(height: 8),
-        // Sabit yükseklikte bilgi satırı: sekme değişince pencere büyüyüp küçülmez.
-        SizedBox(
+        const SizedBox(height: 6),
+        // Şanslı sekmesinin açıklaması (yalnızca o sekmede yer kaplar).
+        if (_tab == 'lucky') SizedBox(
           height: 30,
           child: _tab == 'lucky'
               ? Text(
@@ -339,8 +340,8 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
               : null,
         ),
         // Şanslı hediye sonucu ızgaranın üstünde belirir (pencereyi büyütmez).
-        Stack(children: [
-          _giftPages(),
+        Expanded(child: Stack(children: [
+          Positioned.fill(child: _giftPages()),
           Positioned(
             left: 0,
             right: 0,
@@ -351,11 +352,10 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
               child: _luckyBanner(),
             ),
           ),
-        ]),
-        const SizedBox(height: 6),
+        ])),
+        const SizedBox(height: 4),
         _bottomRow(),
-      ]),
-    );
+      ]);
   }
 
   // ---------- Alıcılar ----------
@@ -371,21 +371,21 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
     return GestureDetector(
       onTap: () => _togglePerson(id),
       child: Padding(
-        padding: const EdgeInsets.only(right: 10),
+        padding: const EdgeInsets.only(right: 8),
         child: SizedBox(
-          width: 52,
+          width: 42,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(
               padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: selected ? Pal.pink : Colors.transparent, width: 2.5)),
-              child: UserAvatar(user: mapOf(m['user']), radius: 20),
+              child: UserAvatar(user: mapOf(m['user']), radius: 15),
             ),
-            const SizedBox(height: 3),
+            const SizedBox(height: 2),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-              constraints: const BoxConstraints(maxWidth: 52),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              constraints: const BoxConstraints(maxWidth: 42),
               decoration: BoxDecoration(color: selected ? Pal.pink : Colors.white24, borderRadius: BorderRadius.circular(8)),
-              child: Text(seat != null ? '$seat' : name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+              child: Text(seat != null ? '$seat' : name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
             ),
           ]),
         ),
@@ -398,21 +398,21 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Expanded(
         child: list.isEmpty
-            ? const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Text('Mikrofonda kimse yok. Ok ile odadakileri göster.', style: TextStyle(color: Colors.white54)))
+            ? const SizedBox(height: 52, child: Align(alignment: Alignment.centerLeft, child: Text('Mikrofonda kimse yok. Ok ile odadakileri göster.', style: TextStyle(color: Colors.white54, fontSize: 12))))
             : _expanded
                 ? ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 150),
-                    child: SingleChildScrollView(child: Wrap(runSpacing: 8, children: [for (final m in list) _person(m)])),
+                    constraints: const BoxConstraints(maxHeight: 112),
+                    child: SingleChildScrollView(child: Wrap(runSpacing: 6, children: [for (final m in list) _person(m)])),
                   )
-                : SizedBox(height: 74, child: ListView(scrollDirection: Axis.horizontal, children: [for (final m in list) _person(m)])),
+                : SizedBox(height: 52, child: ListView(scrollDirection: Axis.horizontal, children: [for (final m in list) _person(m)])),
       ),
       const SizedBox(width: 4),
       InkWell(
         customBorder: const CircleBorder(),
         onTap: () => setState(() => _expanded = !_expanded),
         child: Container(
-          width: 44,
-          height: 44,
+          width: 34,
+          height: 34,
           decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Pal.pink, width: 1.6)),
           child: Icon(_expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: Colors.white),
         ),
@@ -475,7 +475,9 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
     return LayoutBuilder(builder: (context, box) {
       const gap = 8.0;
       final tileW = (box.maxWidth - gap * 3) / 4;
-      final tileH = tileW * 1.05;
+      // Kare görünüm; kalan yükseklik azsa (küçük ekran) satırlar sığacak kadar basıklaşır.
+      final fitH = box.maxHeight.isFinite ? (box.maxHeight - 14 - gap) / 2 : tileW * 1.05;
+      final tileH = math.min(tileW * 1.05, fitH).clamp(40.0, 400.0).toDouble();
       // Her sayfa ve sekme 2 satırlık yer kaplar (hediye az da olsa yok da olsa yükseklik aynı); sayfa noktaları için de yer ayrılır.
       if (gifts.isEmpty) {
         return SizedBox(height: tileH * 2 + gap + 14, child: const Center(child: Text('Bu sekmede hediye yok.', style: TextStyle(color: Colors.white54))));
@@ -607,12 +609,11 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
   Widget _bottomRow() {
     final n = _targets.length;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(
-        height: 20,
-        child: (n > 1 || _quantity > 1)
-            ? Text('Toplam ${fmtNumber(_total.toString())} Coin · $n kişi × $_quantity adet', style: const TextStyle(fontSize: 12, color: Colors.white54))
-            : null,
-      ),
+      if (n > 1 || _quantity > 1)
+        SizedBox(
+          height: 16,
+          child: Text('Toplam ${fmtNumber(_total.toString())} Coin · $n kişi × $_quantity adet', style: const TextStyle(fontSize: 11, color: Colors.white54)),
+        ),
       Row(children: [
         Expanded(
           child: InkWell(
@@ -620,16 +621,16 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
             child: ValueListenableBuilder<Map<String, dynamic>?>(
               valueListenable: Session.me,
               builder: (_, me, __) => Row(children: [
-                const CircleAvatar(radius: 14, backgroundColor: Pal.amber, child: Icon(Icons.star, size: 16, color: Colors.white)),
-                const SizedBox(width: 8),
-                Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${fmtNumber(me?['coins'])}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)))),
-                const Icon(Icons.chevron_right),
+                const CircleAvatar(radius: 11, backgroundColor: Pal.amber, child: Icon(Icons.star, size: 13, color: Colors.white)),
+                const SizedBox(width: 6),
+                Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${fmtNumber(me?['coins'])}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)))),
+                const Icon(Icons.chevron_right, size: 18),
               ]),
             ),
           ),
         ),
         Container(
-          height: 40,
+          height: 36,
           decoration: BoxDecoration(border: Border.all(color: Pal.pink, width: 1.4), borderRadius: BorderRadius.circular(10)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             PopupMenuButton<int>(
@@ -648,7 +649,7 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
               // Combo sürerken gönderim devam ederken de dokunulabilir (dokunuş sıraya alınır).
               onTap: (_gift == null || (_sending && _combo == 0)) ? null : _send,
               child: Container(
-                height: 40,
+                height: 36,
                 padding: EdgeInsets.symmetric(horizontal: _combo > 0 ? 12 : 22),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(

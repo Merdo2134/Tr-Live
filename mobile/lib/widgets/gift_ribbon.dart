@@ -31,10 +31,17 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   Timer? _timer;
   Timer? _entranceTimer;
   // Tam ekran hediye animasyonu (şeffaf mp4 = Tencent VAP, lottie, webp/gif). Sırayla, tek tek oynar.
-  final List<Map<String, dynamic>> _anims = [];
-  Map<String, dynamic>? _anim;
+  // 10'lu atılan hediyenin animasyonu 10 kez arka arkaya oynar: her tekrar bir önceki bitince hemen başlar
+  // (iç içe girmesin diye aynı anda tek animasyon).
+  final List<Map<String, dynamic>> _anims = []; // sırada bekleyen tekrarlar
+  final List<Map<String, dynamic>> _active = []; // şu an ekranda oynayanlar
+  final Map<int, Timer> _animTimers = {};
   int _animSeq = 0;
-  Timer? _animTimer;
+  Timer? _pumpTimer;
+  DateTime _lastStart = DateTime(2000);
+  static const _maxLayers = 1;
+  static const _repeatGap = Duration.zero;
+  static const _maxRepeats = 10;
 
   @override
   void initState() {
@@ -47,7 +54,10 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     _sub?.cancel();
     _timer?.cancel();
     _entranceTimer?.cancel();
-    _animTimer?.cancel();
+    _pumpTimer?.cancel();
+    for (final t in _animTimers.values) {
+      t.cancel();
+    }
     _gTimer?.cancel();
     super.dispose();
   }
@@ -60,13 +70,21 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       // Global duyurular (büyük hediye, süper çanta, büyük şanslı kazanç): yalnızca açık odalarda (hediyenin atıldığı
       // oda dahil), odanın üstünden geçen ayrı şeritte. Ana ekranda ve oda küçültülmüşken gösterilmez.
       if (widget.roomId == null || RoomDock.minimized.value) return;
-      _enqueueGlobal(e);
+      if (e['roomId'] == widget.roomId) {
+        // Hediyenin atıldığı oda: önce yalnızca ortadaki oda şeridi geçer; o bitince yarım saniye sonra üst şerit bir kez geçer
+        // (ikisi aynı anda görünmesin).
+        _afterRoomRibbon(() => _enqueueGlobal(e));
+      } else {
+        _enqueueGlobal(e);
+      }
     } else if (type == 'room_gift' && widget.roomId != null && e['roomId'] == widget.roomId) {
       // Önce ikon koltuğa uçar (oda ekranı), sonra tam ekran animasyon başlar.
       final g = mapOf(e['gift']);
+      // Adet kadar tekrar (10'lu → 10 kez, en fazla 10).
+      final times = ((e['quantity'] as num?)?.toInt() ?? 1).clamp(1, _maxRepeats);
       if (EffectPrefs.giftAnim) {
         Future.delayed(const Duration(milliseconds: 1300), () {
-          if (mounted) _enqueueAnim(g);
+          if (mounted) _enqueueAnim(g, times: times);
         });
       }
       if (EffectPrefs.giftRibbon && !_mergeCombo(e)) _enqueue(e);
@@ -80,7 +98,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     }
   }
 
-  void _enqueueAnim(Map<String, dynamic>? gift) {
+  void _enqueueAnim(Map<String, dynamic>? gift, {int times = 1}) {
     // Oda küçültülmüşken tam ekran hediye animasyonları birikmesin.
     if (widget.roomId != null && RoomDock.minimized.value) return;
     final url = Api.absoluteUrl(gift?['animationUrl'] as String?);
@@ -92,34 +110,51 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       if (mounted && Session.isStaff) toast(context, '"${gift['name']}" hediyesinde animasyon dosyası yok (Yönetim → Katalog).', error: true);
       return;
     }
-    if (_anims.length < 5) _anims.add({'url': url, 'format': (gift['animationFormat'] ?? '').toString()});
-    if (_anim == null) _nextAnim();
+    // Sıra çok uzamasın (art arda yüzlerce hediye): en fazla 30 tekrar bekler.
+    for (var i = 0; i < times && _anims.length < 30; i++) {
+      _anims.add({'url': url, 'format': (gift['animationFormat'] ?? '').toString(), 'sound': true});
+    }
+    _pump();
   }
 
-  void _nextAnim() {
-    _animTimer?.cancel();
-    if (!mounted) return;
-    if (_anims.isEmpty) {
-      setState(() => _anim = null);
+  /// Sıradaki tekrarı başlatır: oynayan yoksa (önceki bittiyse) hemen.
+  void _pump() {
+    _pumpTimer?.cancel();
+    if (!mounted || _anims.isEmpty) return;
+    if (_active.length >= _maxLayers) return; // oynayan bitince _animDone yeniden çağırır
+    final wait = _repeatGap - DateTime.now().difference(_lastStart);
+    if (wait > Duration.zero) {
+      _pumpTimer = Timer(wait, _pump);
       return;
     }
-    final a = _anims.removeAt(0);
-    setState(() => _anim = {...a, 'seq': ++_animSeq});
-    // Güvenlik süresi: oynatıcı bitiş bildirmese de ekran açık kalmasın.
+    final a = {..._anims.removeAt(0), 'seq': ++_animSeq};
+    _lastStart = DateTime.now();
+    setState(() => _active.add(a));
+    final seq = a['seq'] as int;
+    // Güvenlik süresi: oynatıcı bitiş bildirmese de katman ekranda kalmasın.
     final still = !AnimAsset.reportsEnd(a['url'] as String, a['format'] as String);
-    _animTimer = Timer(Duration(seconds: still ? 4 : 20), _nextAnim);
+    _animTimers[seq] = Timer(Duration(seconds: still ? 4 : 20), () => _animDone(seq));
+    if (_anims.isNotEmpty && _active.length < _maxLayers) _pumpTimer = Timer(_repeatGap, _pump);
   }
 
-  Widget _buildAnim() {
-    final a = _anim!;
+  void _animDone(int seq) {
+    _animTimers.remove(seq)?.cancel();
+    if (!mounted) return;
+    setState(() => _active.removeWhere((x) => x['seq'] == seq));
+    _pump();
+  }
+
+  Widget _buildAnim(Map<String, dynamic> a) {
+    final seq = a['seq'] as int;
     return Positioned.fill(
+      key: ValueKey('anim-$seq'),
       child: IgnorePointer(
         child: AnimAsset(
           url: a['url'] as String,
           format: a['format'] as String,
-          key: ValueKey(a['seq']),
-          sound: true,
-          onDone: _nextAnim,
+          key: ValueKey(seq),
+          sound: a['sound'] == true,
+          onDone: () => _animDone(seq),
           onFail: (m) {
             ErrorLog.add('Hediye animasyonu oynatılamadı', '$m ${a['url']}');
             if (mounted && Session.isStaff) toast(context, 'Animasyon oynatılamadı: $m', error: true);
@@ -167,6 +202,24 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   Map<String, dynamic>? _gCurrent;
   int _gSeq = 0;
   Timer? _gTimer;
+
+  /// Ortadaki oda şeridi (ve sırada bekleyenler) bitince yarım saniye sonra [run] çalışır (en fazla 15 sn beklenir).
+  void _afterRoomRibbon(VoidCallback run) {
+    var waited = 0;
+    void check() {
+      if (!mounted) return;
+      if ((_current != null || _queue.isNotEmpty) && waited < 15000) {
+        waited += 300;
+        Future.delayed(const Duration(milliseconds: 300), check);
+        return;
+      }
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) run();
+      });
+    }
+    // Oda şeridi aynı anda gelen olayla kuyruğa girsin diye kısa bir an beklenir.
+    Future.delayed(const Duration(milliseconds: 400), check);
+  }
 
   // Son gösterilen global duyurular: aynı duyuru iki kez gelirse (ör. iki bağlantıdan) bir kez gösterilir.
   final Map<String, DateTime> _gSeen = {};
@@ -242,7 +295,7 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
     final ribbonTop = MediaQuery.sizeOf(context).height * 0.42;
     return Stack(children: [
       widget.child,
-      if (_anim != null) _buildAnim(),
+      for (final a in _active) _buildAnim(a),
       if (_entrance != null) _buildEntrance(top),
       if (_current != null)
         Positioned(

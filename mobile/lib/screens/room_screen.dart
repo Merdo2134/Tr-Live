@@ -1682,7 +1682,22 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   /// Sohbet akışı (Yoho): koltukların altından alt bara kadar, saydam renkli balonlar.
   /// [overlay]: klavye açıkken karartının üstünde balonsuz düz yazı.
+  /// Sohbet bölümü: en üstte uçan yazı şeridi (yazı geçerken yer açılır), altında mesajlar.
   Widget _chatPanel(double w, {bool overlay = false, double? rightPad}) {
+    if (overlay) return _chatList(w, overlay: true, rightPad: rightPad);
+    return Column(children: [
+      AnimatedBuilder(
+        animation: _fly,
+        builder: (context, _) => AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          child: _fly.active ? ClipRect(child: Padding(padding: const EdgeInsets.only(top: 2), child: FlyTextLayer(queue: _fly))) : const SizedBox(width: double.infinity),
+        ),
+      ),
+      Expanded(child: _chatList(w, rightPad: rightPad)),
+    ]);
+  }
+
+  Widget _chatList(double w, {bool overlay = false, double? rightPad}) {
     // Sabit başlık kartları: uygulama uyarı duyurusu ve oda duyurusu.
     final ann = (_room?['announcement'] ?? '').toString().trim();
     final maxW = w * 0.78;
@@ -3387,7 +3402,6 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.36, child: EntranceStrip(queue: _entrance)),
-                Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.24, child: FlyTextLayer(queue: _fly)),
                 MusicBubble(onOpen: _openMusic),
                 for (final f in _flights)
                   _GiftFlight(key: ValueKey(f.id), data: f, onDone: () {

@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'common.dart';
 
-/// Uçan yazı: odada ekranın sağından soluna geçen mesajlar (ücretli "uçan yazı" ve "Hoş geldin" selamı).
-/// İki şeritte sırayla akar; aynı anda en fazla iki yazı görünür.
+/// Uçan yazı: sohbet bölümünün en üstünde sağdan sola kayan yazı (ücretli "uçan yazı" ve "Hoş geldin" selamı).
+/// Tek şeritte arka arkaya sırayla geçer; biri bitince sıradaki başlar.
 class FlyTextQueue extends ChangeNotifier {
   final List<Map<String, dynamic>> _wait = [];
-  final List<Map<String, dynamic>?> lanes = [null, null];
+  final List<Map<String, dynamic>?> lanes = [null];
+
+  /// Şu an kayan yazı var mı (sohbetin üstünde yer açmak için).
+  bool get active => lanes.any((l) => l != null);
   int _seq = 0;
   bool _dead = false;
 
@@ -37,7 +40,7 @@ class FlyTextQueue extends ChangeNotifier {
     if (_dead) return;
     lanes[lane] = null;
     notifyListeners();
-    Timer(const Duration(milliseconds: 250), _pump);
+    Timer(const Duration(milliseconds: 150), _pump);
   }
 }
 
@@ -51,7 +54,7 @@ class FlyTextLayer extends StatelessWidget {
       child: AnimatedBuilder(
         animation: queue,
         builder: (context, _) => SizedBox(
-          height: 84,
+          height: 40,
           child: Stack(clipBehavior: Clip.none, children: [
             for (var i = 0; i < queue.lanes.length; i++)
               if (queue.lanes[i] != null)
