@@ -6,7 +6,7 @@ on:
       api_url:
         description: "Sunucu adresi"
         required: false
-        default: "https://tr-live-1.onrender.com"
+        default: "https://130-61-222-48.sslip.io"
       allow_http:
         description: "http:// adresine izin ver (yalnızca test için)"
         type: boolean
@@ -183,6 +183,17 @@ jobs:
                            '        </service>\n')
           if services:
               s = s.replace("</application>", services + "    </application>", 1)
+          # Google/Facebook girişinden uygulamaya dönüş bağlantısı (trlive://login?...): Flutter kendisi yakalar.
+          if 'android:scheme="trlive"' not in s:
+              link = ('            <meta-data android:name="flutter_deeplinking_enabled" android:value="true"/>\n'
+                      '            <intent-filter>\n'
+                      '                <action android:name="android.intent.action.VIEW"/>\n'
+                      '                <category android:name="android.intent.category.DEFAULT"/>\n'
+                      '                <category android:name="android.intent.category.BROWSABLE"/>\n'
+                      '                <data android:scheme="trlive" android:host="login"/>\n'
+                      '            </intent-filter>\n')
+              s = s.replace("</activity>", link + "        </activity>", 1)
+              print("Giriş dönüş bağlantısı (trlive://login) eklendi")
           if os.environ.get("INPUT_ALLOW_HTTP", "").lower() == "true" and "usesCleartextTraffic" not in s:
               s = s.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
               print("http (cleartext) izni eklendi — yalnızca test için")
@@ -197,7 +208,7 @@ jobs:
           API_URL="${INPUT_API_URL:-}"
           [ -n "$API_URL" ] || API_URL="${REPO_API_URL:-}"
           # Kutu boşsa ve depo değişkeni yoksa (zip yükleyince otomatik başlayan derleme) asıl sunucu kullanılır.
-          [ -n "$API_URL" ] || API_URL="https://tr-live-1.onrender.com"
+          [ -n "$API_URL" ] || API_URL="https://130-61-222-48.sslip.io"
           if ! printf '%s' "$API_URL" | grep -qE '^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$'; then
             echo "::error::Sunucu adresi geçersiz: $API_URL"; exit 1
           fi
