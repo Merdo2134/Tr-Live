@@ -134,21 +134,11 @@ class _EventScreenState extends State<EventScreen> {
   Map<String, dynamic>? _data;
   String? _error;
   int _seq = 0;
-  Timer? _tick;
 
   @override
   void initState() {
     super.initState();
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _data != null) setState(() {});
-    });
     _init();
-  }
-
-  @override
-  void dispose() {
-    _tick?.cancel();
-    super.dispose();
   }
 
   Future<void> _init() async {
@@ -205,7 +195,7 @@ class _EventScreenState extends State<EventScreen> {
               child: _Header(
                 theme: t,
                 group: widget.group,
-                countdown: eventCountdown(end),
+                end: end,
                 weekStart: DateTime.tryParse((_data?['weekStart'] ?? '').toString())?.toLocal(),
                 weekEnd: end,
               ),
@@ -577,10 +567,10 @@ class _EventScreenState extends State<EventScreen> {
 class _Header extends StatelessWidget {
   final EventTheme theme;
   final EventGroup group;
-  final String countdown;
+  final DateTime? end;
   final DateTime? weekStart;
   final DateTime? weekEnd;
-  const _Header({required this.theme, required this.group, required this.countdown, this.weekStart, this.weekEnd});
+  const _Header({required this.theme, required this.group, this.end, this.weekStart, this.weekEnd});
 
   @override
   Widget build(BuildContext context) {
@@ -597,11 +587,11 @@ class _Header extends StatelessWidget {
           ),
           child: Row(children: [
             Expanded(child: Text(theme.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12.5))),
-            if (countdown.isNotEmpty)
+            if (end != null)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(12), border: Border.all(color: theme.accent.withValues(alpha: 0.6))),
-                child: Text('⏳ $countdown', style: TextStyle(color: theme.accent, fontWeight: FontWeight.w900, fontSize: 12.5)),
+                child: _Countdown(end: end!, color: theme.accent),
               ),
           ]),
         ),
@@ -626,4 +616,36 @@ class _TabsHeader extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(covariant _TabsHeader old) => old.tabs != tabs || old.theme != theme;
+}
+
+/// Geri sayım: yalnızca bu küçük yazı her saniye yenilenir (sayfanın geri kalanı yeniden çizilmez).
+class _Countdown extends StatefulWidget {
+  final DateTime end;
+  final Color color;
+  const _Countdown({required this.end, required this.color});
+
+  @override
+  State<_Countdown> createState() => _CountdownState();
+}
+
+class _CountdownState extends State<_Countdown> {
+  Timer? _t;
+
+  @override
+  void initState() {
+    super.initState();
+    _t = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      Text('⏳ ${eventCountdown(widget.end)}', style: TextStyle(color: widget.color, fontWeight: FontWeight.w900, fontSize: 12.5));
 }

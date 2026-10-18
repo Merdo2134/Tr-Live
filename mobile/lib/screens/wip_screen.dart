@@ -57,7 +57,7 @@ class _WipScreenState extends State<WipScreen> {
       backgroundColor: const Color(0xFF0B1220),
       appBar: AppBar(title: const Text('WIP Ayrıcalıkları'), backgroundColor: const Color(0xFF0B1220)),
       body: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_version),
+        version: _version,
         load: _load,
         builder: (context, data, reload) {
           final tiers = listOf(data['tiers']).where((t) => WipStyle.of(wipLevelOf(t['level'])) != null).toList();

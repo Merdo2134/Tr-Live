@@ -207,7 +207,7 @@ class _ClientErrorsScreenState extends State<ClientErrorsScreen> {
         IconButton(tooltip: 'Tümünü sil', onPressed: _clear, icon: const Icon(Icons.delete_sweep_outlined)),
       ]),
       body: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_v),
+        version: _v,
         load: () => Api.get('/api/admin/client-errors', query: {'limit': '150'}),
         builder: (context, data, reload) {
           final top = listOf(data['top']);
@@ -414,7 +414,7 @@ class _StrikesScreenState extends State<StrikesScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Otomatik moderasyon')),
       body: AsyncBody<List<Map<String, dynamic>>>(
-        key: ValueKey(_v),
+        version: _v,
         load: () async => listOf((await Api.get('/api/admin/moderation/strikes', query: {'limit': '200'}))['strikes']),
         builder: (context, list, reload) => RefreshIndicator(
           onRefresh: reload,

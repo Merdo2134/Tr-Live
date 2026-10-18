@@ -1013,7 +1013,6 @@ test('şanslı çanta ve günlük görev', { skip, timeout: 60000 }, async () =>
   const bag = await api('POST', `/api/rooms/${room}/lucky-bags`, { token: s.token, body: { tier: 'n3' } });
   ok(bag, 'çanta');
   assert.equal(await coins(s), 97000n);
-  status(await api('POST', `/api/rooms/${room}/lucky-bags`, { token: s.token, body: { tier: 'n3' } }), 409, 'ikinci açık çanta');
   ok(await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: s.token }), 'gönderen de kendi çantasından alabilir');
   status(await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: s.token }), 409, 'gönderen ikinci kez alamaz');
   const cl = await api('POST', `/api/lucky-bags/${bag.body.bag.id}/claim`, { token: c1.token });

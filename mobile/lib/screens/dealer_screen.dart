@@ -43,7 +43,7 @@ class _DealerScreenState extends State<DealerScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Bayi paneli')),
       body: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_version),
+        version: _version,
         load: () => Api.get('/api/dealer/me'),
         builder: (context, data, reload) {
           final dealer = mapOf(data['dealer']) ?? {};

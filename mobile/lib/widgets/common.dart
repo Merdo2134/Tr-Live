@@ -409,7 +409,10 @@ class LoadError extends StatelessWidget {
 class AsyncBody<T> extends StatefulWidget {
   final Future<T> Function() load;
   final Widget Function(BuildContext context, T data, Future<void> Function() reload) builder;
-  const AsyncBody({super.key, required this.load, required this.builder});
+  /// Değişince veriler sessizce yenilenir: eski içerik ekranda kalır (sayfa baştan kurulmaz, dönen simge çıkmaz).
+  /// Yenileme, sayfa geçişi bitsin diye kısa bir gecikmeyle yapılır (geri dönerken takılma olmasın).
+  final Object? version;
+  const AsyncBody({super.key, required this.load, required this.builder, this.version});
 
   @override
   State<AsyncBody<T>> createState() => _AsyncBodyState<T>();
@@ -427,11 +430,30 @@ class _AsyncBodyState<T> extends State<AsyncBody<T>> {
     _reload();
   }
 
+  @override
+  void didUpdateWidget(covariant AsyncBody<T> old) {
+    super.didUpdateWidget(old);
+    if (old.version != widget.version) {
+      // Sayfa geçişi sürüyorsa (alt sayfadan geri dönülüyor) yenileme geçiş bitince yapılır; yoksa hemen.
+      final sec = ModalRoute.of(context)?.secondaryAnimation;
+      if (sec != null && sec.status != AnimationStatus.dismissed) {
+        Future.delayed(const Duration(milliseconds: 350), () {
+          if (mounted) _reload();
+        });
+      } else {
+        _reload();
+      }
+    }
+  }
+
+  int _seq = 0;
+
   Future<void> _reload() async {
+    final seq = ++_seq;
     if (!_loaded) setState(() => _loading = true);
     try {
       final d = await widget.load();
-      if (!mounted) return;
+      if (!mounted || seq != _seq) return; // daha yeni bir yenileme başladıysa eski yanıt yazılmaz
       setState(() {
         _data = d;
         _loaded = true;
@@ -439,7 +461,7 @@ class _AsyncBodyState<T> extends State<AsyncBody<T>> {
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _seq) return;
       setState(() {
         _error = errorText(e);
         _loading = false;

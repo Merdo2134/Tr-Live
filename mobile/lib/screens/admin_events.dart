@@ -210,7 +210,7 @@ class _AdminWeeklyEventsPageState extends State<AdminWeeklyEventsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Haftalık etkinlikler')),
       body: AsyncBody<List<Map<String, dynamic>>>(
-        key: ValueKey(_v),
+        version: _v,
         load: () async => listOf((await Api.get('/api/admin/weekly-events'))['events']),
         builder: (context, events, reload) => RefreshIndicator(
           onRefresh: reload,

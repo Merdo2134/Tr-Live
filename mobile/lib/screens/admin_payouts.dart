@@ -175,7 +175,7 @@ class _PayoutsTabState extends State<PayoutsTab> {
   @override
   Widget build(BuildContext context) {
     return AsyncBody<Map<String, dynamic>>(
-      key: ValueKey(_v),
+      version: _v,
       load: _load,
       builder: (context, data, reload) {
         final cfg = mapOf(data['config']) ?? {};
@@ -290,7 +290,7 @@ class _PeriodDetailScreenState extends State<PeriodDetailScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Dönem ayrıntısı')),
       body: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_v),
+        version: _v,
         load: () => Api.get('/api/admin/payouts/${widget.periodId}'),
         builder: (context, data, reload) {
           final hosts = listOf(data['hostStatements']);

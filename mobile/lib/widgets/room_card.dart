@@ -70,7 +70,7 @@ class RoomCard extends StatelessWidget {
                     right: inset,
                     top: inset,
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      if (bags > 0) Image.asset('assets/images/lucky_pouch.webp', width: tagH * 1.25, height: tagH * 1.25),
+                      if (bags > 0) Image.asset('assets/images/lucky_pouch.webp', width: tagH * 1.9, height: tagH * 1.9),
                       if (room['locked'] == true) Padding(padding: const EdgeInsets.only(left: 4), child: Icon(Icons.lock, size: tagH, color: Pal.amber)),
                     ]),
                   ),

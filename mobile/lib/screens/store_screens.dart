@@ -297,7 +297,7 @@ class _AppearanceScreenState extends State<AppearanceScreen> {
         _catBar([for (final c in cats) [c[0], c[2]]], _cat, 1, (v) => setState(() => _cat = v)),
         Expanded(
           child: AsyncBody<List<Map<String, dynamic>>>(
-            key: ValueKey(_version),
+            version: _version,
             load: () async => listOf((await Api.get('/api/inventory'))['items']),
             builder: (context, all, reload) {
               final items = all.where((i) => i['itemType'] == _cat).toList();

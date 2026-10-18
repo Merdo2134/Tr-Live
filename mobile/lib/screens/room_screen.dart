@@ -110,6 +110,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   Timer? _followTimer;
   final Set<String> _welcomed = {};
   final List<Map<String, dynamic>> _bags = []; // bu odadaki açık şanslı çantalar
+  /// Henüz açmadığım çantalar: açtığım çanta bana görünmez; çanta tamamen bitince herkesten kalkar.
+  List<Map<String, dynamic>> get _openBags => _bags.where((b) => b['mine'] == null).toList();
   int get _seatCount => (_room?['seatCount'] as num?)?.toInt() ?? 8;
   String get _myRole => (_me['role'] ?? 'user').toString();
   bool get _onSeat => _me['microphone'] == true;
@@ -563,7 +565,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         setState(() {
           final i = _bags.indexWhere((b) => b['id'] == e['bagId']);
           if (i >= 0) {
-            _bags[i] = {..._bags[i], 'claimed': e['claimed']};
+            final byMe = mapOf(e['user'])?['id']?.toString() == Session.id;
+            _bags[i] = {..._bags[i], 'claimed': e['claimed'], if (byMe) 'mine': (e['amount'] ?? '0').toString()};
             if (e['done'] == true) _bags.removeAt(i);
           }
         });
@@ -3304,15 +3307,27 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                   _GiftFlight(key: ValueKey(f.id), data: f, onDone: () {
                     if (mounted) setState(() => _flights.removeWhere((x) => x.id == f.id));
                   }),
-                // Şanslı çanta: Yoho'daki gibi sağda, alt barın hemen üstünde (koltukların üstüne binmez).
-                if (_bags.isNotEmpty && !_inputOpen)
+                // Şanslı çanta: en üstte, oda elmasının hemen altında. Açtığım çanta bana görünmez;
+                // birden çok çanta varsa sayısı yazar ve sıradaki açılır.
+                if (_openBags.isNotEmpty && !_inputOpen)
                   Positioned(
-                    right: 8,
-                    bottom: g.barH + 10,
+                    left: 8,
+                    // PK şeridi ya da bağlantı hatası şeridi varsa onların altına iner.
+                    top: MediaQuery.paddingOf(context).top + g.headerH + 2 + (_pk != null || _lkError != null ? 64 : 0),
                     child: BagEnvelope(
-                      count: _bags.length,
-                      isSuper: _bags.any((b) => b['kind'] == 'super'),
-                      onTap: () => showBagClaim(context, widget.roomId, _bags.first),
+                      size: 40,
+                      count: _openBags.length,
+                      isSuper: _openBags.any((b) => b['kind'] == 'super'),
+                      onTap: () async {
+                        final bag = _openBags.first;
+                        await showBagClaim(context, widget.roomId, bag);
+                        // Açıldıysa (ya da zaten açılmışsa) listeden yenile: bana kalan çantalar görünsün.
+                        if (!mounted) return;
+                        try {
+                          final lb = await Api.get('/api/rooms/${widget.roomId}/lucky-bags');
+                          if (mounted) setState(() => _bags..clear()..addAll(listOf(lb['bags'])));
+                        } catch (_) {}
+                      },
                     ),
                   ),
                 ]);

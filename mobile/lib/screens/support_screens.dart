@@ -77,7 +77,7 @@ class _CoinsCenterScreenState extends State<CoinsCenterScreen> {
         actions: [IconButton(tooltip: 'Müşteri hizmetleri', icon: const Icon(Icons.headset_mic_outlined, color: Color(0xFFFFEB3B)), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomerServiceScreen())))],
       ),
       body: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_v),
+        version: _v,
         load: () async {
           try {
             await Session.refresh();
@@ -88,7 +88,7 @@ class _CoinsCenterScreenState extends State<CoinsCenterScreen> {
         builder: (context, d, reload) {
           final pkgs = listOf(d['packages']);
           return RefreshIndicator(
-            onRefresh: () async => setState(() => _v++),
+            onRefresh: reload,
             child: ListView(padding: EdgeInsets.zero, children: [
               Container(
                 padding: const EdgeInsets.only(top: 14, bottom: 26),
@@ -411,10 +411,10 @@ class _SupportAdminTabState extends State<SupportAdminTab> {
   @override
   Widget build(BuildContext context) {
     return AsyncBody<List<Map<String, dynamic>>>(
-      key: ValueKey(_v),
+      version: _v,
       load: () async => listOf((await Api.get('/api/admin/support/threads'))['threads']),
       builder: (context, th, reload) => RefreshIndicator(
-        onRefresh: () async => setState(() => _v++),
+        onRefresh: reload,
         child: th.isEmpty
             ? ListView(children: const [Padding(padding: EdgeInsets.all(40), child: Center(child: Text('Henüz destek mesajı yok.')))])
             : ListView(children: [
@@ -554,7 +554,7 @@ class _CoinPackagesPageState extends State<CoinPackagesPage> {
       appBar: AppBar(title: const Text('Coin paketleri')),
       floatingActionButton: FloatingActionButton(onPressed: _add, child: const Icon(Icons.add)),
       body: AsyncBody<List<Map<String, dynamic>>>(
-        key: ValueKey(_v),
+        version: _v,
         load: () async => listOf((await Api.get('/api/admin/coin-packages'))['packages']),
         builder: (context, pk, reload) => ListView(children: [
           for (final p in pk)

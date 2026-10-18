@@ -417,7 +417,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       // Yüklenirken veya hata olursa da geri dönülebilsin (asıl geri düğmesi kapak üstünde).
       body: Stack(children: [
         Positioned.fill(child: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_version),
+        version: _version,
         load: _load,
         builder: (context, data, reload) {
           final p = mapOf(data['p']) ?? {};

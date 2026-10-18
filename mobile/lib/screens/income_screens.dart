@@ -43,14 +43,14 @@ class _IncomeCenterScreenState extends State<IncomeCenterScreen> {
   }
 
   Future<Map<String, dynamic>> _load() async {
-    final me = mapOf((await Api.get('/api/me'))['user']) ?? {};
+    // İstekler aynı anda gönderilir (sırayla beklenmez).
+    final hostF = Api.get('/api/broadcaster/me').then((b) => mapOf(b['broadcaster'])?['status'] == 'approved').catchError((_) => false);
+    final res = await Future.wait([Api.get('/api/me'), Api.get('/api/me/wallet', query: {'limit': '60'})]);
+    final me = mapOf(res[0]['user']) ?? {};
     Session.me.value = me;
-    final w = await Api.get('/api/me/wallet', query: {'limit': '60'});
+    final w = res[1];
     final recent = listOf(w['transactions']).where((t) => t['type'] == 'gift_received').take(8).toList();
-    var host = false;
-    try {
-      host = mapOf((await Api.get('/api/broadcaster/me'))['broadcaster'])?['status'] == 'approved';
-    } catch (_) {}
+    final host = await hostF;
     if (mounted) _host.value = host;
     return {'me': me, 'recent': recent, 'host': host};
   }
@@ -77,7 +77,7 @@ class _IncomeCenterScreenState extends State<IncomeCenterScreen> {
         ],
       ),
       body: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_version),
+        version: _version,
         load: _load,
         builder: (context, data, reload) {
           final me = mapOf(data['me']) ?? {};

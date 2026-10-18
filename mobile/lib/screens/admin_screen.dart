@@ -531,7 +531,7 @@ class _AgenciesTabState extends State<_AgenciesTab> {
   @override
   Widget build(BuildContext context) {
     return AsyncBody<Map<String, dynamic>>(
-      key: ValueKey(_v),
+      version: _v,
       load: _load,
       builder: (context, data, reload) {
         final agencies = listOf(data['agencies']);
@@ -634,7 +634,7 @@ class _DealersTabState extends State<_DealersTab> {
   @override
   Widget build(BuildContext context) {
     return AsyncBody<List<Map<String, dynamic>>>(
-      key: ValueKey(_v),
+      version: _v,
       load: () async => listOf((await Api.get('/api/admin/dealers'))['dealers']),
       builder: (context, dealers, reload) => RefreshIndicator(
         onRefresh: reload,
@@ -1149,7 +1149,7 @@ class _ReportsTabState extends State<_ReportsTab> {
   @override
   Widget build(BuildContext context) {
     return AsyncBody<List<Map<String, dynamic>>>(
-      key: ValueKey(_v),
+      version: _v,
       load: () async => listOf((await Api.get('/api/admin/reports'))['reports']),
       builder: (context, reports, reload) => reports.isEmpty
           ? const Center(child: Text('Açık şikâyet yok.'))
@@ -1214,7 +1214,7 @@ class _SecurityTabState extends State<_SecurityTab> {
   @override
   Widget build(BuildContext context) {
     return AsyncBody<Map<String, dynamic>>(
-      key: ValueKey(_v),
+      version: _v,
       load: _load,
       builder: (context, data, reload) {
         final events = listOf(data['events']);
@@ -1391,7 +1391,7 @@ class _StoreItemsPageState extends State<StoreItemsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Mağaza ürünleri (silmek için sola kaydır)')),
       body: AsyncBody<List<Map<String, dynamic>>>(
-        key: ValueKey(_v),
+        version: _v,
         load: () async => listOf((await Api.get('/api/admin/store/items'))['items']),
         builder: (context, items, reload) => items.isEmpty
             ? const Center(child: Text('Henüz ürün yok.'))

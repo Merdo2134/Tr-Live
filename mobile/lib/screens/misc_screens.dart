@@ -290,7 +290,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Engellenen kullanıcılar')),
       body: AsyncBody<List<Map<String, dynamic>>>(
-        key: ValueKey(_version),
+        version: _version,
         load: () async => listOf((await Api.get('/api/blocks'))['users']),
         builder: (context, users, reload) => users.isEmpty
             ? const Center(child: Text('Engellediğiniz kimse yok.'))
@@ -434,7 +434,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Oturumlarım')),
       body: AsyncBody<List<Map<String, dynamic>>>(
-        key: ValueKey(_v),
+        version: _v,
         load: _load,
         builder: (context, list, reload) => RefreshIndicator(
           onRefresh: reload,

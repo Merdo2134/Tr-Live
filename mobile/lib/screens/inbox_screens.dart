@@ -426,7 +426,7 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
         ),
         Expanded(
           child: AsyncBody<List<Map<String, dynamic>>>(
-            key: ValueKey(_v),
+            version: _v,
             // Arkadaşlık istekleri + CP sisteminden gelen ilişki istekleri (Arkadaş / CP) tek listede.
             load: () async {
               final res = await Future.wait([
@@ -520,7 +520,7 @@ class _AgencyInvitesScreenState extends State<AgencyInvitesScreen> {
     return Scaffold(
       appBar: AppBar(titleSpacing: 0, title: const Text('Ajans daveti', style: TextStyle(fontWeight: FontWeight.w800))),
       body: AsyncBody<List<Map<String, dynamic>>>(
-        key: ValueKey(_v),
+        version: _v,
         load: () async => listOf((await Api.get('/api/broadcaster/requests'))['requests']).where((x) => x['direction'] == 'invite').toList(),
         builder: (context, list, reload) => list.isEmpty
             ? const Center(child: Text('Bekleyen ajans daveti yok.', style: TextStyle(color: Pal.textDim, fontSize: 15)))

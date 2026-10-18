@@ -57,7 +57,7 @@ class _AgencyScreenState extends State<AgencyScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.mode == 'agency' ? 'Ajans Merkezi' : 'Yayıncı Merkezi')),
       body: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_version),
+        version: _version,
         load: _load,
         builder: (context, data, reload) {
           final owned = mapOf(data['owned']);
@@ -393,7 +393,7 @@ class _AgencyDashboardScreenState extends State<AgencyDashboardScreen> {
         IconButton(tooltip: 'Yayıncı davet et', icon: const Icon(Icons.person_add), onPressed: _invite),
       ]),
       body: AsyncBody<Map<String, dynamic>>(
-        key: ValueKey(_version),
+        version: _version,
         load: _load,
         builder: (context, data, reload) {
           final d = mapOf(data['dashboard']) ?? {};

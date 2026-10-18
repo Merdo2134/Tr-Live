@@ -82,6 +82,11 @@ ThemeData buildAppTheme() {
     visualDensity: VisualDensity.standard,
     scaffoldBackgroundColor: Pal.bg,
     canvasColor: Pal.bg,
+    // Hafif sayfa geçişi: yalnızca yeni sayfa sağdan kayar (eski sayfa yeniden çizilmez, büyütme/soldurma yok).
+    // Varsayılan Android geçişi iki sayfayı birden büyütüp soldurduğu için ağır sayfalarda takılıyordu.
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FastSlidePageTransitionsBuilder(),
+    }),
     dividerColor: Pal.outline.withValues(alpha: 0.5),
     appBarTheme: const AppBarTheme(
       backgroundColor: Pal.bg,
@@ -161,4 +166,19 @@ Widget appFrame(BuildContext context, Widget? child) {
       child: SafeArea(top: false, left: false, right: false, child: Align(alignment: Alignment.topCenter, child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: Resp.maxContent), child: child))),
     ),
   );
+}
+
+/// Yalnızca kaydırma (dönüşüm): GPU'da ucuz, sayfa içeriği yeniden çizilmez.
+class FastSlidePageTransitionsBuilder extends PageTransitionsBuilder {
+  const FastSlidePageTransitionsBuilder();
+
+  static final _tween = Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero).chain(CurveTween(curve: Curves.easeOutCubic));
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
+    return SlideTransition(
+      position: animation.drive(_tween),
+      child: RepaintBoundary(child: child),
+    );
+  }
 }

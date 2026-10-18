@@ -78,8 +78,7 @@ router.post('/rooms/:roomId/lucky-bags', userLimit('lucky_send', 6, 10 * 60e3), 
     if (!(await c.query(`SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2`, [roomId, userId])).rowCount) throw fail('Önce odaya girin.', 403);
     const u = (await c.query(`SELECT coins FROM users WHERE id = $1 FOR UPDATE`, [userId])).rows[0];
     if (BigInt(u.coins) < BigInt(tier.total)) throw fail('Yeterli Coin yok.', 409);
-    const open = (await c.query(`SELECT 1 FROM lucky_bags WHERE sender_id = $1 AND status = 'open' AND expires_at > NOW()`, [userId])).rowCount;
-    if (open) throw fail('Açık bir çantanız zaten var; süresi dolunca yenisini gönderebilirsiniz.', 409);
+    // Üst üste çanta atılabilir (sıklık sınırı: 10 dakikada en fazla 6).
     await c.query(`UPDATE users SET coins = coins - $2, updated_at = NOW() WHERE id = $1`, [userId, String(tier.total)]);
     const bag = (await c.query(
       `INSERT INTO lucky_bags(room_id, sender_id, kind, tier, total_coins, slots, amounts, note, opens_at, expires_at)

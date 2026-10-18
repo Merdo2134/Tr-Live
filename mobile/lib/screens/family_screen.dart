@@ -22,7 +22,7 @@ class _FamilyScreenState extends State<FamilyScreen> {
   @override
   Widget build(BuildContext context) {
     return AsyncBody<Map<String, dynamic>?>(
-      key: ValueKey(_version),
+      version: _version,
       load: () async => mapOf((await Api.get('/api/families/mine'))['family']),
       builder: (context, family, reload) =>
           family == null ? _FamilyBrowser(onChanged: _changed) : _FamilyDetail(family: family, onChanged: _changed),
@@ -172,7 +172,8 @@ class _FamilyDetailState extends State<_FamilyDetail> {
   Widget build(BuildContext context) {
     final f = widget.family;
     return AsyncBody<List<Map<String, dynamic>>>(
-      key: ValueKey(_v),
+      // Sahiplik/rol değişince de yenilenir (üst sayfa aynı aileyi gösterirken).
+      version: '$_v-${widget.family['myRole']}-${widget.family['ownerId']}',
       load: () async => listOf((await Api.get('/api/families/$_id/members'))['members']),
       builder: (context, members, reload) => RefreshIndicator(
         onRefresh: reload,

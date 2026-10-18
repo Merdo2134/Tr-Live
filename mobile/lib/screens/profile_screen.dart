@@ -38,15 +38,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _reload() => setState(() => _version++);
 
   Future<Map<String, dynamic>> _load() async {
+    // İki istek aynı anda (sırayla beklenmez).
+    final dealerF = Api.get('/api/dealer/me').then((_) => true).catchError((_) => false); // bayi değilse hata döner
     final r = await Api.get('/api/me');
     final profile = mapOf(r['user']) ?? {};
     Session.me.value = profile;
     Inbox.refreshBadges();
-    bool dealer = false;
-    try {
-      await Api.get('/api/dealer/me');
-      dealer = true;
-    } catch (_) {/* bayi değil */}
+    final dealer = await dealerF;
     return {'profile': profile, 'dealer': dealer};
   }
 
@@ -360,7 +358,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return AsyncBody<Map<String, dynamic>>(
-      key: ValueKey(_version),
+      version: _version,
       load: _load,
       builder: (context, data, reload) {
         final p = mapOf(data['profile']) ?? {};

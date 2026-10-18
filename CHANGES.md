@@ -1,3 +1,14 @@
+## v2.49.0 — Şanslı çanta düzenlemesi ve hızlandırma
+- **Şanslı çanta:** oda içinde en üstte, oda elmasının altında. Açtığın çanta sana bir daha görünmez; çanta tamamen
+  bitince herkesten kalkar. Aynı kişi üst üste çanta atabilir (birden çok çanta varsa sayısı yazar, sıradaki açılır).
+  Ana sayfadaki oda kartında çanta simgesi büyüdü.
+- **Daha hızlı sayfa geçişleri:** ağır Android geçişi (iki sayfayı büyütüp soldurma) yerine yalnızca yeni sayfanın
+  sağdan kaydığı hafif geçiş.
+- **Geri dönüşte takılma giderildi:** alt sayfadan dönünce (profil, gelir merkezi, mağaza…) sayfa baştan kurulmuyor ve
+  dönen yükleme simgesi çıkmıyor; içerik ekranda kalır, yenileme geçiş bitince arka planda yapılır (27 ekran).
+- Profil ve Gelir Merkezi'ndeki istekler sırayla değil aynı anda gönderilir; etkinlik sayfasında yalnızca geri sayım
+  yazısı her saniye yenilenir.
+
 ## v2.48.1 — Etkinlik banner görselleri ve tonlarına göre sayfa tasarımı
 - Ana sayfadaki etkinlik kartları artık özel banner görselleri: **Haftalık Kral ve Kraliçe**, **Haftanın Çifti**,
   **Haftalık Yıldızlar**; dokununca ilgili etkinlik sayfası açılır, şimdiki lider sağ altta yazar.
