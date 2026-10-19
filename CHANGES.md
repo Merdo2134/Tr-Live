@@ -1,3 +1,7 @@
+## v2.54.1 — Etkinlik sayımı
+- Alınan hediyeye göre yarışan etkinliklerde (Kral, Kraliçe, Yıldızlar-Yayıncı) kendine gönderilen hediye de sayılır.
+- Destekçi sıralamasında (Yıldızlar-Destekçi) yalnızca başkasına gönderilen hediye sayılır.
+
 ## v2.54.0 — Koyu tema, şanslı çanta, katkı listesi
 - Beyaz sayfalar uygulamanın koyu lacivert renklerine geçti: kullanıcı profili, aile sayfaları (liste, üyeler, istekler,
   bilgileri düzenle, seviyeler, Coins ödülü, kurallar), En İyi Arkadaş / Kanka listesi, koruyucu kuralları, Zirve Listesi üst çubuğu.

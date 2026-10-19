@@ -25,19 +25,20 @@ const DEFAULT_RULES = {
   ].join('\n'),
   king: [
     'Profilinde cinsiyeti "Erkek" olan kullanıcılar yarışır.',
-    'Hafta boyunca aldığın hediyelerin Coin değeri toplanır (kendine gönderdiğin sayılmaz).',
+    'Hafta boyunca aldığın tüm hediyelerin Coin değeri toplanır (kendine gönderdiğin de sayılır).',
     'Hafta Pazartesi 00:00\'da başlar, Pazar 23:59\'da biter (Türkiye saati).',
     'Hafta bitince ilk 3\'e ödüller otomatik verilir.',
   ].join('\n'),
   queen: [
     'Profilinde cinsiyeti "Kadın" olan kullanıcılar yarışır.',
-    'Hafta boyunca aldığın hediyelerin Coin değeri toplanır (kendine gönderdiğin sayılmaz).',
+    'Hafta boyunca aldığın tüm hediyelerin Coin değeri toplanır (kendine gönderdiğin de sayılır).',
     'Hafta Pazartesi 00:00\'da başlar, Pazar 23:59\'da biter (Türkiye saati).',
     'Hafta bitince ilk 3\'e ödüller otomatik verilir.',
   ].join('\n'),
   star: [
     'Her hafta 4 yıldız hediyesi seçilir; her hediye ayrı bir yarıştır.',
-    'O hediyeden hafta boyunca en çok gönderen (adet) kazanır. Kendine gönderilen sayılmaz.',
+    'Destekçi: o hediyeden hafta boyunca başkasına en çok gönderen (adet) kazanır. Kendine gönderilen sayılmaz.',
+    'Yayıncı: o hediyeden en çok alan (kendine gönderilen de sayılır).',
     'Hafta Pazartesi 00:00\'da başlar, Pazar 23:59\'da biter (Türkiye saati).',
     'Hafta bitince her hediyenin ilk 3\'üne kendi ödülleri otomatik verilir.',
   ].join('\n'),
@@ -72,15 +73,17 @@ function rankingSql(kind, side = 'sender') {
   if (kind === 'king' || kind === 'queen') {
     return `SELECT g.receiver_id AS user_id, NULL::uuid AS partner_id, SUM(g.coin_amount)::bigint AS score
             FROM gift_transactions g JOIN users u ON u.id = g.receiver_id
-            WHERE g.created_at >= $1 AND g.created_at < $2 AND g.sender_id <> g.receiver_id
+            WHERE g.created_at >= $1 AND g.created_at < $2
               AND u.gender = $3::text AND u.account_status = 'active'
             GROUP BY g.receiver_id`;
   }
-  // Yıldız: Destekçi = o hediyeden en çok gönderen; Yayıncı = en çok alan (yalnızca gösterim).
+  // Yıldız: Destekçi = o hediyeden başkasına en çok gönderen (kendine gönderilen sayılmaz);
+  // Yayıncı = en çok alan (kendine gönderilen de sayılır; yalnızca gösterim).
   const col = side === 'receiver' ? 'receiver_id' : 'sender_id';
+  const selfRule = side === 'receiver' ? '' : 'AND g.sender_id <> g.receiver_id';
   return `SELECT g.${col} AS user_id, NULL::uuid AS partner_id, SUM(g.quantity)::bigint AS score
           FROM gift_transactions g JOIN users u ON u.id = g.${col}
-          WHERE g.created_at >= $1 AND g.created_at < $2 AND g.sender_id <> g.receiver_id
+          WHERE g.created_at >= $1 AND g.created_at < $2 ${selfRule}
             AND g.gift_id = $3::uuid AND u.account_status = 'active'
           GROUP BY g.${col}`;
 }
