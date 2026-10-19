@@ -1,3 +1,27 @@
+## v2.53.0 — Aile, Zirve Listesi, Etkinlik sayfaları ve Şanslı çanta (Figma tasarımı)
+- Kendi profiline dokununca herkesin gördüğü beyaz profil sayfası açılır; düzenleme sağ üstteki kalemden.
+  Kapak fotoğrafı kırpma oranı yeni profile göre (375x343).
+- Aile:
+  - Seviyeler Demir, Bronz, Gümüş, Altın, Elmas (üye sınırı 150/200/300/450/650, yönetici 5/8/14/23/35), seviyeye
+    özel başlık arka planı ve rozetler; seviye sayfaları (Ayrıcalıklar) ve "Hızlı bir şekilde nasıl yükseltilir?".
+  - Aile sayfası: çerçeveli logo, ad, aile ID, katkı çubuğu, aile bildirimi, üyeler (rol etiketleriyle), aile odaları,
+    "Üye gözünden bak" (başkan), Coins ödülü düğmesi.
+  - Katılım başvuru ile; yöneticiler "Yeni istek" / İstekler'den kabul eder. İstek Ayarları: en düşük zenginlik
+    seviyesi. Bilgileri Düzenle: kapak resmi, aile ismi (12), aile bildirimi (100). Aileyi Dağıt / Aileden Ayrıl.
+  - Katkı değeri (🔥): günlük giriş 20, yükleme 1 Coin = 1, gönderilen hediye 1 Coin = 1, alınan hediye 1 Elmas = 1.
+    Üyelerin bu haftaki katkısı listede.
+  - Coins ödülü: haftalık katkı 800K / 1M / 5M olunca 2300 / 4500 / 25K Coin (aile başkanı alır). Başkan indirimi:
+    kişisel harcamanın seviyeye göre %1-3'ü birikir (en az 10K harcamadan sonra alınır).
+  - Aile kuralları (soru-cevap) ve görev tablosu.
+- Zirve Listesi: Yayıncı, Destekçi, Yükleme (yeni), Ajans, Aile, CP; Günlük / Haftalık / Aylık; her sekme kendi
+  renginde, taçlı çerçeveli ilk 3 kürsü, tutarlar gizli (7****5), altta kendi sıran, Kurallar.
+- Etkinlik sayfaları: Haftalık Kral ve Kraliçe, Haftalık Yıldızlar (Yayıncı / Destekçi ve 4 hediye), Haftanın Çifti;
+  Figma görselleri, geri sayım, Bu Hafta / Geçen Hafta, sıralama, altta kendi sıran, Kural ve Ödül sayfası.
+- Şanslı çanta: Figma'daki pembe perdeli kart; AÇ / geri sayım, "xTutar Tebrikler!", "Üzgünüm, bu şanslı çanta zaten
+  açılmış..."; odadaki çanta simgesi kırmızı zarf.
+- Notlar: mevcut ailelerin seviyesi yeni eşiklere (1M/6M/20M/60M) göre yeniden hesaplanır. Kendine hediye aile
+  katkısına ve başkan indirimine sayılmaz. Başkan indirimi küçük harcamalarda da (kuruş kuruş) birikir.
+
 ## v2.52.0 — Profil, İlişki Duvarı ve Koruyucu (Figma tasarımı)
 - Kullanıcı profili Figma'daki beyaz tasarıma geçti: tam genişlik kapak, çerçeveli avatar, sağda koruyucu rozeti,
   madalyalar, Profil / Başarılar / Paylaşım / İlişkiler sekmeleri, aile kartı, Top Destekçiler, seviye kartları.

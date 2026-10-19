@@ -34,6 +34,7 @@ import { router as friendsRouter } from './routes/friends.js';
 import { router as cpRouter, startRelationRefundTicker } from './routes/cp.js';
 import { router as guardianRouter } from './routes/guardian.js';
 import { startGuardianTicker } from './services/guardian.js';
+import { startFamilyJanitor } from './services/family.js';
 import { router as storeRouter } from './routes/store.js';
 import { router as supportRouter } from './routes/support.js';
 import { router as safetyRouter } from './routes/safety.js';
@@ -227,6 +228,7 @@ const eventsTicker = startWeeklyEventsTicker();
 const notifyJanitor = startNotificationJanitor();
 const relationTicker = startRelationRefundTicker();
 const guardianTicker = startGuardianTicker();
+const familyJanitor = startFamilyJanitor();
 closeStaleMicSessions().catch((e) => console.error('Mikrofon oturumları temizlenemedi:', e.message));
 const janitor = startFirewallJanitor();
 // Bir günden eski işlem (idempotency) anahtarları saatte bir silinir.
@@ -252,6 +254,7 @@ async function shutdown(signal) {
   clearInterval(notifyJanitor);
   clearInterval(relationTicker);
   clearInterval(guardianTicker);
+  clearInterval(familyJanitor);
   clearInterval(janitor);
   clearInterval(idemJanitor);
   const force = setTimeout(() => process.exit(1), 10000);

@@ -7,6 +7,8 @@ import { activeWip, BASE_FEATURES } from '../services/wip.js';
 import { idempotent } from '../idempotency.js';
 import { ghostNow, refreshGhost } from '../services/ghost.js';
 
+import { addLeaderSpend } from '../services/family.js';
+
 export const router = Router();
 router.use(requireAuth);
 
@@ -60,6 +62,7 @@ router.post('/purchase', userLimit('wip_buy', 10, 3600e3), idempotent('wip_purch
       [req.user.id, plan.level, plan.duration_days],
     )).rows[0];
 
+    await addLeaderSpend((q, p) => c.query(q, p), req.user.id, price);
     await c.query(
       `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'wip_purchase',$2,$3,$4)`,
       [req.user.id, (-price).toString(), plan.id, `WIP satın alma: ${plan.name}`],

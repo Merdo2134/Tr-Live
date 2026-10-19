@@ -18,12 +18,14 @@ import { listSessions, revokeSession, revokeAllSessions, revokeOtherSessions, si
 import { idempotent } from '../idempotency.js';
 import { ghostNow, refreshGhost } from '../services/ghost.js';
 
+import { familyDailyLogin } from '../services/family.js';
 export const router = Router();
 router.use(requireAuth);
 
 const LANG_RE = /^[a-z]{2}(-[A-Z]{2})?$/;
 
 router.get('/', async (req, res) => {
+  familyDailyLogin(req.user.id); // aile katkısı: günlük giriş (beklenmez)
   const profile = await loadProfile(req.user.id, req.user.id);
   const wip = await activeWip(req.user.id);
   res.json({ user: profile, wip });

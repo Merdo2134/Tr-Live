@@ -16,8 +16,8 @@ class CropSpec {
   /// Profil fotoğrafı: kare, daire kılavuzlu.
   static const avatar = CropSpec(1, 720, circle: true, title: 'Profil fotoğrafını ayarla');
 
-  /// Profil kapak fotoğrafı: profil sayfasındaki alanla aynı oran (genişlik × 0,62).
-  static const profileCover = CropSpec(1 / 0.62, 1080, title: 'Kapak fotoğrafını ayarla');
+  /// Profil kapak fotoğrafı: profil sayfasındaki alanla aynı oran (Figma: 375 × 343).
+  static const profileCover = CropSpec(375 / 343, 1080, title: 'Kapak fotoğrafını ayarla');
 
   /// Oda fotoğrafı: oda kartındaki kare görsel.
   static const roomCover = CropSpec(1, 720, title: 'Oda fotoğrafını ayarla');

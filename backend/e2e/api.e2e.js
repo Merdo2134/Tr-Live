@@ -334,13 +334,22 @@ test('şifreli oda', { skip, timeout: 60000 }, async () => {
 });
 
 test('aile: kurma, katılma, çifte üyelik engeli, devir, dağıtma', { skip, timeout: 60000 }, async () => {
-  const f = await api('POST', '/api/families', { token: U.a.token, body: { name: `Aile ${tag}`, description: 'test' } });
+  const f = await api('POST', '/api/families', { token: U.a.token, body: { name: `A${tag}`.slice(0, 12), description: 'test' } });
   ok(f);
   const id = f.body.family.id;
-  status(await api('POST', '/api/families', { token: U.a.token, body: { name: `Başka ${tag}` } }), 409, 'zaten ailede');
+  status(await api('POST', '/api/families', { token: U.a.token, body: { name: `B${tag}`.slice(0, 12) } }), 409, 'zaten ailede');
+  // Katılım başvuru ile: yönetici onaylar
   ok(await api('POST', `/api/families/${id}/join`, { token: U.b.token }));
+  const reqs = (await api('GET', `/api/families/${id}/requests`, { token: U.a.token })).body.requests;
+  assert.equal(reqs.length, 1); assert.equal(reqs[0].user.id, U.b.id);
+  status(await api('GET', `/api/families/${id}/requests`, { token: U.b.token }), 403, 'üye olmayan istekleri göremez');
+  ok(await api('POST', `/api/families/${id}/requests/${U.b.id}/accept`, { token: U.a.token }));
   status(await api('POST', `/api/families/${id}/join`, { token: U.b.token }), 409, 'tekrar katılım');
-  const g = await api('POST', '/api/families', { token: U.g.token, body: { name: `Diğer ${tag}` } });
+  // İstek Ayarları: zenginlik seviyesi sınırı
+  ok(await api('PUT', `/api/families/${id}/settings`, { token: U.a.token, body: { joinMinLevel: 150 } }));
+  status(await api('POST', `/api/families/${id}/join`, { token: U.f.token }), 400, 'seviye şartı');
+  ok(await api('PUT', `/api/families/${id}/settings`, { token: U.a.token, body: { joinMinLevel: 0 } }));
+  const g = await api('POST', '/api/families', { token: U.g.token, body: { name: `C${tag}`.slice(0, 12) } });
   ok(g);
   status(await api('POST', `/api/families/${g.body.family.id}/join`, { token: U.b.token }), 409, 'başka aileye sessiz başarı OLMAMALI');
   status(await api('POST', `/api/families/${id}/leave`, { token: U.a.token }), 409, 'sahip ayrılamaz');
@@ -350,7 +359,11 @@ test('aile: kurma, katılma, çifte üyelik engeli, devir, dağıtma', { skip, t
   const before = BigInt((await sql('SELECT total_points FROM families WHERE id=$1', [id])).rows[0].total_points);
   ok(await api('POST', `/api/rooms/${roomId}/gifts/send`, { token: U.a.token, body: { giftId: rose.id, quantity: 5, distribution: 'single', recipientId: U.b.id } }));
   const after = BigInt((await sql('SELECT total_points FROM families WHERE id=$1', [id])).rows[0].total_points);
-  assert.equal(after - before, 50n);
+  assert.equal(after - before, 100n, 'alınan 50 Elmas + gönderilen 50 Coin');
+  const week = (await api('GET', `/api/families/${id}/members`, { token: U.a.token })).body.members;
+  assert.equal(week.find((m) => m.userId === U.b.id).weekPoints, '50', 'üyenin haftalık katkısı');
+  const det = (await api('GET', `/api/families/${id}`, { token: U.b.token })).body.family;
+  assert.equal(det.tier, 'Demir'); assert.equal(det.capacity, 150); assert.ok(det.publicId);
   ok(await api('POST', `/api/families/${id}/transfer`, { token: U.a.token, body: { userId: U.b.id } }));
   status(await api('DELETE', `/api/families/${id}`, { token: U.a.token }), 403, 'artık sahip değil');
   ok(await api('DELETE', `/api/families/${id}`, { token: U.b.token }));

@@ -46,9 +46,10 @@ test('seviye hesapları', () => {
   assert.equal(levelFor('100000000', COIN_LEVEL_STEPS), 9);
   assert.equal(levelFor('999999999999', COIN_LEVEL_STEPS), 9);
   assert.equal(familyLevelFor(0), 1);
-  assert.equal(familyLevelFor('10000000'), 5);
-  assert.equal(familyCapacity(1), 30);
-  assert.equal(familyCapacity(99), 200);
+  assert.equal(familyLevelFor('60000000'), 5);
+  assert.equal(familyLevelFor('5999999'), 2);
+  assert.equal(familyCapacity(1), 150);
+  assert.equal(familyCapacity(99), 650);
   assert.equal(giftDisplayLevel(999), 1);
   assert.equal(giftDisplayLevel(1000), 2);
   assert.equal(giftDisplayLevel(10000), 3);

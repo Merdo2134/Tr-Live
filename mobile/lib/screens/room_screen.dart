@@ -3008,7 +3008,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                 ),
               ),
             ]),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text('Aile')), body: const FamilyScreen()))),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FamilyScreen())),
             border: Border.all(color: Colors.amber.withValues(alpha: 0.6)),
             shrink: true,
           ),

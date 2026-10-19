@@ -237,8 +237,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final features = mapOf(wip?['features']);
     const avatarR = 44.0;
     const frameSize = avatarR * 2 * kFrameScale; // çerçeve, fotoğrafın çapına göre
+    // Fotoğrafa / isme dokununca herkesin gördüğü (beyaz) profil sayfası açılır; düzenleme oradaki kalemle.
     return Column(children: [
-      SizedBox(
+      GestureDetector(
+        onTap: () => _open(UserProfileScreen(userId: Session.id)),
+        child: SizedBox(
         width: frameSize,
         height: frameSize,
         child: Stack(alignment: Alignment.center, children: [
@@ -251,6 +254,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Positioned.fill(child: IgnorePointer(child: WipFrame(level: wipLevelOf(wip?['level'])!, avatarRadius: avatarR))),
           if (frame != null) IgnorePointer(child: SizedBox(width: frameSize, height: frameSize, child: AnimAsset(url: frame, repeat: true, cache: false))),
         ]),
+      ),
       ),
       UserName(
         user: {'displayName': p['displayName'], 'wipLevel': wip?['level'], 'nameColor': features?['nameColor']},
@@ -372,7 +376,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
       child: Row(children: [
         tile(Icons.military_tech, Colors.amber, 'Leveller', () => _open(const LevelsScreen())),
-        tile(Icons.groups, Colors.orangeAccent, 'Aile', () => _open(Scaffold(appBar: AppBar(title: const Text('Aile')), body: const FamilyScreen()))),
+        tile(Icons.groups, Colors.orangeAccent, 'Aile', () => _open(const FamilyScreen())),
         tile(Icons.workspace_premium, Colors.lightBlueAccent, wip == null ? 'WIP' : wipLabel(wipLevelOf(wip['level'])), () => _open(const WipScreen())),
         tile(Icons.checkroom, Colors.pinkAccent, 'Görünüm', () => _open(const AppearanceScreen())),
       ]),
@@ -428,7 +432,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 right: 4,
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   IconButton(tooltip: 'Müşteri hizmetleri', icon: const Icon(Icons.headset_mic_outlined, size: 22), onPressed: () => _open(const CustomerServiceScreen())),
-                  IconButton(tooltip: 'Profili düzenle', icon: const Icon(Icons.edit_outlined, size: 22), onPressed: () => _open(const EditProfileScreen())),
+                  IconButton(tooltip: 'Profilim', icon: const Icon(Icons.account_circle_outlined, size: 23), onPressed: () => _open(UserProfileScreen(userId: Session.id))),
                 ]),
               ),
             ]),

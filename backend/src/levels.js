@@ -1,8 +1,17 @@
 // Seviye ve komisyon hesapları (saf fonksiyonlar).
 export const COIN_LEVEL_STEPS = [1000n, 10000n, 50000n, 200000n, 1000000n, 5000000n, 20000000n, 100000000n];
 export const GIFT_LEVEL_STEPS = COIN_LEVEL_STEPS;
-export const FAMILY_LEVEL_STEPS = [100000n, 500000n, 2000000n, 10000000n];
-export const FAMILY_CAPACITY = [30, 50, 80, 120, 200];
+// Aile seviyeleri: Demir, Bronz, Gümüş, Altın, Elmas (katkı değeri eşikleri).
+export const FAMILY_LEVEL_STEPS = [1000000n, 6000000n, 20000000n, 60000000n];
+export const FAMILY_TIERS = ['Demir', 'Bronz', 'Gümüş', 'Altın', 'Elmas'];
+export const FAMILY_CAPACITY = [150, 200, 300, 450, 650];
+export const FAMILY_ADMINS = [5, 8, 14, 23, 35];
+// Aile başkanı indirimi (baz puan): Demir yok, Bronz %1, Gümüş %1,5, Altın %2, Elmas %3.
+export const FAMILY_CASHBACK_BPS = [0, 100, 150, 200, 300];
+// Haftalık Coins ödülü: haftalık katkı eşiği → Coin.
+export const FAMILY_WEEK_REWARDS = [[800000n, 2300n], [1000000n, 4500n], [5000000n, 25000n]];
+// Başkan indiriminin alınabilmesi için en az kişisel harcama.
+export const FAMILY_CASHBACK_MIN_SPEND = 10000n;
 export const WIP_MIN_LEVEL = 1;
 // WIP 1–10 ve SWIP (11): hayalet mod dahil tüm ayrıcalıklar.
 export const WIP_MAX_LEVEL = 11;
@@ -18,7 +27,12 @@ export function levelFor(total, steps) {
 }
 
 export const familyLevelFor = (points) => levelFor(points, FAMILY_LEVEL_STEPS);
-export const familyCapacity = (level) => FAMILY_CAPACITY[Math.min(Math.max(level, 1), FAMILY_CAPACITY.length) - 1];
+const tierIndex = (level) => Math.min(Math.max(Number(level) || 1, 1), FAMILY_CAPACITY.length) - 1;
+export const familyCapacity = (level) => FAMILY_CAPACITY[tierIndex(level)];
+export const familyAdminLimit = (level) => FAMILY_ADMINS[tierIndex(level)];
+export const familyTier = (level) => FAMILY_TIERS[tierIndex(level)];
+/** Bir sonraki seviyenin eşiği (en üst seviyede son eşik). */
+export const familyNextPoints = (level) => FAMILY_LEVEL_STEPS[Math.min(tierIndex(level), FAMILY_LEVEL_STEPS.length - 1)];
 
 // Ajans komisyonu: baz puan (bps) üzerinden aşağı yuvarlanır.
 export function commissionOf(coinAmount, bps) {

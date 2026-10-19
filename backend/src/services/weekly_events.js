@@ -57,7 +57,7 @@ export async function weekBounds(offset = 0, run = query) {
 
 // ---------------------------------------------------------------- sıralama
 /** Sınırsız sıralama sorgusu: (user_id, partner_id, score). $1 başlangıç, $2 bitiş, $3 hediye/cinsiyet. */
-function rankingSql(kind) {
+function rankingSql(kind, side = 'sender') {
   if (kind === 'couple') {
     return `SELECT LEAST(g.sender_id, g.receiver_id) AS user_id, GREATEST(g.sender_id, g.receiver_id) AS partner_id,
               SUM(g.coin_amount)::bigint AS score
@@ -76,11 +76,13 @@ function rankingSql(kind) {
               AND u.gender = $3::text AND u.account_status = 'active'
             GROUP BY g.receiver_id`;
   }
-  return `SELECT g.sender_id AS user_id, NULL::uuid AS partner_id, SUM(g.quantity)::bigint AS score
-          FROM gift_transactions g JOIN users u ON u.id = g.sender_id
+  // Yıldız: Destekçi = o hediyeden en çok gönderen; Yayıncı = en çok alan (yalnızca gösterim).
+  const col = side === 'receiver' ? 'receiver_id' : 'sender_id';
+  return `SELECT g.${col} AS user_id, NULL::uuid AS partner_id, SUM(g.quantity)::bigint AS score
+          FROM gift_transactions g JOIN users u ON u.id = g.${col}
           WHERE g.created_at >= $1 AND g.created_at < $2 AND g.sender_id <> g.receiver_id
             AND g.gift_id = $3::uuid AND u.account_status = 'active'
-          GROUP BY g.sender_id`;
+          GROUP BY g.${col}`;
 }
 
 function rankingArg(kind, giftId) {
@@ -90,21 +92,21 @@ function rankingArg(kind, giftId) {
   return null;
 }
 
-export async function ranking(kind, start, end, { limit = 50, giftId = null, run = query } = {}) {
+export async function ranking(kind, start, end, { limit = 50, giftId = null, run = query, side = 'sender' } = {}) {
   if (isStar(kind) && !giftId) return [];
   const r = await run(
-    `SELECT * FROM (${rankingSql(kind)}) t ORDER BY score DESC, user_id LIMIT $4`,
+    `SELECT * FROM (${rankingSql(kind, side)}) t ORDER BY score DESC, user_id LIMIT $4`,
     [start, end, rankingArg(kind, giftId), limit],
   );
   return r.rows;
 }
 
 /** Kullanıcının sırası ve puanı (çiftte iki taraftan biri olması yeter). Listede yoksa null. */
-export async function myRank(kind, start, end, userId, giftId = null) {
+export async function myRank(kind, start, end, userId, giftId = null, side = 'sender') {
   if (isStar(kind) && !giftId) return null;
   const r = await query(
     `SELECT rank, score::text, user_id, partner_id FROM (
-       SELECT t.*, ROW_NUMBER() OVER (ORDER BY score DESC, user_id) AS rank FROM (${rankingSql(kind)}) t
+       SELECT t.*, ROW_NUMBER() OVER (ORDER BY score DESC, user_id) AS rank FROM (${rankingSql(kind, side)}) t
      ) x WHERE x.user_id = $4 OR x.partner_id = $4 LIMIT 1`,
     [start, end, rankingArg(kind, giftId), userId],
   );

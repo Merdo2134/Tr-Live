@@ -15,7 +15,7 @@ const TTL_MS = 30_000;
 
 // Kendine gönderilen hediyeler sıralamaya dahil edilmez (kendi kendine puan basmayı önlemek için).
 router.get('/', async (req, res) => {
-  const type = oneOf(String(req.query.type ?? 'senders'), ['senders', 'receivers', 'families', 'agencies', 'rooms', 'cp'], 'Tür');
+  const type = oneOf(String(req.query.type ?? 'senders'), ['senders', 'receivers', 'topups', 'families', 'agencies', 'rooms', 'cp'], 'Tür');
   const period = oneOf(String(req.query.period ?? 'weekly'), ['daily', 'weekly', 'monthly', 'all'], 'Dönem');
   const key = `${type}:${period}`;
   const hit = cache.get(key);
@@ -47,6 +47,14 @@ router.get('/', async (req, res) => {
       // CP: onaylı CP çiftleri, toplam yakınlık puanına (exp) göre. Puan birikimli olduğu için dönemden bağımsızdır.
       rows = (await query(
         `SELECT user_a, user_b, exp AS total FROM cp_pairs WHERE relation = 'cp' ORDER BY exp DESC LIMIT 50`,
+      )).rows;
+    } else if (type === 'topups') {
+      // Yükleme: bayi Coin yüklemeleri (dönem içinde).
+      rows = (await query(
+        `SELECT wt.user_id, SUM(wt.coin_amount) AS total FROM wallet_transactions wt
+         WHERE wt.transaction_type IN ('dealer_credit') AND wt.coin_amount > 0 AND ($1::timestamptz IS NULL OR wt.created_at >= $1::timestamptz)
+         GROUP BY wt.user_id ORDER BY total DESC LIMIT 50`,
+        [start],
       )).rows;
     } else if (type === 'families') {
       rows = (await query(
@@ -89,8 +97,30 @@ router.get('/', async (req, res) => {
     return res.json({ type, period, entries: rows.map((x, i) => ({ rank: i + 1, family: { id: x.id, name: x.name, logoUrl: x.logo_url, level: x.level }, total: String(x.total) })) });
   }
   const users = new Map((await loadPublicRows(rows.map((x) => x.user_id))).map((u) => [u.id, u]));
-  res.json({
-    type, period,
-    entries: rows.filter((x) => users.has(x.user_id)).map((x, i) => ({ rank: i + 1, user: publicUser(users.get(x.user_id), req.user.id), total: String(x.total) })),
-  });
+  const entries = rows.filter((x) => users.has(x.user_id)).map((x, i) => ({ rank: i + 1, user: publicUser(users.get(x.user_id), req.user.id), total: String(x.total) }));
+  // Benim sıram (listede yoksa "50+") ve dönem toplamım.
+  const mineIn = entries.find((e) => e.user.id === req.user.id);
+  let me = null;
+  if (mineIn) me = { rank: mineIn.rank, total: mineIn.total };
+  else {
+    const start = periodStartIso(period);
+    let t;
+    if (type === 'topups') {
+      t = (await query(
+        `SELECT COALESCE(SUM(coin_amount), 0) AS total FROM wallet_transactions WHERE user_id = $1 AND transaction_type IN ('dealer_credit') AND coin_amount > 0
+           AND ($2::timestamptz IS NULL OR created_at >= $2::timestamptz)`,
+        [req.user.id, start],
+      )).rows[0].total;
+    } else {
+      const col = type === 'senders' ? 'sender_id' : 'receiver_id';
+      const amount = type === 'senders' ? 'coin_amount' : 'COALESCE(diamond_amount, coin_amount)';
+      t = (await query(
+        `SELECT COALESCE(SUM(${amount}), 0) AS total FROM gift_transactions WHERE ${col} = $1 AND sender_id <> receiver_id
+           AND ($2::timestamptz IS NULL OR created_at >= $2::timestamptz)`,
+        [req.user.id, start],
+      )).rows[0].total;
+    }
+    me = { rank: null, total: String(t) };
+  }
+  res.json({ type, period, entries, me });
 });

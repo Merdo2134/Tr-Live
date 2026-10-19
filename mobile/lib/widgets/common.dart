@@ -412,7 +412,9 @@ class AsyncBody<T> extends StatefulWidget {
   /// Değişince veriler sessizce yenilenir: eski içerik ekranda kalır (sayfa baştan kurulmaz, dönen simge çıkmaz).
   /// Yenileme, sayfa geçişi bitsin diye kısa bir gecikmeyle yapılır (geri dönerken takılma olmasın).
   final Object? version;
-  const AsyncBody({super.key, required this.load, required this.builder, this.version});
+  /// Yükleniyor / hata durumunu saran çerçeve (ör. geri tuşu olan bir Scaffold). Veri gelince [builder] kendisi çizer.
+  final Widget Function(BuildContext context, Widget child)? shell;
+  const AsyncBody({super.key, required this.load, required this.builder, this.version, this.shell});
 
   @override
   State<AsyncBody<T>> createState() => _AsyncBodyState<T>();
@@ -473,9 +475,9 @@ class _AsyncBodyState<T> extends State<AsyncBody<T>> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (!_loaded) return LoadError(message: _error ?? 'Yüklenemedi.', onRetry: _reload);
-    return widget.builder(context, _data as T, _reload);
+    if (!_loading && _loaded) return widget.builder(context, _data as T, _reload);
+    final Widget child = _loading ? const Center(child: CircularProgressIndicator()) : LoadError(message: _error ?? 'Yüklenemedi.', onRetry: _reload);
+    return widget.shell?.call(context, child) ?? child;
   }
 }
 

@@ -7,6 +7,8 @@ import { hub } from '../realtime.js';
 import { idempotent } from '../idempotency.js';
 import { equipIfNone, announceUserChange } from '../services/users.js';
 
+import { addLeaderSpend } from '../services/family.js';
+
 export const router = Router();
 router.use(requireAuth);
 
@@ -70,6 +72,8 @@ router.post('/buy', userLimit('store_buy', 30, 3600e3), idempotent('store_buy'),
       );
       await equipIfNone((q, p) => c.query(q, p), toUserId, item.category, ins.rows[0].id);
     }
+    // Aile başkanı indirimi: kişisel harcamanın seviyeye göre yüzdesi birikir.
+    await addLeaderSpend((q, p) => c.query(q, p), req.user.id, price);
     await c.query(
       `INSERT INTO wallet_transactions(user_id, transaction_type, coin_amount, reference_id, description) VALUES($1,'store_purchase',$2,$3,$4)`,
       [req.user.id, (-price).toString(), item.id, `${toUserId === req.user.id ? 'Mağaza' : 'Mağaza hediyesi'}: ${item.name}`],

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'common.dart';
+import 'fig.dart';
+import 'level_badge.dart';
 
 /// Şanslı çanta kademeleri (sunucudaki ayarla aynı; sunucu doğrular).
 const _tiers = [
@@ -200,6 +202,7 @@ class _ClaimDialogState extends State<_ClaimDialog> {
   bool _noteSent = false;
   bool _busy = false;
   String? _won;
+  String? _failed;
 
   Map<String, dynamic> get _b => widget.bag;
   bool get _super => _b['kind'] == 'super';
@@ -239,25 +242,43 @@ class _ClaimDialogState extends State<_ClaimDialog> {
 
   Future<void> _open() async {
     setState(() => _busy = true);
-    final r = await guard(context, () => Api.post('/api/lucky-bags/${_b['id']}/claim'));
+    Map<String, dynamic>? r;
+    String? fail;
+    try {
+      r = await Api.post('/api/lucky-bags/${_b['id']}/claim');
+    } catch (e) {
+      fail = errorText(e);
+    }
     if (!mounted) return;
     setState(() {
       _busy = false;
       if (r != null) {
         _won = r['amount'].toString();
         _b['mine'] = _won;
+      } else {
+        // Figma: "Üzgünüm, bu şanslı çanta zaten açılmış..." (süresi dolan / tükenen çanta).
+        _failed = fail ?? 'Üzgünüm, bu şanslı çanta zaten açılmış...';
       }
     });
-    // Açılınca "Açıldı" yazar ve pencere kendiliğinden kapanır.
-    if (r != null) {
-      _t?.cancel();
-      Future.delayed(const Duration(milliseconds: 1700), () {
-        if (mounted) Navigator.of(context).maybePop();
-      });
-    }
+    _t?.cancel();
   }
 
   String _mmss(int s) => '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
+
+  /// Figma'daki sarı "Tamam" düğmesi.
+  Widget _okButton() => GestureDetector(
+        onTap: () => Navigator.of(context).maybePop(),
+        child: Container(
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFFFBD9), Color(0xFFFFE97A)]),
+            boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 4, offset: Offset(0, 2))],
+          ),
+          child: const Text('Tamam', style: TextStyle(color: Color(0xFFE5257E), fontWeight: FontWeight.w800, fontSize: 16)),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -265,100 +286,121 @@ class _ClaimDialogState extends State<_ClaimDialog> {
     final expired = _left <= 0;
     final counting = _super && _toOpen > 0 && _won == null;
     final needNote = _super && !_noteSent && _won == null && !expired;
-    final canOpen = _won == null && !expired && !counting && !needNote && !_busy;
-    final big = _won != null ? '🎉' : (expired ? 'Bitti' : (counting ? _mmss(_toOpen) : (needNote ? 'AÇ' : 'AÇ')));
-    // Sade, küçük pencere.
+    final canOpen = _won == null && _failed == null && !expired && !counting && !needNote && !_busy;
+    final name = '${sender?['displayName'] ?? ''}';
+    Widget body;
+    if (_won != null) {
+      // Kazanç: parıltılı altın para, xTutar, Tebrikler!
+      body = Column(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(
+          width: 150,
+          height: 130,
+          child: Stack(alignment: Alignment.center, children: [
+            const Fig('fam_shine', width: 150, height: 150),
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.4, end: 1),
+              duration: const Duration(milliseconds: 520),
+              curve: Curves.elasticOut,
+              builder: (_, k, child) => Transform.scale(scale: k, child: child),
+              child: const Fig('bag_coin', width: 92, height: 92),
+            ),
+          ]),
+        ),
+        Text('x${fmtNumber(_won)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 26)),
+        const SizedBox(height: 6),
+        const Text('Tebrikler!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 21)),
+        const SizedBox(height: 10),
+        Text('$name takip et ve bir sonrakini kaçırma!', textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFFFF3B0), fontWeight: FontWeight.w600, fontSize: 15)),
+        const SizedBox(height: 16),
+        _okButton(),
+      ]);
+    } else if (_failed != null || (expired && _won == null)) {
+      body = Column(mainAxisSize: MainAxisSize.min, children: [
+        const SizedBox(height: 6),
+        const Fig('bag_sad', width: 90, height: 90),
+        const SizedBox(height: 18),
+        Text(
+          _failed == null || _failed!.contains('tükendi') || _failed!.contains('doldu') ? 'Üzgünüm, bu şanslı çanta zaten açılmış...' : _failed!,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+        ),
+        const SizedBox(height: 20),
+        _okButton(),
+      ]);
+    } else {
+      body = Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          padding: const EdgeInsets.all(2),
+          decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
+          child: UserAvatar(user: sender, radius: 32),
+        ),
+        const SizedBox(height: 8),
+        Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
+        const SizedBox(height: 4),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          LevelPill(level: sender?['coinLevel'] ?? 1, send: true, height: 15),
+          const SizedBox(width: 4),
+          LevelPill(level: sender?['giftLevel'] ?? 1, send: false, height: 15),
+        ]),
+        const SizedBox(height: 6),
+        Text(_super ? 'Süper şanslı çanta gönderdi' : 'Şanslı çanta gönderdi', style: const TextStyle(color: Color(0xFFFFF3B0), fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 16),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          const Fig('bag_coin', width: 26, height: 26),
+          const SizedBox(width: 6),
+          Text(fmtNumber(_b['totalCoins']), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white)),
+        ]),
+        Text('${_b['claimed']}/${_b['slots']} kişi açtı', style: const TextStyle(color: Colors.white70, fontSize: 11.5)),
+        if (needNote) ...[
+          const SizedBox(height: 8),
+          Text('"${_b['note']}"', textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 30,
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFFE8258A), padding: const EdgeInsets.symmetric(horizontal: 12), textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              onPressed: _busy ? null : _sendNote,
+              child: const Text('Notu sohbete gönder ve aç'),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        // Büyük yuvarlak düğme: AÇ (süper çantada önce geri sayım).
+        GestureDetector(
+          onTap: canOpen ? _open : null,
+          child: Container(
+            width: 86,
+            height: 86,
+            padding: const EdgeInsets.all(5),
+            decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x66FFFFFF)),
+            child: Container(
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFFFDE7), Color(0xFFFFF176)]),
+              ),
+              child: _busy
+                  ? const SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFFE5257E)))
+                  : Text(counting ? _mmss(_toOpen) : 'AÇ', style: TextStyle(color: const Color(0xFFE5257E), fontWeight: FontWeight.w900, fontSize: counting ? 19 : 24)),
+            ),
+          ),
+        ),
+      ]);
+    }
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 56),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 52),
       child: Stack(clipBehavior: Clip.none, children: [
         Container(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          constraints: const BoxConstraints(minHeight: 300),
+          padding: const EdgeInsets.fromLTRB(18, 26, 18, 22),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.white54, width: 1.2),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white, width: 1.4),
+            image: DecorationImage(image: Fig.provider('bag_card'), fit: BoxFit.cover, onError: (_, __) {}),
             gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFF4D6D), Color(0xFFE8258A)]),
-            boxShadow: const [BoxShadow(color: Color(0x66FF2D75), blurRadius: 18)],
           ),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                padding: const EdgeInsets.all(1.5),
-                decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white70),
-                child: UserAvatar(user: sender, radius: 17),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Text('${sender?['displayName'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Colors.white)),
-                  Text(_super ? 'Süper şanslı çanta' : 'Şanslı çanta', style: const TextStyle(fontSize: 11.5, color: Colors.white70)),
-                ]),
-              ),
-            ]),
-            const SizedBox(height: 10),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Image.asset('assets/images/lucky_coin.png', width: 24, height: 24),
-              const SizedBox(width: 5),
-              Text(fmtNumber(_b['totalCoins']), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white)),
-            ]),
-            Text('${_b['claimed']}/${_b['slots']} kişi açtı', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            if (_super && !expired && _won == null) ...[
-              const SizedBox(height: 8),
-              Text('"${_b['note']}"', textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
-              const SizedBox(height: 4),
-              if (!_noteSent)
-                SizedBox(
-                  height: 30,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFFE8258A), padding: const EdgeInsets.symmetric(horizontal: 12), textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-                    onPressed: _busy ? null : _sendNote,
-                    child: const Text('Notu sohbete gönder'),
-                  ),
-                )
-              else
-                const Text('✓ Not gönderildi', style: TextStyle(color: Colors.white70, fontSize: 11.5)),
-            ],
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: canOpen ? _open : null,
-              child: Container(
-                width: 92,
-                height: 92,
-                padding: const EdgeInsets.all(6),
-                decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x55FFFFFF)),
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: canOpen ? const [Color(0xFFFFF59D), Color(0xFFFFF176)] : const [Color(0xFFFFF9C4), Color(0xFFFFECB3)]),
-                  ),
-                  child: _won != null
-                      ? TweenAnimationBuilder<double>(
-                          tween: Tween(begin: 0.4, end: 1),
-                          duration: const Duration(milliseconds: 520),
-                          curve: Curves.elasticOut,
-                          builder: (_, k, child) => Transform.scale(scale: k, child: child),
-                          child: Image.asset('assets/images/lucky_coin.png', width: 52, height: 52),
-                        )
-                      : (canOpen || counting)
-                          ? Stack(alignment: Alignment.center, children: [
-                              Opacity(opacity: counting ? 0.35 : 1, child: Image.asset('assets/images/lucky_pouch.webp', width: 62, height: 62)),
-                              if (counting) Text(big, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF8A1560))),
-                            ])
-                          : Padding(padding: const EdgeInsets.all(8), child: FittedBox(fit: BoxFit.scaleDown, child: Text(big, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Color(0xFF8A1560))))),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (_won != null)
-              Text('Açıldı! +${fmtNumber(_won)} Coin', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Colors.white))
-            else if (canOpen)
-              const Text('Keseye dokun ve aç', style: TextStyle(color: Colors.white70, fontSize: 12))
-            else if (counting)
-              const Text('Süre bitince açılır', style: TextStyle(color: Colors.white70, fontSize: 12))
-            else if (expired)
-              const Text('Çantanın süresi doldu', style: TextStyle(color: Colors.white70, fontSize: 12)),
-          ]),
+          child: body,
         ),
         Positioned(right: -6, top: -6, child: InkWell(customBorder: const CircleBorder(), onTap: () => Navigator.pop(context), child: const CircleAvatar(radius: 13, backgroundColor: Colors.black54, child: Icon(Icons.close, size: 15, color: Colors.white)))),
       ]),
@@ -382,13 +424,13 @@ class BagEnvelope extends StatelessWidget {
         width: size + 10,
         height: size + 8,
         child: Stack(clipBehavior: Clip.none, children: [
-          // Odadaki çanta: pembe kese (süper çantada altın parıltı).
+          // Odadaki çanta: Figma'daki kırmızı zarf (süper çantada altın parıltı).
           Positioned(
             left: 0,
             bottom: 0,
             child: Container(
               decoration: isSuper ? const BoxDecoration(boxShadow: [BoxShadow(color: Color(0xAAFFC107), blurRadius: 12)]) : null,
-              child: Image.asset('assets/images/lucky_pouch.webp', width: size, height: size),
+              child: Fig('bag_icon', width: size * 0.78, height: size),
             ),
           ),
           if (count > 0)

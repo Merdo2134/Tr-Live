@@ -9,6 +9,8 @@ import 'guardian_screens.dart';
 import 'relations_screens.dart';
 import '../widgets/presence_widgets.dart';
 import '../widgets/safety_actions.dart';
+import 'edit_profile_screen.dart';
+import 'family_screen.dart';
 import 'feed_screen.dart';
 import 'messages_screen.dart';
 import '../widgets/level_badge.dart';
@@ -140,6 +142,23 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             right: 6 * s,
             top: coverH + 6 * s,
             child: GuardianBadge(ownerId: widget.userId, guardian: mapOf(p['guardian']), size: 72 * s, profileBuilder: _profileOf),
+          ),
+        // Kendi profilinde sağ üstte düzenle (profil düzenleme sayfası).
+        if (isSelf)
+          Positioned(
+            top: MediaQuery.paddingOf(context).top + 6,
+            right: 8,
+            child: CircleAvatar(
+              backgroundColor: Colors.black26,
+              child: IconButton(
+                tooltip: 'Profili düzenle',
+                icon: const Icon(Icons.edit_outlined, color: Colors.white, size: 20),
+                onPressed: () async {
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfileScreen()));
+                  if (mounted) setState(() => _version++);
+                },
+              ),
+            ),
           ),
         if (!isSelf)
           Positioned(
@@ -301,7 +320,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (family != null) ...[
-          Container(
+          GestureDetector(
+            onTap: () => _push(FamilyPage(familyId: '${family['id']}')),
+            child: Container(
             height: 70,
             padding: const EdgeInsets.symmetric(horizontal: 18),
             decoration: BoxDecoration(color: const Color(0xFF242424), borderRadius: BorderRadius.circular(16), image: DecorationImage(image: Fig.provider('fam_bar'), fit: BoxFit.fill, onError: (_, __) {})),
@@ -325,6 +346,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               const Text('Aile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15)),
               const Icon(Icons.chevron_right, color: Colors.white, size: 28),
             ]),
+          ),
           ),
           const SizedBox(height: 10),
         ],

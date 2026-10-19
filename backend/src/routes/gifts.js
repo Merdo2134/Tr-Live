@@ -8,7 +8,7 @@ import { publicUser } from '../views.js';
 import { hub } from '../realtime.js';
 import { config } from '../config.js';
 import { distributeGift } from '../gifts_logic.js';
-import { levelFromExp, familyLevelFor, giftDisplayLevel } from '../levels.js';
+import { levelFromExp, giftDisplayLevel } from '../levels.js';
 import { scorePk, pkView } from '../services/pk.js';
 import { scoreboardOf } from '../services/scoreboard.js';
 import { loadPublicRows } from '../services/users.js';
@@ -19,6 +19,7 @@ import { getConfig } from '../services/app_config.js';
 import { featuresFor, minLevelFor, wipLabel } from '../services/wip.js';
 import { addGiftExp } from '../services/cp.js';
 import { addGuardianPoints } from '../services/guardian.js';
+import { addFamilyContribBatch } from '../services/family.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -144,6 +145,8 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
     const pkIds = new Set();
     const transactions = [];
     const qualifying = [];
+    const familyContrib = [];
+    let selfCoins = 0n;
     for (const item of allocation) {
       const coinAmount = BigInt(gift.coin_price) * BigInt(item.quantity);
       const credit = creditOf(coinAmount); // alıcıya geçen Elmas (normal hediyede = coinAmount)
@@ -184,13 +187,10 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
         );
       }
 
-      // Aile puanı: alıcının ailesine.
-      const fam = (await c.query(
-        `UPDATE families SET total_points = total_points + $1
-         WHERE is_active = TRUE AND id = (SELECT family_id FROM family_members WHERE user_id = $2) RETURNING id, total_points`,
-        [credit.toString(), item.userId],
-      )).rows[0];
-      if (fam) await c.query(`UPDATE families SET level = $1 WHERE id = $2`, [familyLevelFor(fam.total_points), fam.id]);
+      // Aile katkısı: alıcının ailesine alınan Elmas, gönderenin ailesine harcanan Coin (işlem sonunda toplu).
+      // Kendine hediye aileye ve başkan indirimine sayılmaz.
+      if (item.userId !== senderId) familyContrib.push({ userId: item.userId, points: credit }, { userId: senderId, points: coinAmount });
+      else selfCoins += coinAmount;
 
       // Gizli odanın kimliği tüm kullanıcılara yayılmasın: global şerit/kayıt yalnızca açık odalarda.
       if (coinAmount >= config.globalGiftMinCoins && !room.is_hidden) {
@@ -205,6 +205,8 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
         id: gt.id, receiverId: item.userId, quantity: item.quantity, coinAmount: coinAmount.toString(), diamondAmount: credit.toString(),
       });
     }
+    // Aile katkısı ve başkan indirimi (aile satırları sıralı güncellenir).
+    await addFamilyContribBatch((t, p) => c.query(t, p), familyContrib, { userId: senderId, coins: totalCoins - selfCoins });
 
     // Oda elması: odaya gelen toplam (kalıcı oda kaydında; oda kapanıp açılınca sıfırlanmaz). Kendine hediye de sayılır
     // (koltuk sayaçlarıyla aynı).

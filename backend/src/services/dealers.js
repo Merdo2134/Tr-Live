@@ -1,4 +1,5 @@
 import { fail } from '../http.js';
+import { addFamilyContrib } from './family.js';
 
 // Bayi bakiyesinden kullanıcıya Coin satışı. Çağıran, bir transaction (client "c") içinde olmalıdır.
 export async function dealerSell(c, { dealerId, userId, coins, actorId, description }) {
@@ -25,5 +26,7 @@ export async function dealerSell(c, { dealerId, userId, coins, actorId, descript
      VALUES($1,$2,'dealer_sale','dealer',$3,$4,$5,$6,$7)`,
     [actorId, userId, dealer.id, coins.toString(), before.toString(), after.toString(), JSON.stringify({ dealerName: dealer.name })],
   );
+  // Aile katkısı: yükleme 1 Coin = 1.
+  await addFamilyContrib((t, p) => c.query(t, p), userId, coins);
   return { dealerBalance: (balance - coins).toString(), userBalance: after.toString() };
 }

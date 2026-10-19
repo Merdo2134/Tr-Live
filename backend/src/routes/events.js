@@ -41,9 +41,12 @@ router.get('/:kind', async (req, res) => {
   if (!EVENT_KINDS.includes(kind)) throw fail('Etkinlik bulunamadı.', 404);
   const c = (await configs()).get(kind);
   if (!c) throw fail('Etkinlik bulunamadı.', 404);
-  const { start, end } = await weekBounds(0);
-  const rows = c.enabled ? await ranking(kind, start, end, { limit: 50, giftId: c.gift_id }) : [];
-  const me = c.enabled ? await myRank(kind, start, end, req.user.id, c.gift_id) : null;
+  // ?week=-1: geçen haftanın sıralaması; ?side=receiver: yıldızda Yayıncı (en çok alan) sıralaması.
+  const week = String(req.query.week ?? '0') === '-1' ? -1 : 0;
+  const side = isStar(kind) && req.query.side === 'receiver' ? 'receiver' : 'sender';
+  const { start, end } = await weekBounds(week);
+  const rows = c.enabled ? await ranking(kind, start, end, { limit: 50, giftId: c.gift_id, side }) : [];
+  const me = c.enabled ? await myRank(kind, start, end, req.user.id, c.gift_id, side) : null;
   // Geçen haftanın kazananları (dağıtılmışsa).
   const prev = await weekBounds(-1);
   const last = (await query(
@@ -51,7 +54,7 @@ router.get('/:kind', async (req, res) => {
     [prev.start, kind],
   )).rows;
   res.json({
-    kind, title: EVENT_TITLES[kind], enabled: c.enabled, weekStart: start, weekEnd: end, gift: c.gift,
+    kind, title: EVENT_TITLES[kind], enabled: c.enabled, weekStart: start, weekEnd: end, gift: c.gift, week, side,
     // Yıldız: puan hediye adedi; diğerleri Coin değeri.
     scoreUnit: isStar(kind) ? 'adet' : 'Coin',
     leaderboard: await decorate(rows, req.user.id),
