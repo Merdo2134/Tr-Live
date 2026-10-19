@@ -520,7 +520,7 @@ class _MyGuardianScreenState extends State<MyGuardianScreen> {
                     title: 'Koruyucu Sıralaması',
                     list: guardians,
                     onTap: _open,
-                    corner: _edit ? (g) => mapOf(g['user'])?['id']?.toString() == shownId ? null : _cornerTag('Seç', () => _show(mapOf(g['user']) ?? {})) : null,
+                    corner: _edit ? (g) => (mapOf(g['user'])?['id']?.toString() == shownId ? null : _cornerTag('Seç', () => _show(mapOf(g['user']) ?? {}))) : null,
                     tag: _edit ? (g) => _cornerTag('Kaldır', () => _remove(mapOf(g['user']) ?? {}), dark: true, left: true) : null,
                   ),
                 ],
