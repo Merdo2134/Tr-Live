@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../widgets/anim_asset.dart';
 import '../services/session.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/fig.dart';
 import 'guardian_screens.dart';
@@ -28,8 +29,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   int _version = 0;
   int _tab = 0; // 0 Profil · 1 Başarılar · 2 Paylaşım · 3 İlişkiler
 
-  static const _ink = Color(0xFF1C1C1E);
-  static const _dim = Color(0xFF9A9AA0);
+  static const _ink = Pal.text;
+  static const _dim = Pal.textDim;
 
   Future<Map<String, dynamic>> _load() async {
     final p = mapOf((await Api.get('/api/users/${widget.userId}'))['profile']) ?? {};
@@ -114,7 +115,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           top: 0,
           height: coverH,
           child: cover != null && !hidden
-              ? NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: const Color(0xFFEDEDED)))
+              ? NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: Pal.surface))
               : Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFFFF9AD5), Color(0xFF9C7BFF)], begin: Alignment.topLeft, end: Alignment.bottomRight))),
         ),
         // Avatar + çerçeve (kapağın alt kenarında)
@@ -127,7 +128,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               if (features?['profileEffect'] == true && wipLevelOf(wip?['level']) != null)
                 Positioned(left: -24, top: -24, right: -24, bottom: -24, child: IgnorePointer(child: WipAura(level: wipLevelOf(wip?['level'])!))),
               Container(
-                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                decoration: const BoxDecoration(color: Pal.bg, shape: BoxShape.circle),
                 padding: const EdgeInsets.all(2),
                 child: UserAvatar(user: p, radius: avatarR),
               ),
@@ -280,7 +281,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     final following = p['isFollowing'] == true;
     Widget btn(String label, IconData? icon, VoidCallback onTap, {bool filled = false}) => Expanded(
           child: Material(
-            color: filled ? const Color(0xFFFF4FA8) : const Color(0xFFF2F2F5),
+            color: filled ? const Color(0xFFFF4FA8) : Pal.surfaceHi,
             borderRadius: BorderRadius.circular(20),
             child: InkWell(
               borderRadius: BorderRadius.circular(20),
@@ -429,7 +430,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     final gifts = listOf(card['gifts']);
     final medals = listOf(card['medals']);
     Widget box(Widget child) => Container(
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: const Color(0xFFF6F6F8), border: Border.all(color: const Color(0xFFE6E6EA))),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: Pal.surface, border: Border.all(color: Pal.outline)),
           padding: const EdgeInsets.all(6),
           child: child,
         );
@@ -481,9 +482,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Theme(
-      data: ThemeData.light(useMaterial3: true).copyWith(colorScheme: const ColorScheme.light(primary: Color(0xFFFF4FA8))),
+      data: Theme.of(context).copyWith(colorScheme: Theme.of(context).colorScheme.copyWith(primary: const Color(0xFFFF4FA8))),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         body: Stack(children: [
           Positioned.fill(child: AsyncBody<Map<String, dynamic>>(
             version: _version,

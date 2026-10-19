@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/fig.dart';
 import 'relations_screens.dart';
@@ -374,14 +375,14 @@ class GuardianRulesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Theme(
-      data: ThemeData.light(useMaterial3: true),
+      data: Theme.of(context),
       child: Scaffold(
-        backgroundColor: Colors.white,
-        appBar: AppBar(backgroundColor: Colors.white, foregroundColor: Colors.black, elevation: 0),
+        backgroundColor: Pal.bg,
+        appBar: AppBar(backgroundColor: Pal.bg, foregroundColor: Pal.text, elevation: 0),
         body: ListView(padding: const EdgeInsets.fromLTRB(22, 8, 22, 30), children: [
           for (final (t, b) in _text) ...[
-            Text(t, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w800, fontSize: 16, height: 1.5)),
-            Text(b, style: const TextStyle(color: Colors.black, fontSize: 15, height: 1.55)),
+            Text(t, style: const TextStyle(color: Pal.text, fontWeight: FontWeight.w800, fontSize: 16, height: 1.5)),
+            Text(b, style: const TextStyle(color: Pal.textDim, fontSize: 15, height: 1.55)),
             const SizedBox(height: 22),
           ],
         ]),

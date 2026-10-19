@@ -1,3 +1,14 @@
+## v2.54.0 — Koyu tema, şanslı çanta, katkı listesi
+- Beyaz sayfalar uygulamanın koyu lacivert renklerine geçti: kullanıcı profili, aile sayfaları (liste, üyeler, istekler,
+  bilgileri düzenle, seviyeler, Coins ödülü, kurallar), En İyi Arkadaş / Kanka listesi, koruyucu kuralları, Zirve Listesi üst çubuğu.
+- Aile: "Üye gözünden bak" kaldırıldı; "Coins ödüllerini görmek için tıklayın" balonu günde bir kez (6 sn) görünür.
+- İlişki Duvarı: ilişki yokken çerçevenin daralıp sola kayması ve başlığın taşması düzeltildi.
+- Etkinlik sayfası açıkken sıralama 10 saniyede bir kendiliğinden yenilenir.
+- Şanslı çanta: odadaki açma kartı küçük kare (ekranın ortasında). Gönderme penceresi Figma'daki pembe perdeli tasarım:
+  Şanslı / Süper sekmeleri, kırmızı zarflar, sarı Gönder düğmesi, ? ile kurallar.
+- Oda Katkı Listesi Figma tasarımına geçti (TOP1/2/3 taçlı çerçeveler, bayraklar, elmaslı tutar). "Toplam" ömür boyu:
+  oda kapanıp yeniden açılınca sıfırlanmaz (aynı sahibin aynı tür odalarının tümü). "24 Saat" son 24 saat.
+
 ## v2.53.0 — Aile, Zirve Listesi, Etkinlik sayfaları ve Şanslı çanta (Figma tasarımı)
 - Kendi profiline dokununca herkesin gördüğü beyaz profil sayfası açılır; düzenleme sağ üstteki kalemden.
   Kapak fotoğrafı kırpma oranı yeni profile göre (375x343).

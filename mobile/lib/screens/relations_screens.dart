@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/fig.dart';
 
@@ -115,6 +116,8 @@ class _WallFrame extends StatelessWidget {
       final k = box.maxWidth / 350;
       return Stack(clipBehavior: Clip.none, children: [
         Container(
+          // Stack içindeki çocuk gevşek ölçü alır: tam genişlik verilmezse boş duvarda çerçeve daralıp kayıyordu.
+          width: double.infinity,
           margin: EdgeInsets.only(top: 22 * k, bottom: 14 * k),
           padding: EdgeInsets.all(5 * k),
           decoration: BoxDecoration(
@@ -363,12 +366,12 @@ class _RelationListScreenState extends State<RelationListScreen> {
   @override
   Widget build(BuildContext context) {
     return Theme(
-      data: ThemeData.light(useMaterial3: true),
+      data: Theme.of(context),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         appBar: AppBar(
-          backgroundColor: Colors.white,
-          foregroundColor: FigPal.ink,
+          backgroundColor: Pal.bg,
+          foregroundColor: Pal.text,
           elevation: 0,
           titleSpacing: 0,
           title: Text(widget.kind == 'kanka' ? 'Kankalar' : 'En iyi arkadaşlar', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18)),
@@ -378,7 +381,7 @@ class _RelationListScreenState extends State<RelationListScreen> {
           version: _v,
           load: () async => listOf((await Api.get('/api/cp/wall/${widget.userId}/${widget.kind}'))['items']),
           builder: (context, items, reload) => items.isEmpty
-              ? const Center(child: Text('Liste boş.', style: TextStyle(color: FigPal.grey)))
+              ? const Center(child: Text('Liste boş.', style: TextStyle(color: Pal.textDim)))
               : GridView.builder(
                   padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 16, crossAxisSpacing: 12, childAspectRatio: 101 / 150),

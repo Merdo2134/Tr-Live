@@ -500,18 +500,22 @@ router.delete('/:roomId/staff/:userId', requireAuth, userLimit('moderate', 60, 6
   res.json({ ok: true });
 });
 
-// Katkı listesi: odaya en çok hediye gönderenler (24 saat / toplam).
+// Katkı listesi: odaya en çok hediye gönderenler (son 24 saat / toplam = ömür boyu).
+// Oda her açılışta yeni kayıt aldığı için toplam, aynı sahibin aynı tür odalarının hepsinden hesaplanır
+// (oda kapanıp açılınca liste sıfırlanmaz).
 router.get('/:roomId/contributions', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
-  await assertRoomVisible(await activeRoom(roomId), req.user.id);
+  const room = await activeRoom(roomId);
+  await assertRoomVisible(room, req.user.id);
   const day = req.query.range === 'day';
   const r = await query(
     `SELECT ${USER_PUBLIC_COLUMNS}, g.total
-     FROM (SELECT sender_id, SUM(coin_amount)::bigint AS total FROM gift_transactions
-           WHERE room_id = $1 AND ($2::boolean = FALSE OR created_at > NOW() - INTERVAL '24 hours')
-           GROUP BY sender_id ORDER BY total DESC LIMIT 50) g
-     JOIN users u ON u.id = g.sender_id ${USER_PUBLIC_JOINS} ORDER BY g.total DESC`,
-    [roomId, day],
+     FROM (SELECT gt.sender_id, SUM(gt.coin_amount)::bigint AS total FROM gift_transactions gt
+           WHERE gt.room_id IN (SELECT id FROM rooms WHERE owner_id = $1 AND room_type = $2)
+             AND ($3::boolean = FALSE OR gt.created_at > NOW() - INTERVAL '24 hours')
+           GROUP BY gt.sender_id ORDER BY total DESC LIMIT 50) g
+     JOIN users u ON u.id = g.sender_id ${USER_PUBLIC_JOINS} WHERE u.account_status = 'active' ORDER BY g.total DESC`,
+    [room.owner_id, room.room_type, day],
   );
   res.json({ contributions: r.rows.map((x) => ({ user: publicUser(x, req.user.id), total: String(x.total) })) });
 });

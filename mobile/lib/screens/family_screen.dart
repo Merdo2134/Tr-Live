@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api.dart';
 import '../services/room_dock.dart';
 import '../services/session.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/fig.dart';
 import '../widgets/image_pick.dart';
@@ -10,8 +12,8 @@ import 'user_screens.dart';
 
 /// Aile (Figma): Demir → Elmas seviyeleri, aile sayfası, üyeler, istekler, bilgileri düzenle, istek ayarları,
 /// seviye sayfaları, Coins ödülü ve kurallar.
-const _ink = Color(0xFF1C1C1E);
-const _dim = Color(0xFF9A9AA0);
+const _ink = Pal.text;
+const _dim = Pal.textDim;
 const _blue = Color(0xFF0A9BFF);
 const _green = Color(0xFF16C35A);
 const _tierNames = ['Demir', 'Bronz', 'Gümüş', 'Altın', 'Elmas'];
@@ -27,10 +29,11 @@ const _tierGradients = <List<Color>>[
   [Color(0xFF111111), Color(0xFF3A3A3A)],
 ];
 
-ThemeData _light() => ThemeData.light(useMaterial3: true).copyWith(colorScheme: const ColorScheme.light(primary: _blue));
+/// Uygulamanın koyu teması (aile sayfaları da diğer sayfalarla aynı renkte).
+ThemeData _light() => buildAppTheme().copyWith(colorScheme: buildAppTheme().colorScheme.copyWith(primary: _blue));
 
 PreferredSizeWidget _appBar(BuildContext context, String title, {List<Widget> actions = const []}) => AppBar(
-      backgroundColor: Colors.white,
+      backgroundColor: Pal.bg,
       foregroundColor: _ink,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -55,11 +58,11 @@ class _FamilyScreenState extends State<FamilyScreen> {
     return Theme(
       data: _light(),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         body: AsyncBody<Map<String, dynamic>>(
           version: _v,
           load: () => Api.get('/api/families/mine'),
-          shell: (context, child) => Scaffold(backgroundColor: Colors.white, appBar: _appBar(context, 'Aile'), body: child),
+          shell: (context, child) => Scaffold(backgroundColor: Pal.bg, appBar: _appBar(context, 'Aile'), body: child),
           builder: (context, d, reload) {
             final f = mapOf(d['family']);
             if (f != null) return FamilyPage(familyId: f['id'].toString(), onLeft: () => setState(() => _v++));
@@ -100,7 +103,7 @@ class _FamilyBrowserState extends State<_FamilyBrowser> {
     return Theme(
       data: _light(),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         appBar: _appBar(context, 'Aileler', actions: [
           IconButton(tooltip: 'Kurallar', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FamilyRulesPage())), icon: const Icon(Icons.help_outline)),
         ]),
@@ -117,7 +120,7 @@ class _FamilyBrowserState extends State<_FamilyBrowser> {
                 hintText: 'Aile adı ya da ID ara',
                 prefixIcon: const Icon(Icons.search),
                 filled: true,
-                fillColor: const Color(0xFFF2F3F5),
+                fillColor: Pal.surfaceHi,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                 contentPadding: const EdgeInsets.symmetric(vertical: 10),
               ),
@@ -134,7 +137,7 @@ class _FamilyBrowserState extends State<_FamilyBrowser> {
                       child: ListView.separated(
                         padding: const EdgeInsets.only(bottom: 90),
                         itemCount: list.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1, indent: 82, color: Color(0xFFEDEDED)),
+                        separatorBuilder: (_, __) => const Divider(height: 1, indent: 82, color: Pal.outline),
                         itemBuilder: (_, i) {
                           final f = list[i];
                           return ListTile(
@@ -189,12 +192,11 @@ class FamilyLogo extends StatelessWidget {
   }
 }
 
-/// Aile sayfası. [memberView]: başkan "Üye gözünden bak" ile üyelerin gördüğünü görür.
+/// Aile sayfası (yöneticiler ayarları, üyeler yalnızca bilgileri görür).
 class FamilyPage extends StatefulWidget {
   final String familyId;
-  final bool memberView;
   final VoidCallback? onLeft;
-  const FamilyPage({super.key, required this.familyId, this.memberView = false, this.onLeft});
+  const FamilyPage({super.key, required this.familyId, this.onLeft});
 
   @override
   State<FamilyPage> createState() => _FamilyPageState();
@@ -218,7 +220,7 @@ class _FamilyPageState extends State<FamilyPage> {
     final role = f['myRole'];
     final a = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Pal.surface,
       builder: (c) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
@@ -233,7 +235,7 @@ class _FamilyPageState extends State<FamilyPage> {
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size.fromHeight(54),
-                    side: const BorderSide(color: Color(0xFFB9B9BE)),
+                    side: const BorderSide(color: Pal.outline),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     foregroundColor: _ink,
                   ),
@@ -277,7 +279,7 @@ class _FamilyPageState extends State<FamilyPage> {
     final ctl = FixedExtentScrollController(initialItem: value);
     final ok = await showModalBottomSheet<bool>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Pal.surface,
       builder: (c) => SafeArea(
         child: SizedBox(
           height: 330,
@@ -342,13 +344,13 @@ class _FamilyPageState extends State<FamilyPage> {
       child: AsyncBody<Map<String, dynamic>>(
         version: _v,
         load: () async => mapOf((await Api.get('/api/families/$_id'))['family']) ?? {},
-        shell: (context, child) => Scaffold(backgroundColor: Colors.white, appBar: _appBar(context, 'Aile'), body: child),
+        shell: (context, child) => Scaffold(backgroundColor: Pal.bg, appBar: _appBar(context, 'Aile'), body: child),
         builder: (context, f, reload) {
-          final role = widget.memberView ? 'member' : f['myRole']?.toString();
+          final role = f['myRole']?.toString();
           final member = f['myRole'] != null;
           final admin = role == 'owner' || role == 'admin';
           return Scaffold(
-            backgroundColor: Colors.white,
+            backgroundColor: Pal.bg,
             appBar: _appBar(context, '${f['name'] ?? ''}', actions: [
               if (admin) IconButton(tooltip: 'Ayarlar', onPressed: () => _settings(f), icon: const Icon(Icons.settings_outlined, size: 28)),
               IconButton(tooltip: 'Kurallar', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FamilyRulesPage())), icon: const Icon(Icons.help_outline, size: 28)),
@@ -393,17 +395,6 @@ class _FamilyPageState extends State<FamilyPage> {
                   _section('Aile odaları'),
                   const SizedBox(height: 14),
                   _rooms(listOf(f['rooms'])),
-                  if (role == 'owner' && !widget.memberView)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 24, 12, 0),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: GestureDetector(
-                          onTap: () => _push(FamilyPage(familyId: _id, memberView: true)),
-                          child: const Text('Üye gözünden bak', style: TextStyle(color: Color(0xFFE5121F), fontWeight: FontWeight.w700, fontSize: 16)),
-                        ),
-                      ),
-                    ),
                 ]),
               ),
               if (member)
@@ -460,7 +451,7 @@ class _FamilyPageState extends State<FamilyPage> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(18),
                   child: Stack(fit: StackFit.expand, children: [
-                    cover == null ? Container(color: const Color(0xFFE9E9EE)) : NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: const Color(0xFFE9E9EE))),
+                    cover == null ? Container(color: Pal.surfaceHi) : NetImg(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: Pal.surfaceHi)),
                     Positioned(
                       left: 6,
                       bottom: 8,
@@ -584,7 +575,7 @@ class _MemberAvatar extends StatelessWidget {
       child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
         Container(
           padding: const EdgeInsets.all(1.5),
-          decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFDADADA)),
+          decoration: const BoxDecoration(shape: BoxShape.circle, color: Pal.surfaceHi),
           child: UserAvatar(user: user, radius: size / 2 - 1.5),
         ),
         Positioned(bottom: 0, child: RoleTag(role: role, admin: admin)),
@@ -608,23 +599,61 @@ class RoleTag extends StatelessWidget {
       );
 }
 
-/// Sağ altta sandık düğmesi ve "Coins ödüllerini görmek için tıklayın" balonu.
-class _RewardButton extends StatelessWidget {
+/// Sağ altta sandık düğmesi. "Coins ödüllerini görmek için tıklayın" balonu günde bir kez görünür.
+class _RewardButton extends StatefulWidget {
   final VoidCallback onTap;
   const _RewardButton({required this.onTap});
 
   @override
+  State<_RewardButton> createState() => _RewardButtonState();
+}
+
+class _RewardButtonState extends State<_RewardButton> {
+  static const _key = 'family_reward_hint_day';
+  static String? _shownToday; // aynı oturumda tekrar okumamak için
+  bool _hint = false;
+
+  String get _today {
+    final n = DateTime.now();
+    return '${n.year}-${n.month}-${n.day}';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    if (_shownToday == _today) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      if (p.getString(_key) == _today) {
+        _shownToday = _today;
+        return;
+      }
+      await p.setString(_key, _today);
+    } catch (_) {}
+    _shownToday = _today;
+    if (!mounted) return;
+    setState(() => _hint = true);
+    Future.delayed(const Duration(seconds: 6), () {
+      if (mounted) setState(() => _hint = false);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-        Container(
+        if (_hint) Container(
           width: 210,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(color: const Color(0xFFFF5BAA), borderRadius: BorderRadius.circular(10)),
           child: const Text('Coins ödüllerini görmek için tıklayın', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 14)),
         ),
-        const Padding(padding: EdgeInsets.only(right: 22), child: Icon(Icons.arrow_drop_down, color: Color(0xFFFF5BAA), size: 22)),
+        if (_hint) const Padding(padding: EdgeInsets.only(right: 22), child: Icon(Icons.arrow_drop_down, color: Color(0xFFFF5BAA), size: 22)),
         Container(
           width: 60,
           height: 60,
@@ -665,7 +694,7 @@ class _FamilyMembersPageState extends State<FamilyMembersPage> {
     final f = widget.familyId;
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Pal.surface,
       builder: (c) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(leading: const Icon(Icons.person_outline, color: _ink), title: const Text('Profili gör', style: TextStyle(color: _ink)), onTap: () {
@@ -703,7 +732,7 @@ class _FamilyMembersPageState extends State<FamilyMembersPage> {
     return Theme(
       data: _light(),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         appBar: _appBar(context, 'Aile üyeleri'),
         body: AsyncBody<Map<String, dynamic>>(
           version: _v,
@@ -720,7 +749,7 @@ class _FamilyMembersPageState extends State<FamilyMembersPage> {
             return RefreshIndicator(
               onRefresh: reload,
               child: ListView(children: [
-                const Divider(height: 1, color: Color(0xFFEDEDED)),
+                const Divider(height: 1, color: Pal.outline),
                 if (_admin) ...[
                   ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
@@ -734,7 +763,7 @@ class _FamilyMembersPageState extends State<FamilyMembersPage> {
                     ]),
                     title: Text(pending > 0 ? 'Yeni istek ($pending)' : 'Yeni istek', style: const TextStyle(color: _blue, fontSize: 22, fontWeight: FontWeight.w500)),
                   ),
-                  const Divider(height: 1, color: Color(0xFFEDEDED)),
+                  const Divider(height: 1, color: Pal.outline),
                 ],
                 for (final m in members) ...[
                   ListTile(
@@ -747,7 +776,7 @@ class _FamilyMembersPageState extends State<FamilyMembersPage> {
                       }
                     },
                     leading: UserAvatar(user: mapOf(m['user']), radius: 31),
-                    title: Text('${mapOf(m['user'])?['displayName'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF5B6475), fontSize: 20, fontWeight: FontWeight.w500)),
+                    title: Text('${mapOf(m['user'])?['displayName'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Pal.text, fontSize: 20, fontWeight: FontWeight.w500)),
                     subtitle: Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Row(children: [
@@ -757,12 +786,12 @@ class _FamilyMembersPageState extends State<FamilyMembersPage> {
                       ]),
                     ),
                     trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-                      const Text('Bu haftaki katkısı', style: TextStyle(color: Color(0xFF5B6475), fontSize: 12)),
+                      const Text('Bu haftaki katkısı', style: TextStyle(color: Pal.text, fontSize: 12)),
                       const SizedBox(height: 4),
                       Text('${_compact(m['weekPoints'])} 🔥', style: const TextStyle(color: _ink, fontWeight: FontWeight.w800, fontSize: 14)),
                     ]),
                   ),
-                  const Divider(height: 1, color: Color(0xFFEDEDED)),
+                  const Divider(height: 1, color: Pal.outline),
                 ],
               ]),
             );
@@ -805,7 +834,7 @@ class _FamilyRequestsPageState extends State<FamilyRequestsPage> {
     return Theme(
       data: _light(),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         appBar: _appBar(context, 'İstekler'),
         body: AsyncBody<List<Map<String, dynamic>>>(
           version: _v,
@@ -813,19 +842,19 @@ class _FamilyRequestsPageState extends State<FamilyRequestsPage> {
           builder: (context, list, reload) => list.isEmpty
               ? const Center(child: Text('Bekleyen istek yok.', style: TextStyle(color: _dim)))
               : ListView(children: [
-                  const Divider(height: 1, color: Color(0xFFEDEDED)),
+                  const Divider(height: 1, color: Pal.outline),
                   for (final r in list) ...[
                     ListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 6),
                       leading: UserAvatar(user: mapOf(r['user']), radius: 31),
-                      title: Text('${mapOf(r['user'])?['displayName'] ?? ''}', style: const TextStyle(color: Color(0xFF5B6475), fontSize: 20, fontWeight: FontWeight.w500)),
+                      title: Text('${mapOf(r['user'])?['displayName'] ?? ''}', style: const TextStyle(color: Pal.text, fontSize: 20, fontWeight: FontWeight.w500)),
                       subtitle: Align(alignment: Alignment.centerLeft, child: LevelPill(level: mapOf(r['user'])?['coinLevel'] ?? 1, send: true, height: 16)),
                       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                         IconButton(onPressed: () => _answer('${mapOf(r['user'])?['id']}', false), icon: const Icon(Icons.close, color: Color(0xFFE53935), size: 36)),
                         IconButton(onPressed: () => _answer('${mapOf(r['user'])?['id']}', true), icon: const Icon(Icons.check, color: Color(0xFF19B33C), size: 36)),
                       ]),
                     ),
-                    const Divider(height: 1, color: Color(0xFFEDEDED)),
+                    const Divider(height: 1, color: Pal.outline),
                   ],
                 ]),
         ),
@@ -900,9 +929,9 @@ class _FamilyEditPageState extends State<FamilyEditPage> {
           ValueListenableBuilder<TextEditingValue>(
             valueListenable: c,
             builder: (_, v, __) => Row(children: [
-              Text(label, style: const TextStyle(color: Color(0xFF9A9AA6), fontSize: 15)),
+              Text(label, style: const TextStyle(color: Pal.textDim, fontSize: 15)),
               const Spacer(),
-              Text('${v.text.characters.length}/$max', style: const TextStyle(color: Color(0xFF9A9AA6), fontSize: 15)),
+              Text('${v.text.characters.length}/$max', style: const TextStyle(color: Pal.textDim, fontSize: 15)),
             ]),
           ),
           const SizedBox(height: 8),
@@ -914,7 +943,7 @@ class _FamilyEditPageState extends State<FamilyEditPage> {
             decoration: InputDecoration(
               counterText: '',
               filled: true,
-              fillColor: const Color(0xFFF3F4F6),
+              fillColor: Pal.surfaceHi,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
             ),
@@ -929,7 +958,7 @@ class _FamilyEditPageState extends State<FamilyEditPage> {
     return Theme(
       data: _light(),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         appBar: _appBar(context, _create ? 'Aile Kur' : 'Bilgileri Düzenle'),
         body: ListView(padding: EdgeInsets.only(bottom: 30 + MediaQuery.paddingOf(context).bottom), children: [
           const SizedBox(height: 30),
@@ -942,7 +971,7 @@ class _FamilyEditPageState extends State<FamilyEditPage> {
                 child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
                   CircleAvatar(
                     radius: 75,
-                    backgroundColor: const Color(0xFFE9E9EE),
+                    backgroundColor: Pal.surfaceHi,
                     backgroundImage: _img != null ? MemoryImage(_img!.bytes) : (url != null ? NetImage(url, targetW: 450, targetH: 450) : null),
                     child: _img == null && url == null ? const Icon(Icons.groups, color: Colors.white, size: 60) : null,
                   ),
@@ -960,7 +989,7 @@ class _FamilyEditPageState extends State<FamilyEditPage> {
             ),
           ),
           const SizedBox(height: 22),
-          const Center(child: Text('Lütfen bir kapak resmi yükle', style: TextStyle(color: Color(0xFF5B6475), fontSize: 15))),
+          const Center(child: Text('Lütfen bir kapak resmi yükle', style: TextStyle(color: Pal.text, fontSize: 15))),
           const SizedBox(height: 26),
           _field('Aile ismi', _name, 12, enabled: canName),
           _field('Aile bildirimi', _notice, 100),
@@ -1003,7 +1032,7 @@ class _FamilyLevelsPageState extends State<FamilyLevelsPage> {
     return Theme(
       data: _light(),
       child: Scaffold(
-        backgroundColor: const Color(0xFFF4F5F7),
+        backgroundColor: Pal.bg,
         appBar: _appBar(context, '${widget.family?['name'] ?? 'Aile seviyeleri'}'),
         body: AsyncBody<Map<String, dynamic>>(
           load: () => Api.get('/api/families/rules'),
@@ -1025,7 +1054,7 @@ class _FamilyLevelsPageState extends State<FamilyLevelsPage> {
                           onTap: () => setState(() => _tier = i),
                           child: Padding(
                             padding: EdgeInsets.symmetric(horizontal: 10 * k),
-                            child: Text(_tierNames[i - 1], style: TextStyle(color: _tier == i ? Colors.white : const Color(0xFF8E8E93), fontWeight: FontWeight.w700, fontSize: 15 * k)),
+                            child: Text(_tierNames[i - 1], style: TextStyle(color: _tier == i ? Colors.white : Pal.textDim, fontWeight: FontWeight.w700, fontSize: 15 * k)),
                           ),
                         ),
                     ]),
@@ -1085,11 +1114,11 @@ class _FamilyLevelsPageState extends State<FamilyLevelsPage> {
   }
 
   Widget _card(Widget icon, String label) => Container(
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+        decoration: BoxDecoration(color: Pal.surface, borderRadius: BorderRadius.circular(14)),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           SizedBox(height: 96, child: Center(child: icon)),
           const SizedBox(height: 14),
-          Text(label, style: const TextStyle(color: Color(0xFF5B6475), fontWeight: FontWeight.w600, fontSize: 14)),
+          Text(label, style: const TextStyle(color: Pal.text, fontWeight: FontWeight.w600, fontSize: 14)),
         ]),
       );
 }
@@ -1099,7 +1128,7 @@ void _howTo(BuildContext context, Map<String, dynamic> rules) {
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Colors.white,
+    backgroundColor: Pal.bg,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
     builder: (_) => SafeArea(
       child: Padding(
@@ -1131,17 +1160,17 @@ class FamilyTaskTable extends StatelessWidget {
             t,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: head ? (left ? const Color(0xFF16B33C) : const Color(0xFF5B6475)) : (left ? const Color(0xFF16B33C) : const Color(0xFF5B6475)),
+              color: head ? (left ? const Color(0xFF16B33C) : Pal.text) : (left ? const Color(0xFF16B33C) : Pal.text),
               fontWeight: head ? FontWeight.w700 : FontWeight.w600,
               fontSize: head ? 16 : 13,
             ),
           ),
         );
     return Container(
-      decoration: BoxDecoration(border: Border.all(color: const Color(0xFFDADDE2)), borderRadius: BorderRadius.circular(14)),
+      decoration: BoxDecoration(border: Border.all(color: Pal.outline), borderRadius: BorderRadius.circular(14)),
       clipBehavior: Clip.antiAlias,
       child: Table(
-        border: const TableBorder(horizontalInside: BorderSide(color: Color(0xFFDADDE2)), verticalInside: BorderSide(color: Color(0xFFDADDE2))),
+        border: const TableBorder(horizontalInside: BorderSide(color: Pal.outline), verticalInside: BorderSide(color: Pal.outline)),
         children: [
           TableRow(children: [cell('Görev', head: true), cell('Katkı Değeri', head: true, left: false)]),
           for (final t in tasks) TableRow(children: [cell('${t['name']}'), cell('${t['value']} 🔥', left: false)]),
@@ -1194,7 +1223,7 @@ class _FamilyRewardsPageState extends State<FamilyRewardsPage> {
     return Theme(
       data: _light(),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         appBar: _appBar(context, 'Coins ödülü'),
         body: AsyncBody<Map<String, dynamic>>(
           version: _v,
@@ -1264,7 +1293,7 @@ class _FamilyRewardsPageState extends State<FamilyRewardsPage> {
               const SizedBox(height: 6),
               const Text(
                 '1- Katkı değeri bu hafta için belirli bir sayıya ulaştığında, ilgili coins ödüllerini talep edebilirsiniz. Zaman aşımından önce talep etmezseniz ödüller silinecektir.',
-                style: TextStyle(color: Color(0xFF444444), fontSize: 13, height: 1.45),
+                style: TextStyle(color: Pal.text, fontSize: 13, height: 1.45),
               ),
               const SizedBox(height: 14),
               const Text('Katkı değerini artıracak durumlar', style: TextStyle(color: _ink, fontWeight: FontWeight.w800, fontSize: 16)),
@@ -1274,7 +1303,7 @@ class _FamilyRewardsPageState extends State<FamilyRewardsPage> {
               // Aile başkanı indirimi
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFFFD54F))),
+                decoration: BoxDecoration(color: Pal.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFFFD54F))),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
                     const Fig('coin_crown', width: 34, height: 34),
@@ -1295,7 +1324,7 @@ class _FamilyRewardsPageState extends State<FamilyRewardsPage> {
                     '2- Toplam harcama, indirimden önce en az ${_compact(cash['minSpend'] ?? 10000)} olmalıdır (şu an ${fmtNumber(cash['spent'] ?? 0)}).\n'
                     '3- Hediyeler, WIP satın alımları, mağaza ürünleri (araç, çerçeve vb.) kişisel tüketime dahildir.\n'
                     '4- Her tüketim orana göre gerçek zamanlı olarak hesaplanır ve biriktirilir.',
-                    style: const TextStyle(color: Color(0xFF444444), fontSize: 12.5, height: 1.45),
+                    style: const TextStyle(color: Pal.text, fontSize: 12.5, height: 1.45),
                   ),
                   const SizedBox(height: 10),
                   Table(
@@ -1347,7 +1376,7 @@ class FamilyRulesPage extends StatelessWidget {
     return Theme(
       data: _light(),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         appBar: _appBar(context, 'Aile kuralları'),
         body: AsyncBody<Map<String, dynamic>>(
           load: () => Api.get('/api/families/rules'),
@@ -1359,7 +1388,7 @@ class FamilyRulesPage extends StatelessWidget {
                 collapsedIconColor: _ink,
                 childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                 expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                children: [Text(a, style: const TextStyle(color: Color(0xFF555555), fontSize: 13.5, height: 1.5))],
+                children: [Text(a, style: const TextStyle(color: Pal.text, fontSize: 13.5, height: 1.5))],
               ),
             Padding(padding: const EdgeInsets.fromLTRB(8, 14, 8, 0), child: FamilyTaskTable(tasks: listOf(rules['tasks']))),
           ]),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
+import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/fig.dart';
 import 'family_screen.dart';
@@ -73,12 +74,12 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
     return Theme(
-      data: ThemeData.light(useMaterial3: true),
+      data: Theme.of(context),
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: Pal.bg,
         appBar: AppBar(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
+          backgroundColor: Pal.bg,
+          foregroundColor: Pal.text,
           elevation: 0,
           scrolledUnderElevation: 0,
           centerTitle: true,
@@ -404,11 +405,10 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.white,
-        title: Text('${_t.label} sıralaması', style: const TextStyle(color: Colors.black)),
+        title: Text('${_t.label} sıralaması'),
         content: Text(
           '${text[_t.type]}\n\nGünlük sıralama her gün 00:00\'da, haftalık her Pazartesi 00:00\'da, aylık her ayın 1\'inde (İstanbul saati) yenilenir. Tutarlar gizlilik için kısmen gizlenir.',
-          style: const TextStyle(color: Color(0xFF333333), height: 1.45),
+          style: const TextStyle(color: Pal.textDim, height: 1.45),
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tamam'))],
       ),

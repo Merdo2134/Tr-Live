@@ -145,10 +145,22 @@ class _EventScreenState extends State<EventScreen> {
   bool get _star => widget.group == EventGroup.star;
   bool get _couple => widget.group == EventGroup.couple;
 
+  Timer? _poll;
+
   @override
   void initState() {
     super.initState();
     _init();
+    // Sıralama canlı: sayfa açıkken 10 saniyede bir sessizce yenilenir.
+    _poll = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted && _data != null) _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
   }
 
   Future<void> _init() async {
@@ -164,7 +176,7 @@ class _EventScreenState extends State<EventScreen> {
 
   Future<void> _load() async {
     final seq = ++_seq;
-    setState(() => _error = null);
+    if (_error != null) setState(() => _error = null);
     try {
       final d = await Api.get('/api/events/$_kind', query: {'week': '$_week', if (_star) 'side': _side});
       if (!mounted || seq != _seq) return;

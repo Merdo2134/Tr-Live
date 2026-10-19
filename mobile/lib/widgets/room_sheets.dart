@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'common.dart';
 import 'cosmetics.dart';
+import 'fig.dart';
 import 'image_pick.dart';
+import 'level_badge.dart';
 import 'room_categories.dart';
 
 const _yellow = Color(0xFFFFE100);
@@ -31,10 +33,10 @@ Widget tagChip(String t, {bool selected = true, VoidCallback? onTap}) {
   );
 }
 
-Widget _sheetShell(BuildContext c, String title, Widget child, {double height = 0.75}) {
+Widget _sheetShell(BuildContext c, String title, Widget child) {
   return SafeArea(
     child: Container(
-      height: MediaQuery.sizeOf(c).height * height,
+      height: MediaQuery.sizeOf(c).height * 0.75,
       decoration: const BoxDecoration(
         gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF3A3A3F), Color(0xFF111114)]),
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
@@ -85,13 +87,36 @@ void showViewers(BuildContext context, List<Map<String, dynamic>> members, void 
   );
 }
 
-/// Katkı listesi (odaya en çok hediye gönderenler).
+/// Katkı listesi (Figma "Katkı listesi"): 24 Saat / Toplam (ömür boyu), taçlı çerçeveli ilk 3 kürsü ve sıralı liste.
 void showContributions(BuildContext context, String roomId) {
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (c) => _sheetShell(c, 'Katkı Listesi', _Contributions(roomId: roomId), height: 0.85),
+    builder: (c) => SafeArea(
+      child: Container(
+        height: MediaQuery.sizeOf(c).height * (779 / 932),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1B1446), Color(0xFF0B0C24)]),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 4),
+            child: Row(children: [
+              const SizedBox(width: 40),
+              const Expanded(child: Text('Katkı Listesi', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white))),
+              InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => Navigator.pop(c),
+                child: const CircleAvatar(radius: 17, backgroundColor: Colors.white24, child: Icon(Icons.close, color: Colors.white, size: 20)),
+              ),
+            ]),
+          ),
+          Expanded(child: _Contributions(roomId: roomId)),
+        ]),
+      ),
+    ),
   );
 }
 
@@ -106,6 +131,7 @@ class _ContributionsState extends State<_Contributions> {
   bool _total = true;
   List<Map<String, dynamic>>? _rows;
   String? _error;
+  int _seq = 0;
 
   @override
   void initState() {
@@ -114,103 +140,169 @@ class _ContributionsState extends State<_Contributions> {
   }
 
   Future<void> _load() async {
+    final seq = ++_seq;
     setState(() { _rows = null; _error = null; });
     try {
       final r = await Api.get('/api/rooms/${widget.roomId}/contributions', query: {'range': _total ? 'total' : 'day'});
-      if (mounted) setState(() => _rows = listOf(r['contributions']));
+      if (mounted && seq == _seq) setState(() => _rows = listOf(r['contributions']));
     } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+      if (mounted && seq == _seq) setState(() => _error = errorText(e));
     }
   }
 
-  Widget _tab(String label, bool active, VoidCallback onTap) => Expanded(
-        child: GestureDetector(
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(color: active ? _yellow : Colors.white24, borderRadius: BorderRadius.circular(6)),
-            child: Center(child: Text(label, style: TextStyle(color: active ? Colors.black : Colors.white70, fontWeight: FontWeight.w800))),
-          ),
-        ),
+  void _set(bool total) {
+    if (_total == total) return;
+    _total = total;
+    _load();
+  }
+
+  Widget _tabs(double k) => Container(
+        height: 37 * k,
+        margin: EdgeInsets.symmetric(horizontal: 10 * k),
+        padding: EdgeInsets.all(2 * k),
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(19 * k)),
+        child: Row(children: [
+          for (final (label, total) in const [('24 Saat', false), ('Toplam', true)])
+            Expanded(
+              child: GestureDetector(
+                onTap: () => _set(total),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(17 * k),
+                    gradient: _total == total ? const LinearGradient(colors: [Color(0xFFB45CFF), Color(0xFF6A3BFF)]) : null,
+                  ),
+                  child: Text(label, style: TextStyle(color: _total == total ? Colors.white : Colors.white60, fontWeight: FontWeight.w800, fontSize: 14 * k)),
+                ),
+              ),
+            ),
+        ]),
       );
 
-  Widget _podium(Map<String, dynamic>? row, int rank, double h) {
-    final colors = {1: const Color(0xFF7B2CFF), 2: const Color(0xFF3B6BFF), 3: const Color(0xFF3B6BFF)};
-    if (row == null) return Expanded(child: SizedBox(height: h));
-    final u = mapOf(row['user']);
-    return Expanded(
-      child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
-        Text(const {1: '👑', 2: '🥈', 3: '🥉'}[rank] ?? '', style: TextStyle(fontSize: rank == 1 ? 26 : 20)),
-        Container(
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.amber, width: 2.5)),
-          child: UserAvatar(user: u, radius: rank == 1 ? 34 : 28),
+  /// Kürsü: taçlı çerçeve + avatar, altında bayrak (ad, seviyeler), en altta elmas ve tutar.
+  Widget _podium(Map<String, dynamic>? row, int rank, double k) {
+    final first = rank == 1;
+    final w = (first ? 150 : 135) * k;
+    final frameH = (first ? 152 : 136) * k;
+    final avatar = (first ? 100 : 90) * k;
+    final bannerW = (first ? 121 : 111) * k;
+    final bannerH = (first ? 176 : 144) * k;
+    final bannerTop = (first ? 94 : 88) * k;
+    final scoreTop = (first ? 273 : 234) * k;
+    final u = mapOf(row?['user']);
+    return SizedBox(
+      width: w,
+      height: scoreTop + (first ? 33 : 26) * k,
+      child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
+        Positioned(top: bannerTop, width: bannerW, height: bannerH, child: Fig(first ? 'kat_banner1' : 'kat_banner2', fit: BoxFit.fill)),
+        Positioned(
+          top: (first ? 23 : 25) * k,
+          child: row == null
+              ? CircleAvatar(radius: avatar / 2, backgroundColor: Colors.white10, child: Icon(Icons.person, color: Colors.white24, size: avatar * 0.5))
+              : UserAvatar(user: u, radius: avatar / 2),
         ),
-        const SizedBox(height: 4),
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          decoration: BoxDecoration(color: colors[rank], borderRadius: const BorderRadius.vertical(top: Radius.circular(10))),
-          child: Column(children: [
-            Text((u?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-            Text(fmtCompact(row['total']), style: const TextStyle(fontWeight: FontWeight.w800)),
-            const Icon(Icons.diamond, size: 14, color: Colors.lightBlueAccent),
-            Text('$rank', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
-          ]),
+        Positioned(top: 0, width: w, height: frameH, child: IgnorePointer(child: Fig('kat_top$rank', fit: BoxFit.contain))),
+        if (row != null)
+          Positioned(
+            top: (first ? 160 : 136) * k,
+            width: bannerW - 8 * k,
+            child: Column(children: [
+              Text((u?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13 * k)),
+              SizedBox(height: 4 * k),
+              FittedBox(
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  LevelPill(level: u?['coinLevel'] ?? 1, send: true, height: 14 * k),
+                  SizedBox(width: 3 * k),
+                  LevelPill(level: u?['giftLevel'] ?? 1, send: false, height: 14 * k),
+                ]),
+              ),
+            ]),
+          ),
+        Positioned(
+          top: scoreTop,
+          child: Container(
+            height: (first ? 33 : 26) * k,
+            constraints: BoxConstraints(minWidth: 96 * k),
+            padding: EdgeInsets.symmetric(horizontal: 10 * k),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(17 * k),
+              border: Border.all(color: const Color(0x66FFD54F)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+              Fig('kat_crown_dia', width: 18 * k, height: 18 * k),
+              SizedBox(width: 4 * k),
+              Text(row == null ? '0' : fmtCompact(row['total']), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: (first ? 15 : 13) * k)),
+            ]),
+          ),
         ),
       ]),
     );
   }
 
+  Widget _row(Map<String, dynamic> r, int i, double k) {
+    final u = mapOf(r['user']);
+    return Container(
+        height: 87 * k,
+        padding: EdgeInsets.symmetric(horizontal: 21 * k),
+        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white12))),
+        child: Row(children: [
+          SizedBox(width: 36 * k, child: Text('${i + 1}-', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14 * k))),
+          UserAvatar(user: u, radius: 24 * k),
+          SizedBox(width: 12 * k),
+          Expanded(
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              UserName(user: u),
+              SizedBox(height: 5 * k),
+              Row(children: [
+                LevelPill(level: u?['coinLevel'] ?? 1, send: true, height: 14 * k),
+                SizedBox(width: 4 * k),
+                LevelPill(level: u?['giftLevel'] ?? 1, send: false, height: 14 * k),
+              ]),
+            ]),
+          ),
+          Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Fig('kat_dia', width: 25 * k, height: 23 * k),
+            SizedBox(height: 2 * k),
+            Text(fmtCompact(r['total']), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13 * k)),
+          ]),
+        ]),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final k = MediaQuery.sizeOf(context).width / 430;
     final rows = _rows;
     return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        child: Container(
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(8)),
-          child: Row(children: [
-            _tab('24 Saat', !_total, () { if (_total) { _total = false; _load(); } }),
-            _tab('Toplam', _total, () { if (!_total) { _total = true; _load(); } }),
-          ]),
-        ),
-      ),
-      if (_error != null) Padding(padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.redAccent)))
-      else if (rows == null) const Expanded(child: Center(child: CircularProgressIndicator()))
-      else if (rows.isEmpty) const Expanded(child: Center(child: Text('Henüz katkı yok.', style: TextStyle(color: Colors.white60))))
+      SizedBox(height: 8 * k),
+      _tabs(k),
+      SizedBox(height: 14 * k),
+      if (_error != null)
+        Padding(padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.redAccent)))
+      else if (rows == null)
+        const Expanded(child: Center(child: CircularProgressIndicator()))
+      else if (rows.isEmpty)
+        Expanded(child: Center(child: Text(_total ? 'Henüz katkı yok.' : 'Son 24 saatte katkı yok.', style: const TextStyle(color: Colors.white60))))
       else
         Expanded(
-          child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 16), children: [
-            SizedBox(
-              height: 226, // 1. sıradaki taç + büyük avatar + ad + puan büyük yazı boyutunda da sığsın
-              child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                _podium(rows.length > 1 ? rows[1] : null, 2, 150),
-                _podium(rows[0], 1, 190),
-                _podium(rows.length > 2 ? rows[2] : null, 3, 140),
-              ]),
-            ),
-            const SizedBox(height: 8),
-            for (var i = 3; i < rows.length; i++) ...[
-              ListTile(
-                leading: SizedBox(
-                  width: 92,
-                  child: Row(children: [
-                    SizedBox(width: 30, child: Text('${i + 1}-', style: const TextStyle(fontWeight: FontWeight.w800))),
-                    UserAvatar(user: mapOf(rows[i]['user']), radius: 22),
-                  ]),
-                ),
-                title: UserName(user: mapOf(rows[i]['user'])),
-                trailing: Column(mainAxisAlignment: MainAxisAlignment.center, mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.diamond, size: 18, color: Colors.lightBlueAccent),
-                  Text(fmtCompact(rows[i]['total']), style: const TextStyle(fontWeight: FontWeight.w800)),
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(padding: const EdgeInsets.only(bottom: 16), children: [
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 3 * k),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.end, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  _podium(rows.length > 1 ? rows[1] : null, 2, k),
+                  _podium(rows[0], 1, k),
+                  _podium(rows.length > 2 ? rows[2] : null, 3, k),
                 ]),
               ),
-              const Divider(height: 1, color: Colors.white12),
-            ],
-          ]),
+              SizedBox(height: 16 * k),
+              for (var i = 3; i < rows.length; i++) _row(rows[i], i, k),
+            ]),
+          ),
         ),
     ]);
   }
