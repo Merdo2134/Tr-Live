@@ -12,7 +12,7 @@ import { ipLimit, loginGuard, clientIp } from '../firewall.js';
 import { promoteBootstrapAdmins } from '../services/bootstrap.js';
 
 export const router = Router();
-const USERNAME_RE = /^[a-z0-9_.]{3,30}$/;
+export const USERNAME_RE = /^[a-z0-9_.]{3,30}$/;
 let dummyHash;
 
 /**

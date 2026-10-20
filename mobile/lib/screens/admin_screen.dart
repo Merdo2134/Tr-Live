@@ -402,6 +402,38 @@ class _UsersTabState extends State<_UsersTab> {
     await _run(() => Api.post('/api/admin/users/${_user!['id']}/display-name', {'displayName': f['Yeni ad']}), 'Ad değiştirildi.');
   }
 
+  /// Giriş bilgileri: kullanıcı adı, telefon ve yeni şifre (yalnızca yönetici). Şifre gösterilmez, yenisi verilir.
+  Future<void> _credentials() async {
+    final id = _user?['id'];
+    if (id == null) return;
+    final cur = await guard(context, () => Api.get('/api/admin/users/$id/credentials'));
+    if (cur == null || !mounted) return;
+    const lUser = 'Kullanıcı adı (giriş)';
+    const lPhone = 'Telefon (boş bırakılırsa kaldırılır)';
+    const lPass = 'Yeni şifre (boş = değişmez, en az 6)';
+    final f = await formDialog(context, 'Giriş bilgileri', [lUser, lPhone, lPass], initial: {
+      lUser: (cur['username'] ?? '').toString(),
+      lPhone: (cur['phone'] ?? '').toString(),
+      lPass: '',
+    });
+    if (f == null || !mounted) return;
+    final pass = f[lPass] ?? '';
+    if (pass.isNotEmpty && pass.length < 6) return toast(context, 'Şifre en az 6 karakter olmalı.', error: true);
+    if (pass.isNotEmpty &&
+        !await confirm(context, 'Şifre değişince kullanıcının tüm cihazlardaki oturumları kapanır; yeni şifreyle giriş yapar. Devam edilsin mi?', action: 'Değiştir')) {
+      return;
+    }
+    if (!mounted) return;
+    await _run(
+      () => Api.post('/api/admin/users/$id/credentials', {
+        'username': f[lUser] ?? '',
+        'phone': f[lPhone] ?? '',
+        if (pass.isNotEmpty) 'password': pass,
+      }),
+      pass.isNotEmpty ? 'Giriş bilgileri ve şifre güncellendi.' : 'Giriş bilgileri güncellendi.',
+    );
+  }
+
   Future<void> _restrict() async {
     final f = await formDialog(context, 'Sohbet kısıtı', ['Süre (dakika; 0 = kısıtı kaldır)'], initial: {'Süre (dakika; 0 = kısıtı kaldır)': '60'});
     if (f == null || !mounted) return;
@@ -466,6 +498,7 @@ class _UsersTabState extends State<_UsersTab> {
             OutlinedButton.icon(onPressed: () => _run(() => Api.post('/api/admin/users/${u['id']}/unban', {}), 'Ban kaldırıldı.'), icon: const Icon(Icons.lock_open), label: const Text('Banı kaldır')),
           OutlinedButton.icon(onPressed: _restrict, icon: const Icon(Icons.speaker_notes_off_outlined), label: Text(u['chatRestrictedUntil'] != null ? 'Sohbet kısıtını değiştir' : 'Sohbet kısıtı')),
           // Yalnızca yönetici
+          if (admin) OutlinedButton.icon(onPressed: _credentials, icon: const Icon(Icons.key), label: const Text('Giriş bilgileri / şifre')),
           if (admin) OutlinedButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => UserDevicesScreen(user: u))), icon: const Icon(Icons.devices), label: const Text('Cihazlar')),
           if (admin) OutlinedButton.icon(style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent), onPressed: _revokeSessions, icon: const Icon(Icons.logout), label: const Text('Oturumları kapat')),
           if (admin) OutlinedButton.icon(onPressed: _coins, icon: const Icon(Icons.monetization_on), label: const Text('Coin düzenle')),

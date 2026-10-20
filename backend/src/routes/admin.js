@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import express from 'express';
 import { query, tx } from '../database.js';
-import { requireAuth, requireStaff, requireSuperAdmin } from '../auth.js';
+import { requireAuth, requireStaff, requireSuperAdmin, hashPassword, passwordRules } from '../auth.js';
+import { USERNAME_RE, normalizePhone } from './auth.js';
 import { supportMayCall, banEnd, mayActOnUser } from '../staff_logic.js';
 import { fail, uuid, bigAmount, positiveInt, text, oneOf, httpsUrl, assetUrl } from '../http.js';
 import { validateAgencyConfig } from '../agency_config.js';
@@ -1322,6 +1323,72 @@ router.get('/users/:userId/devices', requireSuperAdmin, async (req, res) => {
     online: hub.isOnline(userId),
     linkedAccounts: linked.rows.map((u) => ({ id: u.id, publicId: u.public_id, username: u.username, displayName: u.display_name, accountStatus: u.account_status, lastUsedAt: u.last_used_at })),
   });
+});
+
+// ---------------- Giriş bilgileri (yalnızca yönetici) ----------------
+// Kullanıcı adı, telefon ve şifre. Şifre hiçbir zaman gösterilmez; yalnızca yenisi verilebilir.
+router.get('/users/:userId/credentials', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const u = (await query(`SELECT username, phone, (password_hash IS NOT NULL) AS has_password FROM users WHERE id = $1`, [userId])).rows[0];
+  if (!u) throw fail('Kullanıcı bulunamadı.', 404);
+  res.json({ username: u.username, phone: u.phone ?? '', hasPassword: u.has_password });
+});
+
+// Giriş bilgilerini günceller. Gönderilmeyen alan değişmez. phone: '' → telefon kaldırılır.
+// Şifre değişince kullanıcının tüm oturumları kapanır (yeni şifreyle yeniden giriş yapar).
+router.post('/users/:userId/credentials', requireSuperAdmin, async (req, res) => {
+  const userId = uuid(req.params.userId, 'Kullanıcı');
+  const target = await assertUser(userId);
+  if (target.account_status === 'deleted') throw fail('Silinmiş hesap değiştirilemez.', 409);
+  if (!mayActOnUser(req.user.system_role, target.system_role, userId === req.user.id)) throw fail('Bu hesap üzerinde işlem yetkiniz yok.', 403);
+  const b = req.body ?? {};
+  const changes = {};
+  if (b.username !== undefined && b.username !== null) {
+    const username = String(b.username).trim().toLowerCase();
+    if (!USERNAME_RE.test(username)) throw fail('Kullanıcı adı 3-30 karakter olmalı; yalnızca harf, rakam, nokta ve alt çizgi kullanılabilir.');
+    if (username !== target.username) changes.username = username;
+  }
+  if (b.phone !== undefined && b.phone !== null) {
+    const raw = String(b.phone).trim();
+    if (raw === '') {
+      changes.phone = null;
+    } else {
+      const phone = normalizePhone(raw);
+      if (!phone) throw fail('Geçerli bir cep telefonu numarası girin (ör. 0555 123 45 67).');
+      changes.phone = phone;
+    }
+  }
+  let passwordHash = null;
+  if (b.password !== undefined && b.password !== null && String(b.password) !== '') {
+    passwordRules(String(b.password));
+    passwordHash = await hashPassword(String(b.password));
+  }
+  if (!Object.keys(changes).length && !passwordHash) throw fail('Değiştirilecek bir bilgi yok.');
+  try {
+    await tx(async (c) => {
+      const before = (await c.query(`SELECT username, phone FROM users WHERE id = $1 FOR UPDATE`, [userId])).rows[0];
+      if ('phone' in changes && changes.phone === before.phone) delete changes.phone;
+      const sets = []; const vals = [userId];
+      for (const [k, v] of Object.entries(changes)) { vals.push(v); sets.push(`${k} = $${vals.length}`); }
+      if (passwordHash) { vals.push(passwordHash); sets.push(`password_hash = $${vals.length}`, 'token_version = token_version + 1'); }
+      if (sets.length) await c.query(`UPDATE users SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1`, vals);
+      await auditStaff(c, req.user.id, userId, 'credentials_update', {
+        username: changes.username ? { before: before.username, after: changes.username } : undefined,
+        phone: 'phone' in changes ? { before: before.phone, after: changes.phone } : undefined,
+        password: passwordHash ? 'changed' : undefined,
+        by: req.user.system_role,
+      });
+    });
+  } catch (error) {
+    if (error.code === '23505') throw fail(String(error.constraint ?? '').includes('phone') ? 'Bu telefon numarası başka bir hesapta kayıtlı.' : 'Bu kullanıcı adı zaten kullanılıyor.', 409);
+    throw error;
+  }
+  if (passwordHash) {
+    await revokeAllSessions(userId, 'admin_password');
+    hub.disconnectUser(userId, 'sessions_revoked');
+  }
+  const u = (await query(`SELECT username, phone FROM users WHERE id = $1`, [userId])).rows[0];
+  res.json({ ok: true, username: u.username, phone: u.phone ?? '', passwordChanged: Boolean(passwordHash) });
 });
 
 // Kullanıcının tüm cihazlarındaki oturumları kapatır (hesap çalındı şüphesi vb.).
