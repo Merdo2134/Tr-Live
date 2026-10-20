@@ -1,3 +1,16 @@
+## v2.55.1 — Koltuk susturma
+- Yetkili (oda sahibi, yardımcı sahip, moderatör) bir konuşanı "Sustur" deyince kişi koltuktan inmez; mikrofonu
+  kapanır ve açamaz. Koltukta pembe "susturuldu" işareti görünür. Boş koltuk da susturulabilir (koltuk menüsü).
+  "Sesi Aç" ile geri açılır. Koltuktan indirmek için "Koltuk" düğmesi aynı kaldı.
+
+## v2.55.0 — Ekran, arama, sıralama listeleri
+- Uygulama açıkken ekran kendiliğinden kapanmaz; uygulama yalnızca dikey çalışır (yan çevirince dönmez).
+- Telefon araması: Android'in kendi arama durumu okunur (ilk odaya girişte "telefon durumu" izni istenir). Arama
+  gelince oda sesi, oda müziği, hediye / araç sesleri ve mikrofon kapanır; arama bitince açılır.
+- "Oda sesini kapat" artık oda müziğini ve hediye / araç seslerini de susturur (odadan çıkınca açılır).
+- Etkinlikler, Zirve Listesi, Katkı Listesi ve Koruyucu Sıralaması kimse olmasa da ilk 10 satırı gösterir.
+- GitHub: apk_build.yml güncellendi (MainActivity, READ_PHONE_STATE izni, dikey ekran). Elle yüklenmeli.
+
 ## v2.54.1 — Etkinlik sayımı
 - Alınan hediyeye göre yarışan etkinliklerde (Kral, Kraliçe, Yıldızlar-Yayıncı) kendine gönderilen hediye de sayılır.
 - Destekçi sıralamasında (Yıldızlar-Destekçi) yalnızca başkasına gönderilen hediye sayılır.

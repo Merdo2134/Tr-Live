@@ -134,15 +134,13 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                 version: '${_t.type}|$_period',
                 load: () => Api.get('/api/leaderboards', query: {'type': _t.type, 'period': _period}),
                 builder: (context, d, reload) {
-                  final entries = listOf(d['entries']);
+                  final entries = padRanking(listOf(d['entries']));
                   final top = entries.take(3).toList();
                   final rest = entries.skip(3).toList();
                   return Stack(children: [
                     RefreshIndicator(
                       onRefresh: reload,
                       child: ListView(padding: EdgeInsets.only(bottom: 90 + mq.padding.bottom), children: [
-                        if (entries.isEmpty)
-                          const Padding(padding: EdgeInsets.only(top: 80), child: Center(child: Text('Bu dönemde henüz sıralama yok.', style: TextStyle(color: Colors.white70)))),
                         if (top.isNotEmpty) _t.type == 'cp' ? _cpPodium(top) : _podium(top),
                         for (final e in rest) _t.type == 'cp' ? _cpRow(e) : _row(e),
                       ]),
@@ -198,7 +196,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
       backgroundColor: Colors.white24,
       backgroundImage: u == null ? null : NetImage(u, targetW: px, targetH: px),
       onBackgroundImageError: u == null ? null : (_, __) {},
-      child: u == null ? Icon(_t.type == 'families' ? Icons.groups : Icons.business, color: Colors.white) : null,
+      child: u == null ? Icon(_t.type == 'families' ? Icons.groups : _t.type == 'agencies' ? Icons.business : Icons.person, color: Colors.white) : null,
     );
   }
 

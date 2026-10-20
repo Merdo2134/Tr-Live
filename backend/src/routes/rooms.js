@@ -35,7 +35,7 @@ const newCode = () => Array.from(crypto.randomBytes(6), (b) => CODE_ALPHABET[b %
 const roomJson = (r, { showCode = false } = {}) => ({
   id: r.id, roomNumber: r.room_number ?? null, announcement: r.announcement ?? '', coverUrl: r.cover_url ?? null, name: r.name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.created_at,
   layout: r.layout === 'live' ? 'live' : 'grid', tags: r.tags ?? [], locked: Boolean(r.password_hash), chatEnabled: r.chat_enabled !== false,
-  hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false, lockedSeats: r.locked_seats ?? [], micRequest: r.mic_request === true,
+  hidden: Boolean(r.is_hidden), theme: r.theme ?? 'default', themeImageUrl: r.theme_image_url ?? null, scoreboardEnabled: r.scoreboard_enabled !== false, lockedSeats: r.locked_seats ?? [], mutedSeats: r.muted_seats ?? [], micRequest: r.mic_request === true,
   ...(showCode && r.join_code ? { joinCode: r.join_code } : {}),
 });
 
@@ -296,7 +296,7 @@ router.get('/:roomId', requireAuth, async (req, res) => {
   const roomId = uuid(req.params.roomId, 'Oda');
   const r = (await query(
     `SELECT r.id AS room_id, r.room_number, r.cover_url, r.announcement, r.name AS room_name, r.room_type, r.seat_count, r.owner_id, r.created_at AS room_created_at, r.tags, r.chat_enabled,
-       r.is_hidden AS room_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats, r.mic_request,
+       r.is_hidden AS room_hidden, r.join_code, r.theme, r.theme_image_url, r.scoreboard_enabled, r.locked_seats, r.muted_seats, r.mic_request,
        (r.password_hash IS NOT NULL) AS locked, ${USER_PUBLIC_COLUMNS}
      FROM rooms r JOIN users u ON u.id = r.owner_id ${USER_PUBLIC_JOINS} WHERE r.id = $1 AND r.is_active = TRUE`,
     [roomId],
@@ -309,7 +309,7 @@ router.get('/:roomId', requireAuth, async (req, res) => {
     room: {
       id: r.room_id, roomNumber: r.room_number ?? null, coverUrl: r.cover_url ?? null, announcement: r.announcement ?? '', name: r.room_name, roomType: r.room_type, seatCount: r.seat_count, ownerId: r.owner_id, createdAt: r.room_created_at,
       tags: r.tags ?? [], locked: r.locked, chatEnabled: r.chat_enabled !== false,
-      hidden: r.room_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [], micRequest: r.mic_request === true,
+      hidden: r.room_hidden, theme: r.theme, themeImageUrl: r.theme_image_url, scoreboardEnabled: r.scoreboard_enabled, lockedSeats: r.locked_seats ?? [], mutedSeats: r.muted_seats ?? [], micRequest: r.mic_request === true,
       ...(canSeeCode && r.join_code ? { joinCode: r.join_code } : {}),
       owner: publicUser(r, req.user.id),
     },
@@ -414,6 +414,7 @@ router.patch('/:roomId', requireAuth, userLimit('room_settings', 20, 60e3), asyn
     if (!SUPPORTED_SEATS.has(newSeats)) throw fail('Geçersiz koltuk sayısı.');
     set('seat_count', newSeats);
     set('locked_seats', (before.locked_seats ?? []).filter((i) => i < newSeats)); // kalkan koltukların kilidi de kalkar
+    set('muted_seats', (before.muted_seats ?? []).filter((i) => i < newSeats));
   }
   if (b.themeImageUrl !== undefined) {
     if (b.themeImageUrl !== null && b.themeImageUrl !== '') {
@@ -594,6 +595,11 @@ router.post('/:roomId/mic/take', requireAuth, userLimit('mic', 60, 60e3), async 
       if (!Number.isInteger(target) || target < 0 || target >= room.seat_count) throw fail('Geçersiz koltuk.');
       if (target === 0 && member.role !== 'owner') throw fail('Bu koltuk oda sahibine ayrılmıştır.', 403);
       if (taken.has(target)) throw fail('Koltuk dolu.', 409);
+      // Susturulan kişi başka koltuğa geçerek susturmadan kurtulamaz (yetkililer hariç).
+      const mutedNow = room.muted_seats ?? [];
+      if (member.seat_index !== null && mutedNow.includes(member.seat_index) && !mutedNow.includes(target) && !SEAT_MANAGERS.includes(member.role)) {
+        throw fail('Koltuğun susturuldu; başka koltuğa geçemezsin.', 403);
+      }
       if ((room.locked_seats ?? []).includes(target) && !SEAT_MANAGERS.includes(member.role)) throw fail('Bu koltuk kilitli.', 403);
     }
     await c.query(`UPDATE room_members SET seat_index = $3, microphone = TRUE WHERE room_id = $1 AND user_id = $2`, [roomId, userId, target]);
@@ -799,6 +805,33 @@ router.post('/:roomId/seats/:index/lock', requireAuth, userLimit('moderate', 60,
   await syncProfile(await activeRoom(roomId));
   hub.broadcastRoom(roomId, { type: 'room_seats_locked', roomId, lockedSeats: r.rows[0].locked_seats });
   res.json({ ok: true, lockedSeats: r.rows[0].locked_seats });
+});
+
+// Koltuk sustur / aç (oda sahibi, yardımcı sahip, moderatör). Oturan kişi koltukta kalır; susturulmuş koltukta
+// mikrofon açılmaz (uygulama kapatır) ve koltukta "susturuldu" işareti görünür. Boş koltuk da susturulabilir.
+router.post('/:roomId/seats/:index/mute', requireAuth, userLimit('moderate', 60, 60e3), async (req, res) => {
+  const roomId = uuid(req.params.roomId, 'Oda');
+  const room = await activeRoom(roomId);
+  const idx = Number(req.params.index);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= room.seat_count) throw fail('Geçersiz koltuk.');
+  const me = await memberOf(roomId, req.user.id);
+  if (!me || !SEAT_MANAGERS.includes(me.role)) throw fail('Koltukları yalnızca oda sahibi ve yöneticiler susturabilir.', 403);
+  const muted = req.body?.muted !== false;
+  const occupant = (await query(`SELECT user_id, role FROM room_members WHERE room_id = $1 AND seat_index = $2`, [roomId, idx])).rows[0];
+  if (occupant && occupant.user_id === req.user.id && !muted && me.role !== 'owner') throw fail('Susturulan koltuğunu kendin açamazsın.', 403);
+  if (occupant && occupant.user_id !== req.user.id) {
+    if (!canManage(me.role, occupant.role, 'moderate')) throw fail('Bu kişiyi susturma yetkiniz yok.', 403);
+    if (muted) await assertNotImmune(me, occupant.user_id, req.user);
+  }
+  if (idx === 0 && me.role !== 'owner') throw fail('Oda sahibinin koltuğunu yalnızca oda sahibi susturabilir.', 403);
+  const r = await query(
+    muted
+      ? `UPDATE rooms SET muted_seats = (SELECT ARRAY(SELECT DISTINCT x FROM unnest(muted_seats || $2::int) x ORDER BY x)) WHERE id = $1 RETURNING muted_seats`
+      : `UPDATE rooms SET muted_seats = array_remove(muted_seats, $2::int) WHERE id = $1 RETURNING muted_seats`,
+    [roomId, idx],
+  );
+  hub.broadcastRoom(roomId, { type: 'room_seats_muted', roomId, mutedSeats: r.rows[0].muted_seats, seatIndex: idx, muted });
+  res.json({ ok: true, mutedSeats: r.rows[0].muted_seats });
 });
 
 // Mikrofona davet: davet edilen kişi kabul ederse mic/take ile oturur.

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Odadaki görsel efekt tercihleri (yalnızca bu cihazda; uygulama kapanıp açılınca da hatırlanır).
@@ -14,6 +15,8 @@ class EffectPrefs {
   static bool entranceFx = true;
   /// Sesli MP4 hediye ve giriş efektlerinin sesi.
   static bool giftSound = true;
+  /// Odada "oda sesini kapat" seçiliyken hediye / araç sesleri de çalmaz (kaydedilmez; odadan çıkınca açılır).
+  static final ValueNotifier<bool> roomMuted = ValueNotifier<bool>(false);
 
   static const _keys = {
     'fx_gift_anim': 0,

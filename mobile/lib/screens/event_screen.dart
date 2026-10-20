@@ -212,7 +212,7 @@ class _EventScreenState extends State<EventScreen> {
     final k = w / 430;
     final d = _data;
     final end = DateTime.tryParse('${_thisWeekEnd ?? d?['weekEnd'] ?? ''}')?.toLocal();
-    final list = listOf(d?['leaderboard']);
+    final list = padRanking(listOf(d?['leaderboard']), scoreKey: 'score');
     return Scaffold(
       backgroundColor: _bg,
       body: Stack(children: [
@@ -408,7 +408,6 @@ class _EventScreenState extends State<EventScreen> {
             child: Column(children: [
               _weekSwitch(k),
               SizedBox(height: 12 * k),
-              if (list.isEmpty) _empty(),
               for (final e in list) _royalRow(k, e),
             ]),
           ),
@@ -417,11 +416,6 @@ class _EventScreenState extends State<EventScreen> {
       ]),
     );
   }
-
-  Widget _empty() => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 30),
-        child: Center(child: Text('Bu hafta henüz sıralamaya giren yok.\nİlk sen ol!', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, height: 1.4))),
-      );
 
   Widget _royalRow(double k, Map<String, dynamic> e) {
     final rank = (e['rank'] as num?)?.toInt() ?? 0;
@@ -465,7 +459,6 @@ class _EventScreenState extends State<EventScreen> {
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 14 * k),
       child: Column(children: [
-        if (list.isEmpty) _empty(),
         for (final e in list) _starRow(k, e),
       ]),
     );
@@ -514,7 +507,6 @@ class _EventScreenState extends State<EventScreen> {
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 14 * k),
       child: Column(children: [
-        if (list.isEmpty) _empty(),
         if (top.isNotEmpty)
           Container(
             padding: EdgeInsets.fromLTRB(4 * k, 34 * k, 4 * k, 30 * k),

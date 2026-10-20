@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 /// Telefon araması (ya da WhatsApp gibi bir arama) gelince Android, uygulamaya "sesi geçici olarak bırak" der.
 /// Bu sınıf o sinyali dinler: [inCall] true olunca oda sesi ve mikrofon kapatılır, arama bitince geri açılır.
@@ -17,8 +18,35 @@ class CallGuard {
   Timer? _poll;
   bool _focusPaused = false; // ses odağı "geçici kesinti" dedi
   bool _phoneMode = false; // telefonun ses modu: çalıyor / görüşmede
+  bool _native = false; // Android'in arama durumu (MainActivity: TelephonyManager + ses modu)
+  StreamSubscription<dynamic>? _nativeSub;
+  static const _device = MethodChannel('trlive/device');
+  static const _phoneCall = EventChannel('trlive/phone_call');
+  static bool _askedPermission = false;
 
-  void _update() => inCall.value = _focusPaused || _phoneMode;
+  void _update() => inCall.value = _focusPaused || _phoneMode || _native;
+
+  /// Asıl arama sinyali: Android'in kendi arama durumu. Oda sesi sistemi ses odağını kendisi aldığı için
+  /// odak sinyali çoğu telefonda uygulamaya hiç gelmiyor; bu yol her durumda çalışır ("telefon durumu" izniyle).
+  void _startNative() {
+    if (_nativeSub != null || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      _nativeSub = _phoneCall.receiveBroadcastStream().listen((v) {
+        _native = v == true;
+        _update();
+      }, onError: (_) {});
+    } catch (_) {/* eski APK: kanal yok */}
+  }
+
+  /// "Telefon durumu" iznini (bir kez) ister. Diğer izin pencereleri kapandıktan sonra çağrılır
+  /// (Android aynı anda iki izin penceresi açmaz; ikincisi sessizce reddedilir).
+  Future<void> requestPhonePermission() async {
+    if (_askedPermission || defaultTargetPlatform != TargetPlatform.android) return;
+    _askedPermission = true;
+    try {
+      await _device.invokeMethod<bool>('requestPhoneState');
+    } catch (_) {/* eski APK */}
+  }
 
   /// Android'in ses modunu saniyede bir okur: zil çalıyorsa ya da normal telefon görüşmesi sürüyorsa arama var.
   /// (Oda sesi sistemi ses odağını kendisi aldığı için odak sinyali bazı telefonlarda hiç gelmiyor; bu yol her zaman çalışır.)
@@ -51,6 +79,7 @@ class CallGuard {
   Future<void> start() async {
     _users++;
     _startPoll();
+    _startNative();
     if (_sub != null) return;
     try {
       final s = await AudioSession.instance;
@@ -78,6 +107,9 @@ class CallGuard {
     _sub = null;
     _poll?.cancel();
     _poll = null;
+    await _nativeSub?.cancel();
+    _nativeSub = null;
+    _native = false;
     _focusPaused = false;
     _phoneMode = false;
     inCall.value = false;

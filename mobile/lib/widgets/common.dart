@@ -559,3 +559,13 @@ Future<Map<String, String>?> formDialog(BuildContext context, String title, List
   }
   return ok == true ? values : null;
 }
+
+/// Sıralama listelerinde kimse olmasa da ilk [count] satır görünür: eksik satırlar boş (sıra numarası, 0 puan) eklenir.
+/// Boş satırda kullanıcı yoktur (dokununca bir şey açılmaz). [scoreKey]: puan alanının adı (total / score / points).
+List<Map<String, dynamic>> padRanking(List<Map<String, dynamic>> list, {int count = 10, String scoreKey = 'total'}) {
+  if (list.length >= count) return list;
+  return [
+    ...list,
+    for (var i = list.length; i < count; i++) <String, dynamic>{'rank': i + 1, scoreKey: '0', 'placeholder': true},
+  ];
+}

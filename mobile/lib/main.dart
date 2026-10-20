@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/update_screen.dart';
@@ -41,6 +42,8 @@ Future<void> main() async {
 
 Future<void> _boot() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Uygulama yalnızca dikey çalışır (telefon yan çevrilince ekran dönüp yarım görünmesin).
+  unawaited(SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]).catchError((_) {}));
   // Google/Facebook girişinden dönüş bağlantısı (sayfa yönlendirmesinden önce yakalansın diye en başta).
   LoginLink.instance.init();
   // Yayın sürümünde bozulan bir parça gri kutu yerine sade bir simgeyle görünsün (ekranın geri kalanı çalışır).

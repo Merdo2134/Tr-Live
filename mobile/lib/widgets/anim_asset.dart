@@ -53,9 +53,16 @@ class _AnimAssetState extends State<AnimAsset> {
 
   bool get _isMp4 => AnimAsset.extOf(widget.url) == 'mp4' || widget.format == 'mp4';
 
+  /// Arama başlayınca çalan hediye / araç sesi hemen susar.
+  void _onCall() {
+    if (CallGuard.instance.inCall.value || EffectPrefs.roomMuted.value) _audio?.pause().catchError((_) {});
+  }
+
   @override
   void initState() {
     super.initState();
+    CallGuard.instance.inCall.addListener(_onCall);
+    EffectPrefs.roomMuted.addListener(_onCall);
     if (widget.cache) {
       _resolve();
     } else if (_isMp4) {
@@ -65,6 +72,8 @@ class _AnimAssetState extends State<AnimAsset> {
 
   @override
   void dispose() {
+    CallGuard.instance.inCall.removeListener(_onCall);
+    EffectPrefs.roomMuted.removeListener(_onCall);
     _doneTimer?.cancel();
     _audio?.dispose();
     _audio = null;
@@ -75,7 +84,7 @@ class _AnimAssetState extends State<AnimAsset> {
   /// Sessiz dosyada bir şey duyulmaz. Arama sürerken ya da ayar kapalıysa çalınmaz.
   Future<void> _startSound(String? path) async {
     if (!widget.sound || !_isMp4 || _audio != null || widget.repeat) return;
-    if (!EffectPrefs.giftSound || CallGuard.instance.inCall.value) return;
+    if (!EffectPrefs.giftSound || EffectPrefs.roomMuted.value || CallGuard.instance.inCall.value) return;
     final p = _audio = AudioPlayer();
     try {
       if (path != null) {

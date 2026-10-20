@@ -144,7 +144,7 @@ class _ContributionsState extends State<_Contributions> {
     setState(() { _rows = null; _error = null; });
     try {
       final r = await Api.get('/api/rooms/${widget.roomId}/contributions', query: {'range': _total ? 'total' : 'day'});
-      if (mounted && seq == _seq) setState(() => _rows = listOf(r['contributions']));
+      if (mounted && seq == _seq) setState(() => _rows = padRanking(listOf(r['contributions'])));
     } catch (e) {
       if (mounted && seq == _seq) setState(() => _error = errorText(e));
     }
@@ -198,24 +198,24 @@ class _ContributionsState extends State<_Contributions> {
         Positioned(top: bannerTop, width: bannerW, height: bannerH, child: Fig(first ? 'kat_banner1' : 'kat_banner2', fit: BoxFit.fill)),
         Positioned(
           top: (first ? 23 : 25) * k,
-          child: row == null
+          child: u == null
               ? CircleAvatar(radius: avatar / 2, backgroundColor: Colors.white10, child: Icon(Icons.person, color: Colors.white24, size: avatar * 0.5))
               : UserAvatar(user: u, radius: avatar / 2),
         ),
         Positioned(top: 0, width: w, height: frameH, child: IgnorePointer(child: Fig('kat_top$rank', fit: BoxFit.contain))),
-        if (row != null)
+        if (u != null)
           Positioned(
             top: (first ? 160 : 136) * k,
             width: bannerW - 8 * k,
             child: Column(children: [
-              Text((u?['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
+              Text((u['displayName'] ?? '').toString(), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13 * k)),
               SizedBox(height: 4 * k),
               FittedBox(
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  LevelPill(level: u?['coinLevel'] ?? 1, send: true, height: 14 * k),
+                  LevelPill(level: u['coinLevel'] ?? 1, send: true, height: 14 * k),
                   SizedBox(width: 3 * k),
-                  LevelPill(level: u?['giftLevel'] ?? 1, send: false, height: 14 * k),
+                  LevelPill(level: u['giftLevel'] ?? 1, send: false, height: 14 * k),
                 ]),
               ),
             ]),
@@ -254,12 +254,12 @@ class _ContributionsState extends State<_Contributions> {
           SizedBox(width: 12 * k),
           Expanded(
             child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              UserName(user: u),
-              SizedBox(height: 5 * k),
-              Row(children: [
-                LevelPill(level: u?['coinLevel'] ?? 1, send: true, height: 14 * k),
+              u == null ? Text('—', style: TextStyle(color: Colors.white38, fontSize: 14 * k)) : UserName(user: u),
+              if (u != null) SizedBox(height: 5 * k),
+              if (u != null) Row(children: [
+                LevelPill(level: u['coinLevel'] ?? 1, send: true, height: 14 * k),
                 SizedBox(width: 4 * k),
-                LevelPill(level: u?['giftLevel'] ?? 1, send: false, height: 14 * k),
+                LevelPill(level: u['giftLevel'] ?? 1, send: false, height: 14 * k),
               ]),
             ]),
           ),
@@ -284,8 +284,6 @@ class _ContributionsState extends State<_Contributions> {
         Padding(padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.redAccent)))
       else if (rows == null)
         const Expanded(child: Center(child: CircularProgressIndicator()))
-      else if (rows.isEmpty)
-        Expanded(child: Center(child: Text(_total ? 'Henüz katkı yok.' : 'Son 24 saatte katkı yok.', style: const TextStyle(color: Colors.white60))))
       else
         Expanded(
           child: RefreshIndicator(

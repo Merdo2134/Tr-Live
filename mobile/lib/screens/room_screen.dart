@@ -180,6 +180,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   void dispose() {
     CallGuard.instance.inCall.removeListener(_onPhoneCall);
     CallGuard.instance.stop();
+    EffectPrefs.roomMuted.value = false;
     _beat?.cancel();
     _lkTick?.cancel();
     for (final t in _micEmojiTimers.values) {
@@ -251,7 +252,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       _loadExtras();
       MusicService.instance.bind(widget.roomId);
       _startHeartbeat();
-      BackgroundService.instance.ensurePermissions((msg, action) => confirm(context, msg, action: action));
+      BackgroundService.instance
+          .ensurePermissions((msg, action) => confirm(context, msg, action: action))
+          .catchError((_) {})
+          .whenComplete(() => CallGuard.instance.requestPhonePermission());
     } catch (e) {
       if (!mounted) return;
       toast(context, errorText(e), error: true);
@@ -481,10 +485,33 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   bool _micInviteOpen = false;
   List<int> get _lockedSeats => ((_room?['lockedSeats'] as List?) ?? const []).map((x) => (x as num).toInt()).toList();
   bool get _canSeatManage => ['owner', 'cohost', 'moderator'].contains(_myRole);
+  /// Yetkilinin susturduğu koltuklar: oturan kişi koltukta kalır ama mikrofonu açılmaz; koltukta kırmızı işaret görünür.
+  List<int> get _mutedSeats => ((_room?['mutedSeats'] as List?) ?? const []).map((x) => (x as num).toInt()).toList();
+  bool get _seatMuted {
+    final i = _mySeatIndex;
+    return i != null && _mutedSeats.contains(i);
+  }
 
   Future<void> _lockSeat(int index, bool locked) async {
     await guard(context, () => Api.post('/api/rooms/${widget.roomId}/seats/$index/lock', {'locked': locked}));
   }
+
+  Future<void> _muteSeat(int index, bool muted) async {
+    final r = await guard(context, () => Api.post('/api/rooms/${widget.roomId}/seats/$index/mute', {'muted': muted}));
+    if (r != null && mounted) toast(context, muted ? 'Koltuk susturuldu.' : 'Koltuğun sesi açıldı.');
+  }
+
+  /// Koltuktaki "susturuldu" işareti (pembe daire, üstü çizili mikrofon).
+  Widget _mutedBadge(double size) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)]),
+        padding: EdgeInsets.all(size * 0.08),
+        child: Container(
+          decoration: const BoxDecoration(color: Color(0xFFF2457A), shape: BoxShape.circle),
+          child: Icon(Icons.mic_off, color: Colors.white, size: size * 0.58),
+        ),
+      );
 
   // ---------- Gerçek zamanlı olaylar ----------
   void _onEvent(Map<String, dynamic> e) {
@@ -625,6 +652,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         break;
       case 'room_seats_locked':
         setState(() => _room = {...?_room, 'lockedSeats': e['lockedSeats']});
+      case 'room_seats_muted':
+        final wasMuted = _seatMuted;
+        setState(() => _room = {...?_room, 'mutedSeats': e['mutedSeats']});
+        if (_seatMuted != wasMuted) {
+          _syncPublish();
+          toast(context, _seatMuted ? 'Mikrofonun yetkili tarafından kapatıldı.' : 'Mikrofonunun sesi açıldı.');
+        }
         break;
       case 'room_role_changed':
         setState(() {
@@ -691,13 +725,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   }
 
   void _applySeat(String userId, int? seat, bool mic) {
+    final wasMuted = _seatMuted;
     final i = _members.indexWhere((m) => m['userId'] == userId);
     if (i >= 0) _members[i] = {..._members[i], 'seatIndex': seat, 'microphone': mic};
     if (userId == Session.id) {
       final changed = _me['microphone'] != mic;
       _me = {..._me, 'seatIndex': seat, 'microphone': mic};
       BackgroundService.instance.micChanged(mic);
-      if (changed) _syncPublish();
+      if (changed || _seatMuted != wasMuted) _syncPublish();
     }
   }
 
@@ -829,7 +864,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (room == null) return;
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
-        await room.localParticipant?.setMicrophoneEnabled(_onSeat && _micOn && !CallGuard.instance.inCall.value);
+        await room.localParticipant?.setMicrophoneEnabled(_onSeat && _micOn && !_seatMuted && !CallGuard.instance.inCall.value);
         if (_isVideo) await room.localParticipant?.setCameraEnabled(_onSeat && _camOn);
         BackgroundService.instance.micChanged(_onSeat); // izin verildikten sonra servis "mikrofon" türüne geçer
         return;
@@ -1913,10 +1948,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           ),
           const Divider(height: 1),
           ListTile(
-            leading: Icon(_micOn ? Icons.mic_off : Icons.mic),
-            title: Text(_micOn ? 'Koltuğu sessize al' : 'Sesi aç'),
+            leading: Icon(_micOn && !_seatMuted ? Icons.mic_off : Icons.mic),
+            title: Text(_seatMuted ? 'Koltuğun susturuldu' : (_micOn ? 'Koltuğu sessize al' : 'Sesi aç')),
             onTap: () {
               Navigator.pop(c);
+              if (_seatMuted) {
+                toast(context, 'Koltuğun yetkili tarafından susturuldu; mikrofonu açamazsın.', error: true);
+                return;
+              }
               setState(() => _micOn = !_micOn);
               _syncPublish();
             },
@@ -2123,7 +2162,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                                 }),
                               if (canMod)
                                 seat != null
-                                    ? action(Icons.mic_off, 'Mic Kapat', () { close(); _moderate(userId, 'mic-off'); }, color: Colors.white70)
+                                    ? (_mutedSeats.contains(seat)
+                                        ? action(Icons.mic, 'Sesi Aç', () { close(); _muteSeat(seat, false); })
+                                        : action(Icons.mic_off, 'Sustur', () { close(); _muteSeat(seat, true); }, color: Colors.white70))
                                     : action(Icons.mic, 'Mic Aç', () { close(); _moderate(userId, 'mic-invite', body: {}); }),
                               if (canMod) action(Icons.comments_disabled, 'Sohbet', () { close(); _muteChoice(userId); }),
                               if (canMod && seat != null) action(Icons.event_seat, 'Koltuk', () { close(); _moderate(userId, 'mic-off'); _lockSeat(seat, true); }),
@@ -2278,14 +2319,23 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   // Bir koltuğun avatar alanı (slot) boyutu satıra göre değişir: üst (oda sahibi) satırı daha büyüktür.
   double _cellH(double slot) => slot + 2 + _seatNameH + (_scoreOn ? _seatScoreH + 2 : 0);
 
-  Widget _seatFrame({required double slotSize, required Widget slot, required Widget name, Widget? score, VoidCallback? onTap}) {
+  Widget _seatFrame({required double slotSize, required Widget slot, required Widget name, Widget? score, VoidCallback? onTap, bool muted = false}) {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: onTap,
       child: SizedBox(
         height: _cellH(slotSize),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          SizedBox(width: slotSize, height: slotSize, child: slot),
+          SizedBox(
+            width: slotSize,
+            height: slotSize,
+            child: muted
+                ? Stack(clipBehavior: Clip.none, children: [
+                    Positioned.fill(child: slot),
+                    Positioned(right: slotSize * 0.04, bottom: slotSize * 0.04, child: IgnorePointer(child: _mutedBadge(slotSize * 0.36))),
+                  ])
+                : slot,
+          ),
           const SizedBox(height: 2),
           SizedBox(height: _seatNameH, child: Center(child: name)),
           if (_scoreOn) ...[const SizedBox(height: 2), SizedBox(height: _seatScoreH, child: Center(child: score ?? const SizedBox.shrink()))],
@@ -2305,6 +2355,11 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         builder: (c) => SafeArea(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             ListTile(leading: const Icon(Icons.mic), title: const Text('Bu koltuğa otur'), onTap: () { Navigator.pop(c); _takeMic(index); }),
+            ListTile(
+              leading: Icon(_mutedSeats.contains(index) ? Icons.mic : Icons.mic_off),
+              title: Text(_mutedSeats.contains(index) ? 'Koltuğun sesini aç' : 'Koltuğu sustur'),
+              onTap: () { Navigator.pop(c); _muteSeat(index, !_mutedSeats.contains(index)); },
+            ),
             ListTile(
               leading: Icon(locked ? Icons.lock_open : Icons.lock),
               title: Text(locked ? 'Koltuğun kilidini aç' : 'Koltuğu kilitle'),
@@ -2327,6 +2382,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       final locked = _lockedSeats.contains(index);
       return _seatFrame(
         slotSize: slotSize,
+        muted: _mutedSeats.contains(index),
         onTap: () => _emptySeatTap(index, reserved, locked),
         slot: Center(
           child: Container(
@@ -2349,6 +2405,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final nameColor = parseColor(user?['nameColor'] as String?);
     return _seatFrame(
       slotSize: slotSize,
+      muted: _mutedSeats.contains(index),
       onTap: () => isMe ? _selfSeatSheet(m, index) : _memberSheet(m),
       slot: KeyedSubtree(
         key: _seatKeys.putIfAbsent(userId, () => GlobalKey()),
@@ -2532,11 +2589,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         onTap: () => _emptySeatTap(index, reserved, locked),
         child: Container(
           decoration: BoxDecoration(color: index == 0 ? kGridHostFill : kGridEmptyFill, border: border, borderRadius: radius),
-          child: Icon(
-            reserved ? Icons.videocam_off_outlined : (locked ? Icons.lock : kEmptySeatIcon),
-            size: side * 0.32,
-            color: locked ? Colors.orangeAccent : Colors.white.withValues(alpha: 0.8),
-          ),
+          child: Stack(alignment: Alignment.center, children: [
+            Icon(
+              reserved ? Icons.videocam_off_outlined : (locked ? Icons.lock : kEmptySeatIcon),
+              size: side * 0.32,
+              color: locked ? Colors.orangeAccent : Colors.white.withValues(alpha: 0.8),
+            ),
+            if (_mutedSeats.contains(index)) Positioned(top: 4, right: 4, child: _mutedBadge(side * 0.2)),
+          ]),
         ),
       );
     }
@@ -2559,6 +2619,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             key: _seatKeys.putIfAbsent(userId, () => GlobalKey()),
             child: video ?? Center(child: UserAvatar(user: user, radius: side * 0.26)),
           ),
+          if (_mutedSeats.contains(index)) Positioned(top: 4, right: 4, child: IgnorePointer(child: _mutedBadge(side * 0.2))),
           // Konuşma göstergesi: hücrenin kenarında yeşil çerçeve (düzeni değiştirmez).
           IgnorePointer(
             child: AnimatedContainer(
@@ -3122,6 +3183,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   // ---------- Alt satır: 6 yuvarlak düğme (Figma) ----------
   void _toggleRoomSound() {
     setState(() => _roomMuted = !_roomMuted);
+    // Oda sesi kapalıyken oda müziği ve hediye / araç sesleri de susar.
+    EffectPrefs.roomMuted.value = _roomMuted;
     _applyRoomSound();
     toast(context, _roomMuted ? 'Oda sesi kapatıldı (yalnızca sizde).' : 'Oda sesi açıldı.');
   }
@@ -3310,10 +3373,14 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           at(0.5 - step * 3, circle(Icons.chat_bubble_outline, 'Sohbet', _openInput)),
           at(0.5 - step * 2, GestureDetector(
             onLongPress: _leaveMic,
-            child: circle(_micOn ? Icons.mic : Icons.mic_off, 'Mikrofon (uzun bas: mikrofondan in)', () {
+            child: circle(_micOn && !_seatMuted ? Icons.mic : Icons.mic_off, 'Mikrofon (uzun bas: mikrofondan in)', () {
+              if (_seatMuted) {
+                toast(context, 'Koltuğun yetkili tarafından susturuldu; mikrofonu açamazsın.', error: true);
+                return;
+              }
               setState(() => _micOn = !_micOn);
               _syncPublish();
-            }, color: _micOn ? Colors.white : Colors.redAccent),
+            }, color: _micOn && !_seatMuted ? Colors.white : Colors.redAccent),
           )),
           at(0.5 - step, circle(Icons.sentiment_satisfied_alt, 'Emoji', _micEmojiSheet)),
         ];

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'api.dart';
 import 'call_guard.dart';
+import 'effect_prefs.dart';
 
 /// Odadaki ortak müziği her cihazda yerel olarak, sunucu konumuna senkron çalar.
 /// Sunucu "positionMs" (alındığı andaki konum) gönderir; şimdiki konum = positionMs + (şimdi - alındığıAn).
@@ -26,7 +27,7 @@ class MusicService {
   bool _callHooked = false;
 
   /// Çalınacak ses düzeyi: kullanıcı kıstıysa ya da telefon araması sürüyorsa 0.
-  double get _vol => muted.value || CallGuard.instance.inCall.value ? 0 : volume.value;
+  double get _vol => muted.value || EffectPrefs.roomMuted.value || CallGuard.instance.inCall.value ? 0 : volume.value;
 
   /// Panelde ilerleme çubuğu için şimdiki konum (ms).
   int currentPositionMs() {
@@ -44,6 +45,7 @@ class MusicService {
     if (!_callHooked) {
       _callHooked = true;
       CallGuard.instance.inCall.addListener(() => _player?.setVolume(_vol).catchError((_) {}));
+      EffectPrefs.roomMuted.addListener(() => _player?.setVolume(_vol).catchError((_) {}));
     }
     await refresh();
     _resync?.cancel();

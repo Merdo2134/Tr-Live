@@ -157,7 +157,7 @@ class _GuardiansScreenState extends State<GuardiansScreen> {
                         ]),
                 ),
               const SizedBox(height: 26),
-              _RankingBoard(title: 'Koruyucu Sıralaması', list: list, onTap: (u) {
+              _RankingBoard(title: 'Koruyucu Sıralaması', list: padRanking(list, scoreKey: 'points'), onTap: (u) {
                 final id = u?['id']?.toString();
                 if (id != null && u?['isHidden'] != true) Navigator.push(context, MaterialPageRoute(builder: (_) => widget.profileBuilder(id)));
               }),
