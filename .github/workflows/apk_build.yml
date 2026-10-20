@@ -167,7 +167,7 @@ jobs:
           s = mf.read_text()
           perms = ["INTERNET", "RECORD_AUDIO", "CAMERA", "MODIFY_AUDIO_SETTINGS", "ACCESS_NETWORK_STATE", "BLUETOOTH_CONNECT",
                    "WAKE_LOCK", "POST_NOTIFICATIONS", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-                   "FOREGROUND_SERVICE_SPECIAL_USE", "SYSTEM_ALERT_WINDOW", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"]
+                   "FOREGROUND_SERVICE_SPECIAL_USE", "SYSTEM_ALERT_WINDOW", "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", "READ_PHONE_STATE"]
           add = "".join(f'    <uses-permission android:name="android.permission.{p}"/>\n' for p in perms if f'android.permission.{p}"' not in s)
           if add:
               s = s.replace("<application", add + "    <application", 1)
@@ -197,8 +197,31 @@ jobs:
           if os.environ.get("INPUT_ALLOW_HTTP", "").lower() == "true" and "usesCleartextTraffic" not in s:
               s = s.replace("<application", '<application android:usesCleartextTraffic="true"', 1)
               print("http (cleartext) izni eklendi — yalnızca test için")
+          # Uygulama yalnızca dikey (ekran dönmesin).
+          if 'android:screenOrientation' not in s:
+              s = re.sub(r'(<activity\s[^>]*android:name="\.MainActivity")', r'\1 android:screenOrientation="portrait"', s, count=1)
+              print("Dikey ekran kilidi eklendi")
           mf.write_text(s)
           print("Manifest izinleri tamam")
+
+          # 3) Ana ekran (MainActivity): ekran açık kalır, telefon araması algılanır (mobile/native/MainActivity.kt).
+          native = pathlib.Path("native/MainActivity.kt")
+          if native.exists():
+              found = list(pathlib.Path("android/app/src/main").rglob("MainActivity.kt")) + list(pathlib.Path("android/app/src/main").rglob("MainActivity.java"))
+              if not found:
+                  sys.exit("HATA: MainActivity bulunamadı")
+              old = found[0]
+              m = re.search(r"^package\s+([\w.]+)", old.read_text(), re.M)
+              pkg = m.group(1) if m else "com.trlive.tr_live"
+              body = re.sub(r"^package\s+[\w.]+", "package " + pkg, native.read_text(), count=1, flags=re.M)
+              target = old.with_suffix(".kt")
+              if old.suffix == ".java":
+                  old.unlink()
+                  if "/java/" in str(target):
+                      target = pathlib.Path(str(target).replace("/java/", "/kotlin/"))
+                      target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(body)
+              print(f"MainActivity yazıldı: {target} (paket {pkg})")
           PY
 
       - name: Sunucu adresini doğrula
