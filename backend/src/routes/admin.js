@@ -5,6 +5,7 @@ import { requireAuth, requireStaff, requireSuperAdmin, hashPassword, passwordRul
 import { USERNAME_RE, normalizePhone } from './auth.js';
 import { supportMayCall, banEnd, mayActOnUser } from '../staff_logic.js';
 import { fail, uuid, bigAmount, positiveInt, text, oneOf, httpsUrl, assetUrl } from '../http.js';
+import { prepareMp4 } from '../services/media_tools.js';
 import { validateAgencyConfig } from '../agency_config.js';
 import { loadConfig, configJson, closePeriod, hostStatementJson, agencyStatementJson } from '../services/payouts.js';
 import { parsePeriodKey, previousPeriod } from '../settlement.js';
@@ -480,27 +481,96 @@ router.post('/media', requireSuperAdmin, express.raw({ type: () => true, limit: 
   const buf = req.body;
   if (!Buffer.isBuffer(buf) || !buf.length) throw fail('Dosya gönderilmedi.');
   const d = detectMedia(buf);
-  const alpha = req.query.alpha === 'right' ? 'right' : 'left';
-  let data = buf; let note = null;
+  // alpha: 'auto' (varsayılan) sunucu anlar; 'left' / 'right' elle seçim.
+  const alpha = ['left', 'right'].includes(req.query.alpha) ? req.query.alpha : 'auto';
+  let data = buf; let note = null; let iconPng = null;
   if (d.kind === 'mp4') {
-    const r = ensureVapc(buf, alpha);
-    data = r.buf;
-    note = r.injected ? 'Şeffaflık ayarı eklendi.' : 'Dosyada şeffaflık ayarı zaten vardı.';
+    let prepared = null;
+    try {
+      prepared = await prepareMp4(buf, alpha, { frame: req.query.purpose === 'frame' });
+    } catch (e) {
+      console.error('Video hazırlanamadı:', e.message);
+    }
+    if (prepared) {
+      data = ensureVapc(prepared.buf, prepared.alpha).buf;
+      iconPng = prepared.icon;
+      note = prepared.converted
+        ? (prepared.scene ? 'Arka planlı video tam ekran (kenarları yumuşak) şeffaf mp4\'e çevrildi.' : 'Siyah arka plan şeffaf yapıldı.')
+        : `Şeffaf mp4 (maske ${prepared.alpha === 'right' ? 'sağda' : 'solda'}).`;
+    } else {
+      const r = ensureVapc(buf, alpha === 'right' ? 'right' : 'left');
+      data = r.buf;
+      note = r.injected ? 'Şeffaflık ayarı eklendi.' : 'Dosyada şeffaflık ayarı zaten vardı.';
+    }
   }
-  const ins = await query(
+  const save = (kind, mime, ext, bytes, meta) => query(
     `INSERT INTO media_files(kind, mime, ext, size_bytes, data, meta, created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-    [d.kind, mimeFor(d.ext), d.ext, data.length, data, JSON.stringify(d.meta ?? {}), req.user.id],
+    [kind, mime, ext, bytes.length, bytes, JSON.stringify(meta ?? {}), req.user.id],
   );
+  const ins = await save(d.kind, mimeFor(d.ext), d.ext, data, d.meta);
+  const url = `/media/${ins.rows[0].id}.${d.ext}`;
+  // Küçük resim (hediye ikonu): videodan otomatik; görsel dosyalarda dosyanın kendisi.
+  let iconUrl = null;
+  if (iconPng) iconUrl = `/media/${(await save('png', 'image/png', 'png', iconPng, { purpose: 'auto_icon' })).rows[0].id}.png`;
+  else if (['png', 'jpg', 'webp', 'gif'].includes(d.kind)) iconUrl = url;
   const format = { mp4: 'mp4', svga: 'svga', json: 'lottie', webp: 'webp', gif: 'gif', png: 'png', jpg: 'png' }[d.kind];
-  res.status(201).json({ url: `/media/${ins.rows[0].id}.${d.ext}`, kind: d.kind, format, size: data.length, note });
+  res.status(201).json({ url, kind: d.kind, format, size: data.length, note, iconUrl });
+});
+// İkon verilmediyse animasyondan otomatik: görsel dosyada kendisi, yüklenmiş mp4'te ortalardaki kare.
+async function autoIcon(animationUrl, userId) {
+  if (!animationUrl) return null;
+  if (/\.(png|jpe?g|webp|gif)(\?|$)/i.test(animationUrl)) return animationUrl;
+  const m = /^\/media\/([0-9a-f-]{36})\.mp4$/i.exec(animationUrl);
+  if (!m) return null;
+  try {
+    const row = (await query('SELECT data FROM media_files WHERE id = $1', [m[1]])).rows[0];
+    if (!row) return null;
+    const p = await prepareMp4(row.data, 'auto', { iconOnly: true });
+    if (!p?.icon) return null;
+    const ins = await query(
+      `INSERT INTO media_files(kind, mime, ext, size_bytes, data, meta, created_by) VALUES('png','image/png','png',$1,$2,$3,$4) RETURNING id`,
+      [p.icon.length, p.icon, JSON.stringify({ purpose: 'auto_icon' }), userId],
+    );
+    return `/media/${ins.rows[0].id}.png`;
+  } catch (e) {
+    console.error('Otomatik ikon yapılamadı:', e.message);
+    return null;
+  }
+}
+// Küçük resmi olmayan hediyelere animasyondan otomatik küçük resim yapar.
+// Her çağrıda en fazla 3 hediye (istek kısa sürsün); uygulama "kalan" bitene kadar tekrar çağırır.
+let filling = false;
+router.post('/gifts/fill-icons', requireSuperAdmin, async (req, res) => {
+  if (filling) throw fail('Küçük resimler zaten hazırlanıyor, biraz bekleyin.', 409);
+  filling = true;
+  try {
+  const rows = (await query(`SELECT id, animation_url FROM gifts WHERE (icon_url IS NULL OR icon_url = '') AND animation_url IS NOT NULL ORDER BY id LIMIT 3 OFFSET $1`,
+    [Math.min(10000, Math.max(0, Number(req.body?.skip) | 0))])).rows;
+  let done = 0;
+  for (const g of rows) {
+    const icon = await autoIcon(g.animation_url, req.user.id);
+    if (icon) {
+      await query(`UPDATE gifts SET icon_url = $2 WHERE id = $1`, [g.id, icon]);
+      done++;
+    }
+  }
+  const left = (await query(`SELECT COUNT(*)::int AS n FROM gifts WHERE (icon_url IS NULL OR icon_url = '') AND animation_url IS NOT NULL`)).rows[0].n;
+  res.json({ ok: true, total: rows.length, done, failed: rows.length - done, left });
+  } finally {
+    filling = false;
+  }
 });
 router.post('/gifts', requireSuperAdmin, async (req, res) => {
+  // Önce doğrulama (hatalıysa boşuna küçük resim üretilmesin).
+  const name = text(req.body?.name, 'Ad', { min: 2, max: 80, required: true });
+  const price = bigAmount(req.body?.coinPrice, 'Fiyat').toString();
+  const animUrl = assetUrl(req.body?.animationUrl, 'Animasyon adresi');
+  const format = oneOf(req.body?.animationFormat ?? guessFormat(req.body?.animationUrl), ['lottie', 'svga', 'mp4', 'webp', 'gif', 'png'], 'Animasyon biçimi');
+  const category = oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip', 'lucky', 'cp'], 'Hediye sekmesi');
+  const iconUrl = assetUrl(req.body?.iconUrl, 'İkon adresi') ?? await autoIcon(animUrl, req.user.id);
   const r = await query(
     `INSERT INTO gifts(name, coin_price, icon_url, animation_url, animation_format, has_alpha, category) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-    [text(req.body?.name, 'Ad', { min: 2, max: 80, required: true }), bigAmount(req.body?.coinPrice, 'Fiyat').toString(),
-      assetUrl(req.body?.iconUrl, 'İkon adresi'), assetUrl(req.body?.animationUrl, 'Animasyon adresi'),
-      oneOf(req.body?.animationFormat ?? guessFormat(req.body?.animationUrl), ['lottie', 'svga', 'mp4', 'webp', 'gif', 'png'], 'Animasyon biçimi'), req.body?.hasAlpha !== false,
-      oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip', 'lucky', 'cp'], 'Hediye sekmesi')],
+    [name, price, iconUrl, animUrl, format, req.body?.hasAlpha !== false, category],
   );
   res.status(201).json({ id: r.rows[0].id });
 });

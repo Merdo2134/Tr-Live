@@ -16,8 +16,10 @@ import 'admin_payouts.dart';
 import 'support_screens.dart';
 
 /// Telefondan dosya seçip sunucuya yükler. Sunucu türü dosyanın içinden anlar (svga, mp4, Lottie, webp, gif, png).
-/// [alpha]: yan yana şeffaf mp4'te şeffaflık maskesinin yeri ('left' / 'right').
-Future<Map<String, dynamic>?> pickAndUploadMedia(BuildContext context, {String alpha = 'left'}) async {
+/// [alpha]: yan yana şeffaf mp4'te şeffaflık maskesinin yeri ('auto' / 'left' / 'right'). 'auto': sunucu anlar;
+/// düz (siyah arka planlı) videoyu da kendisi şeffaf yapar ve küçük resmi (iconUrl) çıkarır.
+/// [frame] true: çerçeve (kare, 360x360); false: hediye / efekt (540x960).
+Future<Map<String, dynamic>?> pickAndUploadMedia(BuildContext context, {String alpha = 'auto', bool frame = false}) async {
   final r = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
   if (r == null || r.files.isEmpty || !context.mounted) return null;
   final Uint8List? bytes = r.files.first.bytes;
@@ -29,8 +31,8 @@ Future<Map<String, dynamic>?> pickAndUploadMedia(BuildContext context, {String a
     toast(context, 'Dosya 40 MB sınırını aşıyor.', error: true);
     return null;
   }
-  toast(context, 'Yükleniyor (${(bytes.length / 1048576).toStringAsFixed(1)} MB)…');
-  return guard(context, () => Api.postBytes('/api/admin/media', bytes, 'application/octet-stream', query: {'alpha': alpha}));
+  toast(context, 'Yükleniyor ve hazırlanıyor (${(bytes.length / 1048576).toStringAsFixed(1)} MB)… Video ise 1 dakika kadar sürebilir.');
+  return guard(context, () => Api.postBytes('/api/admin/media', bytes, 'application/octet-stream', query: {'alpha': alpha, if (frame) 'purpose': 'frame'}));
 }
 
 
@@ -259,7 +261,31 @@ class _CatalogListPageState extends State<CatalogListPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Katalog önizleme')),
+      appBar: AppBar(title: const Text('Katalog önizleme'), actions: [
+        IconButton(
+          tooltip: 'Küçük resmi olmayan hediyelere otomatik küçük resim',
+          icon: const Icon(Icons.auto_fix_high),
+          onPressed: () async {
+            toast(context, 'Küçük resimler hazırlanıyor…');
+            var added = 0;
+            var skip = 0;
+            // Sunucu her seferde birkaç hediye işler; yapılamayanlar atlanır, kalan bitene kadar devam edilir.
+            for (var i = 0; i < 100; i++) {
+              final r = await guard(context, () => Api.post('/api/admin/gifts/fill-icons', {'skip': skip}));
+              if (r == null || !mounted) break;
+              added += (r['done'] as num?)?.toInt() ?? 0;
+              skip += (r['failed'] as num?)?.toInt() ?? 0;
+              final total = (r['total'] as num?)?.toInt() ?? 0;
+              final left = (r['left'] as num?)?.toInt() ?? 0;
+              if (total == 0 || left <= skip) break;
+              toast(context, '$added hediyeye küçük resim eklendi, devam ediyor…');
+            }
+            if (!mounted) return;
+            toast(context, '$added hediyeye küçük resim eklendi.');
+            _load();
+          },
+        ),
+      ]),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -784,7 +810,7 @@ class _CatalogTab extends StatelessWidget {
     final icon = TextEditingController();
     final anim = TextEditingController();
     var format = 'auto';
-    var alphaSide = 'left';
+    var alphaSide = 'auto';
     var category = 'popular';
     final ok = await showDialog<bool>(
       context: context,
@@ -803,7 +829,7 @@ class _CatalogTab extends StatelessWidget {
                   label: const Text('İkonu telefondan yükle'),
                   onPressed: () async {
                     final m = await pickAndUploadMedia(c);
-                    if (m != null) setS(() => icon.text = m['url'].toString());
+                    if (m != null && c.mounted) setS(() => icon.text = (m['iconUrl'] ?? m['url']).toString());
                   },
                 ),
               ),
@@ -832,10 +858,11 @@ class _CatalogTab extends StatelessWidget {
                 DropdownButton<String>(
                   value: alphaSide,
                   items: const [
+                    DropdownMenuItem(value: 'auto', child: Text('Otomatik')),
                     DropdownMenuItem(value: 'left', child: Text('Sol yarıda (siyah-beyaz)')),
                     DropdownMenuItem(value: 'right', child: Text('Sağ yarıda (siyah-beyaz)')),
                   ],
-                  onChanged: (v) => setS(() => alphaSide = v ?? 'left'),
+                  onChanged: (v) => setS(() => alphaSide = v ?? 'auto'),
                 ),
               ]),
               Align(
@@ -851,13 +878,18 @@ class _CatalogTab extends StatelessWidget {
                       format = 'auto';
                     });
                     if (c.mounted) toast(c, 'Yüklendi: ${m['kind']} (${(((m['size'] as num?) ?? 0) / 1048576).toStringAsFixed(1)} MB). ${m['note'] ?? ''}');
-                    if (icon.text.trim().isEmpty && c.mounted) {
+                    final serverIcon = m['iconUrl']?.toString();
+                    if (!c.mounted) return;
+                    if (icon.text.trim().isEmpty && serverIcon != null && serverIcon.isNotEmpty) {
+                      setS(() => icon.text = serverIcon);
+                      if (c.mounted) toast(c, 'Küçük resim otomatik oluşturuldu.');
+                    } else if (icon.text.trim().isEmpty && c.mounted) {
                       final u = await autoIconFromAnimation(c, anim.text);
                       if (u != null) {
                         setS(() => icon.text = u);
                         if (c.mounted) toast(c, 'İkon animasyonun ilk karesinden otomatik oluşturuldu.');
                       } else if (c.mounted) {
-                        toast(c, 'İlk kare otomatik alınamadı; ikonu elle yükleyebilirsin.', error: true);
+                        toast(c, 'Küçük resim şimdi alınamadı; boş bırakırsan sunucu kaydederken kendisi oluşturur.', error: true);
                       }
                     }
                   },
@@ -924,7 +956,7 @@ class _CatalogTab extends StatelessWidget {
     final days = TextEditingController(text: '14');
     var category = 'frame';
     var forSale = true;
-    var alphaSide = 'left';
+    var alphaSide = 'auto';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -957,8 +989,12 @@ class _CatalogTab extends StatelessWidget {
                 const Text('MP4 şeffaflık:  ', style: TextStyle(color: Colors.white70)),
                 DropdownButton<String>(
                   value: alphaSide,
-                  items: const [DropdownMenuItem(value: 'left', child: Text('Sol yarıda')), DropdownMenuItem(value: 'right', child: Text('Sağ yarıda'))],
-                  onChanged: (v) => setS(() => alphaSide = v ?? 'left'),
+                  items: const [
+                    DropdownMenuItem(value: 'auto', child: Text('Otomatik')),
+                    DropdownMenuItem(value: 'left', child: Text('Sol yarıda')),
+                    DropdownMenuItem(value: 'right', child: Text('Sağ yarıda')),
+                  ],
+                  onChanged: (v) => setS(() => alphaSide = v ?? 'auto'),
                 ),
               ]),
               Align(
@@ -967,7 +1003,7 @@ class _CatalogTab extends StatelessWidget {
                   icon: const Icon(Icons.upload_file),
                   label: const Text('Telefondan yükle'),
                   onPressed: () async {
-                    final m = await pickAndUploadMedia(c, alpha: alphaSide);
+                    final m = await pickAndUploadMedia(c, alpha: alphaSide, frame: category == 'frame');
                     if (m == null) return;
                     setS(() => url.text = m['url'].toString());
                   },
@@ -1002,7 +1038,7 @@ class _CatalogTab extends StatelessWidget {
   Future<void> _frameForm(BuildContext context) async {
     final name = TextEditingController();
     final url = TextEditingController();
-    var alphaSide = 'left';
+    var alphaSide = 'auto';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -1018,10 +1054,11 @@ class _CatalogTab extends StatelessWidget {
                 DropdownButton<String>(
                   value: alphaSide,
                   items: const [
+                    DropdownMenuItem(value: 'auto', child: Text('Otomatik')),
                     DropdownMenuItem(value: 'left', child: Text('Sol yarıda')),
                     DropdownMenuItem(value: 'right', child: Text('Sağ yarıda')),
                   ],
-                  onChanged: (v) => setS(() => alphaSide = v ?? 'left'),
+                  onChanged: (v) => setS(() => alphaSide = v ?? 'auto'),
                 ),
               ]),
               Align(
@@ -1030,9 +1067,10 @@ class _CatalogTab extends StatelessWidget {
                   icon: const Icon(Icons.upload_file),
                   label: const Text('Telefondan yükle (svga, mp4, webp, gif, json)'),
                   onPressed: () async {
-                    final m = await pickAndUploadMedia(c, alpha: alphaSide);
+                    final m = await pickAndUploadMedia(c, alpha: alphaSide, frame: true);
                     if (m == null) return;
                     setS(() => url.text = m['url'].toString());
+                    if (c.mounted && m['note'] != null) toast(c, m['note'].toString());
                   },
                 ),
               ),
@@ -1057,7 +1095,7 @@ class _CatalogTab extends StatelessWidget {
   Future<void> _bulk(BuildContext context, {required bool frames}) async {
     final price = TextEditingController(text: '100');
     var category = 'popular';
-    var alpha = 'left';
+    var alpha = 'auto';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
@@ -1085,10 +1123,11 @@ class _CatalogTab extends StatelessWidget {
                 value: alpha,
                 decoration: const InputDecoration(labelText: 'MP4 şeffaflık maskesi'),
                 items: const [
+                  DropdownMenuItem(value: 'auto', child: Text('Otomatik')),
                   DropdownMenuItem(value: 'left', child: Text('Sol yarıda')),
                   DropdownMenuItem(value: 'right', child: Text('Sağ yarıda')),
                 ],
-                onChanged: (v) => setS(() => alpha = v ?? 'left'),
+                onChanged: (v) => setS(() => alpha = v ?? 'auto'),
               ),
             ]),
           ),
@@ -1117,7 +1156,7 @@ class _CatalogTab extends StatelessWidget {
       if (context.mounted) toast(context, 'Yükleniyor ${done + log.length + 1}/${r.files.length}: ${f.name}');
       try {
         final bytes = await File(path).readAsBytes();
-        final m = await Api.postBytes('/api/admin/media', bytes, 'application/octet-stream', query: {'alpha': alpha});
+        final m = await Api.postBytes('/api/admin/media', bytes, 'application/octet-stream', query: {'alpha': alpha, if (frames) 'purpose': 'frame'});
         if (frames) {
           await Api.post('/api/admin/frames', {'name': name, 'imageUrl': m['url']});
         } else {
@@ -1125,6 +1164,7 @@ class _CatalogTab extends StatelessWidget {
             'name': name,
             'coinPrice': priceText,
             'animationUrl': m['url'],
+            if (m['iconUrl'] != null) 'iconUrl': m['iconUrl'],
             'animationFormat': m['format'],
             'category': category,
           });

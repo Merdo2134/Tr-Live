@@ -116,6 +116,18 @@ function shiftOffsets(buf, moovStart, moovSize, delta) {
   walk(moovStart + 8, moovStart + moovSize);
 }
 
+/** Dosyada VAP ayar kutusu (vapc) varsa içindeki bilgiyi döndürür (info: aFrame, rgbFrame, videoW, videoH ...), yoksa null. */
+export function vapcInfo(buf) {
+  try {
+    const box = boxes(buf, 0, buf.length).find((x) => x.type === 'vapc');
+    if (!box) return null;
+    const j = JSON.parse(buf.toString('utf8', box.start + box.hdr, box.start + box.size));
+    return j?.info ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** GIF her zaman, WebP yalnızca animasyon bayrağı (VP8X) varsa hareketli sayılır. */
 export function isAnimatedImage(buf) {
   if (buf.length > 6 && buf.toString('ascii', 0, 4) === 'GIF8') return 'gif';

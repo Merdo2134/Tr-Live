@@ -1,3 +1,21 @@
+## v2.60.0 — Yuvarlak uygulama simgesi, yeni giriş ekranı
+- Uygulama simgesi telefonda yuvarlak halkayı tamamen doldurur (siyah daire + logo, uyarlanabilir simge). Ana ekrandaki ad
+  "TR Live". Açılış ekranı siyah zemin + logo (beyaz parlama yok). apk_build.yml güncellendi (elle yüklenmeli).
+- Giriş ekranı logoya göre baştan: siyah-altın tema, logonun arkasında altın ışıma ve ağır süzülen altın tozları,
+  altın degrade "Telefon numarası ile" düğmesi, altın çerçeveli "Kullanıcı adı ile", altın vurgulu giriş/kayıt alanları,
+  yumuşak geçiş animasyonları.
+
+## v2.59.0 — Otomatik küçük resim ve şeffaf yapma (yükleme sırasında)
+- Yönetimde video yüklenince sunucu kendisi anlar:
+  - Yan yana şeffaf mp4 ise maskenin hangi yarıda olduğunu bulur ("Otomatik" seçeneği, varsayılan).
+  - Siyah arka planlı düz video ise siyahı şeffaf yapar; kendi arka planı olan sahneyi kenarları yumuşak tam ekran yapar.
+    Hediyeler 540x960, çerçeveler 360x360 ölçüye getirilir.
+  - Hediye küçük resmi (ikon) videonun ortalarındaki kareden otomatik çıkar; png/webp/gif'te dosyanın kendisi kullanılır.
+  - İkon boş bırakılırsa hediye kaydedilirken sunucu oluşturur (toplu yüklemede de).
+- Katalog önizleme: sağ üstteki sihirli değnek, küçük resmi olmayan eski hediyelere otomatik küçük resim ekler.
+- Zaten şeffaflık ayarı (vapc) olan dosyalara dokunulmaz. Videolar sırayla işlenir (sunucuyu yormasın).
+- Sunucuya ffmpeg eklendi (Docker). Büyük dosya yükleme süresi 6 dakikaya çıkarıldı.
+
 ## v2.58.1 — Derleme hatası düzeltmesi
 - APK derlemesi "defaultTargetPlatform tanımsız" hatasıyla duruyordu (arka plan servisi dosyasında eksik içe aktarma). Düzeltildi.
 

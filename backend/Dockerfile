@@ -1,6 +1,8 @@
 FROM node:20-alpine
 ENV NODE_ENV=production
 WORKDIR /app
+# Yüklenen videoları şeffaf yapmak ve hediye ikonunu otomatik çıkarmak için.
+RUN apk add --no-cache ffmpeg
 COPY package*.json ./
 RUN npm install --omit=dev && npm cache clean --force
 COPY src ./src

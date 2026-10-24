@@ -229,5 +229,5 @@ class Api {
 
   /// Ham dosya gönderimi (POST) — büyük dosyalar için uzun zaman aşımı.
   static Future<Map<String, dynamic>> postBytes(String path, Uint8List bytes, String contentType, {Map<String, String>? query}) =>
-      _send(() => http.post(_uri(path, query), headers: _headers(contentType), body: bytes), timeout: const Duration(minutes: 3), mutating: true);
+      _send(() => http.post(_uri(path, query), headers: _headers(contentType), body: bytes), timeout: const Duration(minutes: 6), mutating: true);
 }
