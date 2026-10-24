@@ -2,7 +2,13 @@ import { Router } from 'express';
 import { query } from '../database.js';
 import { optionalAuth } from '../auth.js';
 import { ipLimit } from '../firewall.js';
+import fs from 'node:fs';
 import { getConfig } from '../services/app_config.js';
+
+// Sunucunun sürümü (yönetim panelinde ve sorun ararken görünür).
+let SERVER_VERSION = null;
+try { SERVER_VERSION = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version ?? null; } catch { /* yok */ }
+export { SERVER_VERSION };
 
 export const router = Router();
 
@@ -11,7 +17,7 @@ router.get('/app/config', async (_req, res) => {
   const c = await getConfig();
   res.json({
     minAppVersion: c.minAppVersion, latestAppVersion: c.latestAppVersion, updateUrl: c.updateUrl || null, updateMessage: c.updateMessage,
-    roomNotice: c.roomNotice || '', flyTextCoins: c.flyTextCoins,
+    roomNotice: c.roomNotice || '', flyTextCoins: c.flyTextCoins, serverVersion: SERVER_VERSION,
   });
 });
 

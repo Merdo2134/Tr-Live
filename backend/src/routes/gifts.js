@@ -30,7 +30,7 @@ const DISTRIBUTIONS = ['single', 'equal', 'random', 'selected', 'each', 'all_mic
 const MAX_BULK_RECIPIENTS = 50;
 const giftJson = (g) => ({
   id: g.id, name: g.name, coinPrice: String(g.coin_price), iconUrl: g.icon_url, animationUrl: g.animation_url,
-  animationFormat: g.animation_format, hasAlpha: g.has_alpha, category: g.category ?? 'popular',
+  animationFormat: g.animation_format, hasAlpha: g.has_alpha, category: g.category ?? 'popular', playMode: g.play_mode ?? 'full',
 });
 
 router.get('/gifts', async (req, res) => {
@@ -256,7 +256,7 @@ router.post('/rooms/:roomId/gifts/send', userLimit('gift', 60, 60e3), idempotent
   const byId = new Map(userRows.map((u) => [u.id, u]));
   const giftInfo = {
     id: result.gift.id, name: result.gift.name, iconUrl: result.gift.icon_url, animationUrl: result.gift.animation_url,
-    animationFormat: result.gift.animation_format, category: result.gift.category,
+    animationFormat: result.gift.animation_format, category: result.gift.category, playMode: result.gift.play_mode ?? 'full',
   };
   const sender = publicUser(byId.get(senderId));
   const receivers = result.transactions.map((t) => ({

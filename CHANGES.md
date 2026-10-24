@@ -1,3 +1,16 @@
+## v2.63.0 — Hediyeler tek tek düzeltildi, paket yönetimden yüklenir, yumurta/domates mikte
+- Telefonda görülen bozuk hediyeler ilk paketin (v2.58) dosyalarıydı; sonraki paketler sunucuya ulaşmamıştı. Artık paketler
+  Yönetim → Katalog → "Hazır hediye paketi yükle / durum" ile telefondan doğrudan sunucuya yüklenir ve hemen uygulanır
+  (GitHub ve sunucu güncellemesi beklenmez). Aynı sayfada sunucu sürümü ve kurulu paket durumu görünür.
+- 107 hediyenin hepsi tek tek yeniden üretildi ve 6 karede, telefonun birleştirmesiyle oda zemini üzerinde kontrol edildi:
+  - renkler oynatıcının beklediği biçimde (yarı saydam yerlerde beyaz/pembe leke ve bloklanma yok),
+  - kaynak oranı korunur, küçük kaynaklar en çok 1,5 kat büyütülür (bulanık değil), kenarlarda kesik çizgi yok,
+  - sahnelerde (ülkeler, aslan, ejderha...) siyah gökyüzü ve boş şeritler şeffaf, sahnenin kendisi opak ve net,
+  - loş arka planlı videolarda (anka, gelinlik, motosiklet, sandık...) gri kutu kalmaz.
+- Yumurta ve domates kime atılırsa onun mikindeki dairenin içinde oynar (tam ekran değil). Yönetimde her hediyeye
+  "Nerede oynasın: Tam ekran / Alıcının mikindeki dairede" seçeneği eklendi.
+- Daha önce eklenen hediyelerin adı, fiyatı ve sekmesi korunur; yalnızca görüntüsü yenilenir. Yönetimden silinen eklenmez.
+
 ## v2.62.0 — Hediye görüntü bozulması giderildi
 - Asıl sebep: şeffaf video oynatıcısı renkleri "ön-çarpımlı" (renk x şeffaflık) bekliyor; hediyeler düz renkle
   üretilmişti. Bu yüzden yarı saydam yerler (sis, toz, gökyüzü, ışık) aşırı parlak, lekeli ve bloklu görünüyordu.

@@ -108,7 +108,8 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
       final g = mapOf(e['gift']);
       // Adet kadar tekrar (10'lu → 10 kez, en fazla 10).
       final times = ((e['quantity'] as num?)?.toInt() ?? 1).clamp(1, _maxRepeats);
-      if (EffectPrefs.giftAnim) {
+      // Mikte oynayan hediyeler (yumurta, domates) tam ekran oynamaz; oda ekranı alıcının dairesinde oynatır.
+      if (EffectPrefs.giftAnim && g?['playMode'] != 'seat') {
         Future.delayed(const Duration(milliseconds: 1300), () {
           if (mounted) _enqueueAnim(g, times: times);
         });

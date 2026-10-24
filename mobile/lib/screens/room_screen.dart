@@ -63,6 +63,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   final GlobalKey _viewersKey = GlobalKey();
   final List<_GiftFlightData> _flights = [];
   int _flightSeq = 0;
+  // Mikte oynayan hediyeler (yumurta, domates): alıcının koltuk dairesinin içinde oynar.
+  final List<_SeatFx> _seatFx = [];
   Map<String, dynamic>? _myFamily; // ailesi olanlarda üst köşede kısayol
   Map<String, dynamic> _me = {};
   List<Map<String, dynamic>> _members = [];
@@ -1101,18 +1103,49 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
     Offset? centerOf(String? userId) => userId == null ? null : centerOfBox(_seatKeys[userId]);
 
+    // Koltuktaki avatarın çapı (koltuk kutusu − kenar boşluğu).
+    double? seatDiameter(String? userId) {
+      final box = userId == null ? null : _seatKeys[userId]?.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached) return null;
+      return math.max(24.0, box.size.shortestSide - 8);
+    }
+
     final from = centerOf(mapOf(e['sender'])?['id']?.toString()) ?? Offset(stage.size.width / 2, stage.size.height * 0.86);
     final receivers = e['receivers'] is List ? (e['receivers'] as List) : const [];
     final fresh = <_GiftFlightData>[];
+    final seatFx = <_SeatFx>[];
+    final anim = Api.absoluteUrl(gift?['animationUrl'] as String?);
+    final animFormat = (gift?['animationFormat'] ?? '').toString();
+    final onSeat = gift?['playMode'] == 'seat' && EffectPrefs.giftAnim;
     for (final r in receivers.take(20)) {
       final rid = mapOf(r is Map ? r['user'] : null)?['id']?.toString();
       // Mikrofonda değilse (odadaysa) seyirci sayısı rozetine uçar.
       final to = centerOf(rid) ?? (rid == null ? null : centerOfBox(_viewersKey));
       final qty = _asInt(r is Map ? r['quantity'] : null) ?? _asInt(e['quantity']) ?? 1;
       if (to != null) fresh.add(_GiftFlightData(++_flightSeq, icon, from, to, qty < 1 ? 1 : qty));
+      // Yalnızca mikteki alıcının dairesinde oynar (seyirci rozetinde oynamaz).
+      final seatAt = centerOf(rid);
+      if (onSeat && anim != null && seatAt != null) {
+        seatFx.add(_SeatFx(++_flightSeq, anim, animFormat, seatAt, seatDiameter(rid) ?? 56, sound: seatFx.isEmpty));
+      }
     }
     if (fresh.isEmpty) return;
     setState(() => _flights.addAll(fresh));
+    if (seatFx.isNotEmpty) {
+      // İkon koltuğa varınca hediye o dairenin içinde oynar.
+      Future.delayed(const Duration(milliseconds: 1300), () {
+        if (!mounted || !EffectPrefs.giftAnim) return;
+        setState(() {
+          _seatFx.addAll(seatFx);
+          if (_seatFx.length > 20) _seatFx.removeRange(0, _seatFx.length - 20);
+        });
+        // Oynatıcı bitişi bildirmese de daire boş kalsın.
+        final ids = {for (final f in seatFx) f.id};
+        Future.delayed(const Duration(seconds: 15), () {
+          if (mounted) setState(() => _seatFx.removeWhere((x) => ids.contains(x.id)));
+        });
+      });
+    }
   }
 
   /// Mikrofon modu (Yoho): pencere açık kalır; seçim anında uygulanır, istek modu alttaki seçenekle açılıp kapanır.
@@ -3537,6 +3570,27 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                     ]),
                   ),
                 ),
+                for (final fx in _seatFx)
+                  Positioned(
+                    key: ValueKey('seatfx-${fx.id}'),
+                    left: fx.center.dx - fx.diameter / 2,
+                    top: fx.center.dy - fx.diameter / 2,
+                    width: fx.diameter,
+                    height: fx.diameter,
+                    child: IgnorePointer(
+                      child: ClipOval(
+                        child: AnimAsset(
+                          url: fx.url,
+                          format: fx.format,
+                          fit: BoxFit.cover,
+                          sound: fx.sound,
+                          onDone: () {
+                            if (mounted) setState(() => _seatFx.removeWhere((x) => x.id == fx.id));
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
                 for (final f in _flights)
                   _GiftFlight(key: ValueKey(f.id), data: f, onDone: () {
                     if (mounted) setState(() => _flights.removeWhere((x) => x.id == f.id));
@@ -3575,6 +3629,17 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
 /// Sunucudan sayı ya da yazı olarak gelebilen adet.
 int? _asInt(Object? v) => v is num ? v.toInt() : int.tryParse('${v ?? ''}');
+
+/// Mikte oynayan hediye (alıcının koltuk dairesinde).
+class _SeatFx {
+  final int id;
+  final String url;
+  final String format;
+  final Offset center;
+  final double diameter;
+  final bool sound;
+  _SeatFx(this.id, this.url, this.format, this.center, this.diameter, {this.sound = false});
+}
 
 class _GiftFlightData {
   final int id;

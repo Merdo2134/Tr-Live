@@ -6,6 +6,8 @@ import { USERNAME_RE, normalizePhone } from './auth.js';
 import { supportMayCall, banEnd, mayActOnUser } from '../staff_logic.js';
 import { fail, uuid, bigAmount, positiveInt, text, oneOf, httpsUrl, assetUrl } from '../http.js';
 import { prepareMp4 } from '../services/media_tools.js';
+import { applyPackZip, packStatus } from '../asset_packs.js';
+import { SERVER_VERSION } from './system.js';
 import { validateAgencyConfig } from '../agency_config.js';
 import { loadConfig, configJson, closePeriod, hostStatementJson, agencyStatementJson } from '../services/payouts.js';
 import { parsePeriodKey, previousPeriod } from '../settlement.js';
@@ -477,6 +479,30 @@ router.post('/store/samples', requireSuperAdmin, async (req, res) => {
   announceUserChange(req.user.id);
 });
 
+// Hazır hediye / çerçeve paketi (TR-Live-paket-N.zip): telefondan doğrudan yüklenir ve hemen uygulanır.
+let packBusy = false;
+router.post('/asset-pack', requireSuperAdmin, express.raw({ type: () => true, limit: MEDIA_MAX_BYTES }), async (req, res) => {
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || !buf.length) throw fail('Dosya gönderilmedi.');
+  if (packBusy) throw fail('Başka bir paket uygulanıyor, biraz sonra tekrar deneyin.', 409);
+  packBusy = true;
+  try {
+    let results;
+    try {
+      results = await applyPackZip(buf);
+    } catch (e) {
+      throw fail(`Paket okunamadı: ${e.message}`);
+    }
+    if (!results.length) throw fail('Bu zip içinde hediye / çerçeve dosyası yok (TR-Live-paket-N.zip olmalı).');
+    const count = (s) => results.filter((r) => r.status === s).length;
+    res.json({ ok: true, added: count('added'), updated: count('updated'), same: count('same'), deleted: count('deleted'), failed: count('error') + count('incomplete'), results });
+  } finally {
+    packBusy = false;
+  }
+});
+router.get('/asset-pack/status', requireSuperAdmin, async (_req, res) => {
+  res.json({ serverVersion: SERVER_VERSION, ...(await packStatus()) });
+});
 router.post('/media', requireSuperAdmin, express.raw({ type: () => true, limit: MEDIA_MAX_BYTES }), async (req, res) => {
   const buf = req.body;
   if (!Buffer.isBuffer(buf) || !buf.length) throw fail('Dosya gönderilmedi.');
@@ -567,10 +593,11 @@ router.post('/gifts', requireSuperAdmin, async (req, res) => {
   const animUrl = assetUrl(req.body?.animationUrl, 'Animasyon adresi');
   const format = oneOf(req.body?.animationFormat ?? guessFormat(req.body?.animationUrl), ['lottie', 'svga', 'mp4', 'webp', 'gif', 'png'], 'Animasyon biçimi');
   const category = oneOf(req.body?.category ?? 'popular', ['event', 'popular', 'private', 'vip', 'lucky', 'cp'], 'Hediye sekmesi');
+  const playMode = oneOf(req.body?.playMode ?? 'full', ['full', 'seat'], 'Oynatma yeri');
   const iconUrl = assetUrl(req.body?.iconUrl, 'İkon adresi') ?? await autoIcon(animUrl, req.user.id);
   const r = await query(
-    `INSERT INTO gifts(name, coin_price, icon_url, animation_url, animation_format, has_alpha, category) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-    [name, price, iconUrl, animUrl, format, req.body?.hasAlpha !== false, category],
+    `INSERT INTO gifts(name, coin_price, icon_url, animation_url, animation_format, has_alpha, category, play_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [name, price, iconUrl, animUrl, format, req.body?.hasAlpha !== false, category, playMode],
   );
   res.status(201).json({ id: r.rows[0].id });
 });
@@ -631,10 +658,10 @@ router.delete('/gifts/:id', requireSuperAdmin, async (req, res) => removeOrHide(
 router.delete('/store/items/:id', requireSuperAdmin, async (req, res) => removeOrHide(res, 'store_items', uuid(req.params.id, 'Kimlik'), 'Geçmişte alındığı için silinmedi, gizlendi.'));
 router.delete('/frames/:id', requireSuperAdmin, async (req, res) => removeOrHide(res, 'frames', uuid(req.params.id, 'Kimlik'), 'Kullanıcılarda olduğu için silinmedi, gizlendi.'));
 router.get('/catalog', requireSuperAdmin, async (_req, res) => {
-  const g = await query(`SELECT id, name, coin_price, icon_url, animation_url, animation_format, category, is_active FROM gifts ORDER BY is_active DESC, coin_price DESC, name`);
+  const g = await query(`SELECT id, name, coin_price, icon_url, animation_url, animation_format, category, play_mode, is_active FROM gifts ORDER BY is_active DESC, coin_price DESC, name`);
   const f = await query(`SELECT id, name, image_url, is_active FROM frames ORDER BY is_active DESC, name`);
   res.json({
-    gifts: g.rows.map((r) => ({ id: r.id, name: r.name, coinPrice: String(r.coin_price), iconUrl: r.icon_url, animationUrl: r.animation_url, animationFormat: r.animation_format, category: r.category, isActive: r.is_active })),
+    gifts: g.rows.map((r) => ({ id: r.id, name: r.name, coinPrice: String(r.coin_price), iconUrl: r.icon_url, animationUrl: r.animation_url, animationFormat: r.animation_format, category: r.category, playMode: r.play_mode ?? 'full', isActive: r.is_active })),
     frames: f.rows.map((r) => ({ id: r.id, name: r.name, imageUrl: r.image_url, isActive: r.is_active })),
   });
 });
@@ -656,9 +683,11 @@ router.post('/gifts/:id/edit', requireSuperAdmin, async (req, res) => {
   const name = b.name === undefined ? null : text(b.name, 'Ad', { min: 2, max: 80, required: true });
   const price = b.coinPrice === undefined ? null : bigAmount(b.coinPrice, 'Fiyat').toString();
   const category = b.category === undefined ? null : oneOf(b.category, GIFT_TABS, 'Hediye sekmesi');
+  const playMode = b.playMode === undefined ? null : oneOf(b.playMode, ['full', 'seat'], 'Oynatma yeri');
   const r = await query(
-    `UPDATE gifts SET name = COALESCE($2, name), coin_price = COALESCE($3::bigint, coin_price), category = COALESCE($4, category) WHERE id = $1 RETURNING id`,
-    [id, name, price, category],
+    `UPDATE gifts SET name = COALESCE($2, name), coin_price = COALESCE($3::bigint, coin_price), category = COALESCE($4, category),
+       play_mode = COALESCE($5, play_mode) WHERE id = $1 RETURNING id`,
+    [id, name, price, category, playMode],
   );
   if (!r.rowCount) throw fail('Hediye bulunamadı.', 404);
   res.json({ ok: true });

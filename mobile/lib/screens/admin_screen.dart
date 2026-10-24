@@ -79,12 +79,13 @@ Future<String?> autoIconFromAnimation(BuildContext context, String animUrl) asyn
 
 /// Hediye / çerçeve / mağaza ürünü düzenleme penceresi. [price] null ise fiyat alanı, [category] null ise sekme seçimi,
 /// [days] null ise süre alanı, [forSale] null ise "mağazada satılsın" anahtarı gösterilmez. Değişen alanları döndürür.
-Future<Map<String, dynamic>?> editItemDialog(BuildContext context, {required String title, required String name, String? price, String? category, int? days, bool? forSale}) async {
+Future<Map<String, dynamic>?> editItemDialog(BuildContext context, {required String title, required String name, String? price, String? category, int? days, bool? forSale, String? playMode}) async {
   final nameC = TextEditingController(text: name);
   final priceC = TextEditingController(text: price ?? '');
   final daysC = TextEditingController(text: days?.toString() ?? '');
   var cat = category;
   var sale = forSale;
+  var mode = playMode;
   final ok = await showDialog<bool>(
     context: context,
     builder: (c) => StatefulBuilder(
@@ -111,6 +112,16 @@ Future<Map<String, dynamic>?> editItemDialog(BuildContext context, {required Str
                 ],
                 onChanged: (v) => setS(() => cat = v ?? cat),
               ),
+            if (mode != null)
+              DropdownButtonFormField<String>(
+                value: mode,
+                decoration: const InputDecoration(labelText: 'Nerede oynasın'),
+                items: const [
+                  DropdownMenuItem(value: 'full', child: Text('Tam ekran')),
+                  DropdownMenuItem(value: 'seat', child: Text('Alıcının mikindeki dairede')),
+                ],
+                onChanged: (v) => setS(() => mode = v ?? mode),
+              ),
             if (sale != null)
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -133,6 +144,7 @@ Future<Map<String, dynamic>?> editItemDialog(BuildContext context, {required Str
     if (days != null) 'days': daysC.text.trim(),
     if (cat != null) 'category': cat,
     if (sale != null) 'forSale': sale,
+    if (mode != null) 'playMode': mode,
   };
   // Pencere kapanış animasyonu bitince bırakılır (kapanırken alanlar hâlâ çiziliyor olabilir).
   WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -218,10 +230,20 @@ class _CatalogListPageState extends State<CatalogListPage> {
   Future<void> _edit(Map<String, dynamic> it, {required bool frame}) async {
     final v = frame
         ? await editItemDialog(context, title: 'Çerçeveyi düzenle', name: it['name'].toString())
-        : await editItemDialog(context, title: 'Hediyeyi düzenle', name: it['name'].toString(), price: it['coinPrice']?.toString() ?? '', category: (it['category'] ?? 'popular').toString());
+        : await editItemDialog(context,
+            title: 'Hediyeyi düzenle',
+            name: it['name'].toString(),
+            price: it['coinPrice']?.toString() ?? '',
+            category: (it['category'] ?? 'popular').toString(),
+            playMode: it['playMode'] == 'seat' ? 'seat' : 'full');
     if (v == null || !mounted) return;
     final price = (v['price'] ?? '').toString();
-    final body = <String, dynamic>{'name': v['name'], if (!frame && price.isNotEmpty) 'coinPrice': price, if (!frame) 'category': v['category']};
+    final body = <String, dynamic>{
+      'name': v['name'],
+      if (!frame && price.isNotEmpty) 'coinPrice': price,
+      if (!frame) 'category': v['category'],
+      if (!frame) 'playMode': v['playMode'],
+    };
     final r = await guard(context, () => Api.post('/api/admin/${frame ? 'frames' : 'gifts'}/${it['id']}/edit', body));
     if (r != null && mounted) {
       toast(context, 'Kaydedildi.');
@@ -243,7 +265,7 @@ class _CatalogListPageState extends State<CatalogListPage> {
           Expanded(child: LayoutBuilder(builder: (c, box) => Center(child: mediaPreview((frame ? it['imageUrl'] : it['animationUrl'] ?? it['iconUrl']) as String?, frame: frame, size: box.biggest.shortestSide)))),
           const SizedBox(height: 6),
           Text(it['name'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
-          if (!frame) Text('${fmtNumber(it['coinPrice'])} coin · ${it['category']}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          if (!frame) Text('${fmtNumber(it['coinPrice'])} coin · ${it['category']}${it['playMode'] == 'seat' ? ' · mikte' : ''}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             Text(active ? 'Açık' : 'Kapalı', style: TextStyle(color: active ? Colors.greenAccent : Colors.white38)),
             Switch(value: active, onChanged: (v) => _toggle(kind, it, v)),
@@ -1203,6 +1225,12 @@ class _CatalogTab extends StatelessWidget {
         onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminWeeklyEventsPage())),
       ),
       const SizedBox(height: 8),
+      FilledButton.icon(
+        icon: const Icon(Icons.inventory_2_outlined),
+        label: const Text('Hazır hediye paketi yükle / durum'),
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AssetPackPage())),
+      ),
+      const SizedBox(height: 8),
       OutlinedButton.icon(
         icon: const Icon(Icons.grid_view),
         label: const Text('Katalog listesi (önizleme)'),
@@ -1616,6 +1644,159 @@ class _StoreItemsPageState extends State<StoreItemsPage> {
                   ),
                   ),
               ]),
+      ),
+    );
+  }
+}
+
+
+/// Hazır hediye / çerçeve paketi: TR-Live-paket-N.zip dosyaları telefondan doğrudan sunucuya yüklenir ve hemen uygulanır
+/// (GitHub gerekmez). Üstte sunucu sürümü ve kurulu paket durumu görünür.
+class AssetPackPage extends StatefulWidget {
+  const AssetPackPage({super.key});
+
+  @override
+  State<AssetPackPage> createState() => _AssetPackPageState();
+}
+
+class _AssetPackPageState extends State<AssetPackPage> {
+  Map<String, dynamic>? _status;
+  String? _error;
+  bool _busy = false;
+  final List<String> _log = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final r = await Api.get('/api/admin/asset-pack/status');
+      if (!mounted) return;
+      setState(() {
+        _status = r;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e is ApiException && e.statusCode == 404
+          ? 'Sunucu bu özelliği tanımıyor: sunucu henüz bu sürüme güncellenmemiş. Sunucu panelinde "Şimdi güncelle"ye basın; '
+              'olmazsa paneldeki "Kurulum kaydı" bölümünün ekran görüntüsünü gönderin.'
+          : errorText(e));
+    }
+  }
+
+  static const _statusText = {
+    'added': 'eklendi',
+    'updated': 'yenilendi',
+    'same': 'zaten güncel',
+    'deleted': 'silinmiş (eklenmedi)',
+    'error': 'HATA',
+    'incomplete': 'eksik dosya',
+    'unknown': 'tanınmadı',
+  };
+
+  Future<void> _upload() async {
+    final r = await FilePicker.platform.pickFiles(type: FileType.any, allowMultiple: true);
+    if (r == null || r.files.isEmpty || !mounted) return;
+    setState(() {
+      _busy = true;
+      _log.clear();
+    });
+    var i = 0;
+    for (final f in r.files) {
+      i++;
+      final path = f.path;
+      if (path == null) {
+        setState(() => _log.add('✗ ${f.name}: dosya okunamadı'));
+        continue;
+      }
+      setState(() => _log.add('… ${f.name} yükleniyor ($i/${r.files.length})'));
+      try {
+        final bytes = await File(path).readAsBytes();
+        if (bytes.length > 40 * 1024 * 1024) throw Exception('40 MB sınırını aşıyor');
+        final res = await Api.postBytes('/api/admin/asset-pack', bytes, 'application/zip');
+        if (!mounted) return;
+        final items = listOf(res['results']);
+        final bad = [for (final it in items) if (it['status'] == 'error' || it['status'] == 'incomplete' || it['status'] == 'unknown') '${it['name']}: ${_statusText[it['status']] ?? it['status']}'];
+        setState(() {
+          _log.removeLast();
+          _log.add('✓ ${f.name}: ${res['added']} eklendi, ${res['updated']} yenilendi, ${res['same']} zaten güncel'
+              '${(res['deleted'] ?? 0) != 0 ? ', ${res['deleted']} silinmiş' : ''}${(res['failed'] ?? 0) != 0 ? ', ${res['failed']} hatalı' : ''}');
+          for (final b in bad) {
+            _log.add('   ✗ $b');
+          }
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _log.removeLast();
+          _log.add('✗ ${f.name}: ${errorText(e)}');
+        });
+      }
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = _status;
+    final versions = mapOf(st?['versions']) ?? const {};
+    final missing = listOf(st?['missing']);
+    final deleted = listOf(st?['deleted']);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Hazır hediye paketi')),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(padding: const EdgeInsets.all(16), children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: _error != null
+                  ? Text(_error!, style: const TextStyle(color: Colors.redAccent))
+                  : st == null
+                      ? const Center(child: CircularProgressIndicator())
+                      : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('Sunucu sürümü: ${st['serverVersion'] ?? '?'}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 6),
+                          Text('Kurulu: ${st['installed']} / ${(st['gifts'] as num? ?? 0) + (st['frames'] as num? ?? 0)} (hediye ${st['gifts']}, çerçeve ${st['frames']})'),
+                          if (versions.isNotEmpty)
+                            Text('Sürümler: ${[for (final e in versions.entries) 'paket ${e.key}: ${e.value}'].join(' · ')}', style: const TextStyle(color: Colors.white70)),
+                          if (missing.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text('Henüz kurulmayan ${missing.length}: ${missing.take(12).map((m) => m['name']).join(', ')}${missing.length > 12 ? '…' : ''}',
+                                  style: const TextStyle(color: Colors.amberAccent)),
+                            ),
+                          if (deleted.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text('Silindiği için eklenmeyen ${deleted.length}: ${deleted.take(12).map((m) => m['name']).join(', ')}',
+                                  style: const TextStyle(color: Colors.white54)),
+                            ),
+                        ]),
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'TR-Live-paket-1.zip, TR-Live-paket-2.zip … dosyalarını seç (birden fazla seçebilirsin). Her biri sunucuya yüklenir ve '
+            'hemen uygulanır: pakette olup sunucuda olmayan hediyeler eklenir, var olanların yalnızca görüntüsü yenilenir '
+            '(ad, fiyat, sekme korunur). Yönetimden sildiğin hediye yeniden eklenmez.',
+            style: TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _busy ? null : _upload,
+            icon: _busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.upload_file),
+            label: Text(_busy ? 'Yükleniyor…' : 'Paket zip dosyalarını seç ve yükle'),
+          ),
+          const SizedBox(height: 12),
+          for (final l in _log) Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text(l)),
+        ]),
       ),
     );
   }
