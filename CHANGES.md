@@ -1,3 +1,11 @@
+## v2.63.1 — Sunucu güncellemesinin takılması giderildi
+- Sunucu bir güncellemeyi kuramazsa bir sonraki yüklemeye kadar eski sürümde kalıyordu (v2.59'dan beri sunucu güncellenmemişti).
+  Artık başarısız kurulum 20 dakikada bir kendiliğinden yeniden denenir ve hatanın sebebi kayda yazılır.
+- Sunucu imajı küçüldü: hediye paketleri imaja / GitHub deposuna konmaz (uygulamadan yüklenir). Disk azsa eski derleme
+  artıkları temizlenir. ffmpeg kurulamazsa derleme durmaz.
+- Yönetim → Katalog → "Hazır hediye paketi": sunucu sürümü, "Şimdi güncelle" düğmesi, güncelleme ve kurulum kayıtları.
+- zip_ile_guncelle.yml: GitHub'a yüklenen paket zip'leri depoya eklenmez (elle yüklenmeli).
+
 ## v2.63.0 — Hediyeler tek tek düzeltildi, paket yönetimden yüklenir, yumurta/domates mikte
 - Telefonda görülen bozuk hediyeler ilk paketin (v2.58) dosyalarıydı; sonraki paketler sunucuya ulaşmamıştı. Artık paketler
   Yönetim → Katalog → "Hazır hediye paketi yükle / durum" ile telefondan doğrudan sunucuya yüklenir ve hemen uygulanır

@@ -182,6 +182,16 @@ $LKHOSTS {
 EOF
 
 # ---------- 6) Başlat ----------
+FREE_KB=$(df -Pk / | awk 'NR==2{print $4}')
+log "Boş disk: $((FREE_KB / 1024)) MB"
+if [ "${FREE_KB:-0}" -lt 5000000 ]; then
+  log "Disk az: eski derleme artıkları temizleniyor"
+  docker builder prune -af >/dev/null 2>&1 || true
+  docker image prune -af >/dev/null 2>&1 || true
+  log "Temizlikten sonra boş disk: $(( $(df -Pk / | awk 'NR==2{print $4}') / 1024 )) MB"
+fi
+mkdir -p "$STATE"
+[ "$(stat -c %a "$STATE/update" 2>/dev/null)" = 666 ] || { systemctl stop trlive-apply.path 2>/dev/null; touch "$STATE/update" && chmod 666 "$STATE/update"; systemctl start trlive-apply.path 2>/dev/null; } || true
 log "Servisler derleniyor ve başlatılıyor (ilk seferde birkaç dakika sürer)"
 $COMPOSE up -d --build --remove-orphans
 if [ "$MODE" = --apply ]; then

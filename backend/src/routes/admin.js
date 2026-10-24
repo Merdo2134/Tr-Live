@@ -500,6 +500,34 @@ router.post('/asset-pack', requireSuperAdmin, express.raw({ type: () => true, li
     packBusy = false;
   }
 });
+// Sunucu (Oracle kurulumu): güncelleme / kurulum kayıtları ve "şimdi güncelle" isteği.
+// Kayıtlar sunucudaki /opt/trlive/state klasöründen gelir (compose ile /srv/state'e bağlı); yoksa boş döner.
+const STATE_DIR = '/srv/state';
+function tailFile(name, lines) {
+  try {
+    return fs.readFileSync(`${STATE_DIR}/${name}`, 'utf8').split('\n').slice(-lines).join('\n').trim();
+  } catch {
+    return null;
+  }
+}
+router.get('/server/status', requireSuperAdmin, async (_req, res) => {
+  res.json({
+    serverVersion: SERVER_VERSION,
+    available: (() => {
+      try { fs.accessSync(`${STATE_DIR}/update`, fs.constants.W_OK); return true; } catch { return false; }
+    })(),
+    updateLog: tailFile('update.log', 25),
+    installLog: tailFile('install.log', 40),
+  });
+});
+router.post('/server/update', requireSuperAdmin, async (_req, res) => {
+  try {
+    fs.writeFileSync(`${STATE_DIR}/update`, `${new Date().toISOString()}\n`);
+  } catch {
+    throw fail('Sunucu bu isteği alamıyor (istek dosyası yazılamıyor). Birkaç dakika sonra tekrar deneyin.');
+  }
+  res.json({ ok: true });
+});
 router.get('/asset-pack/status', requireSuperAdmin, async (_req, res) => {
   res.json({ serverVersion: SERVER_VERSION, ...(await packStatus()) });
 });

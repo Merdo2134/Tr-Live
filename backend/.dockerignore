@@ -1,0 +1,7 @@
+# Sunucu imajına girmeyecekler (derleme küçük ve hızlı kalsın).
+node_modules
+uploads
+e2e
+test
+# Hazır hediye paketleri imaja konmaz: yönetim panelinden (uygulama) yüklenir.
+src/samples/pack*

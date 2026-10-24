@@ -34,6 +34,8 @@ services:
       - "127.0.0.1:3000:3000"
     volumes:
       - uploads:/app/uploads
+      # Güncelleme / kurulum kayıtları ve "şimdi güncelle" isteği (uygulamadaki yönetim sayfası için).
+      - /opt/trlive/state:/srv/state
     networks: [internal]
 
   panel:

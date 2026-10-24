@@ -1661,14 +1661,32 @@ class AssetPackPage extends StatefulWidget {
 
 class _AssetPackPageState extends State<AssetPackPage> {
   Map<String, dynamic>? _status;
+  Map<String, dynamic>? _server;
   String? _error;
   bool _busy = false;
+  bool _showLogs = false;
   final List<String> _log = [];
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadServer();
+  }
+
+  Future<void> _loadServer() async {
+    try {
+      final r = await Api.get('/api/admin/server/status');
+      if (mounted) setState(() => _server = r);
+    } catch (_) {
+      // Eski sunucuda bu bilgi yok.
+    }
+  }
+
+  Future<void> _updateServer() async {
+    final r = await guard(context, () => Api.post('/api/admin/server/update'));
+    if (r == null || !mounted) return;
+    toast(context, 'Güncelleme istendi. Sunucu birkaç dakika içinde yeni sürümü kurar; bu sayfayı sonra yenileyin.');
   }
 
   Future<void> _load() async {
@@ -1751,7 +1769,10 @@ class _AssetPackPageState extends State<AssetPackPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Hazır hediye paketi')),
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () async {
+          await _load();
+          await _loadServer();
+        },
         child: ListView(padding: const EdgeInsets.all(16), children: [
           Card(
             child: Padding(
@@ -1781,6 +1802,43 @@ class _AssetPackPageState extends State<AssetPackPage> {
                         ]),
             ),
           ),
+          if (_server != null) ...[
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Sunucu', style: TextStyle(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _server?['available'] == true ? _updateServer : null,
+                        icon: const Icon(Icons.system_update_alt),
+                        label: const Text('Şimdi güncelle'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => setState(() => _showLogs = !_showLogs),
+                        icon: Icon(_showLogs ? Icons.expand_less : Icons.receipt_long),
+                        label: Text(_showLogs ? 'Kayıtları gizle' : 'Kayıtlar'),
+                      ),
+                    ),
+                  ]),
+                  if (_showLogs) ...[
+                    const SizedBox(height: 8),
+                    const Text('Güncelleme kaydı', style: TextStyle(color: Colors.white70)),
+                    SelectableText((_server?['updateLog'] ?? '-').toString(), style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+                    const SizedBox(height: 8),
+                    const Text('Kurulum kaydı', style: TextStyle(color: Colors.white70)),
+                    SelectableText((_server?['installLog'] ?? '-').toString(), style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+                  ],
+                ]),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           const Text(
             'TR-Live-paket-1.zip, TR-Live-paket-2.zip … dosyalarını seç (birden fazla seçebilirsin). Her biri sunucuya yüklenir ve '

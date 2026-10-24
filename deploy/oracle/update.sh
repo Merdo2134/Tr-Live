@@ -17,23 +17,43 @@ else
 fi
 
 changed=false
-if git -C "$SRC" fetch -q --depth 1 origin "$BRANCH" 2>/dev/null; then
+if git -C "$SRC" fetch -q --depth 1 origin "$BRANCH" 2>>"$STATE/update.log"; then
   if [ "$(git -C "$SRC" rev-parse HEAD)" != "$(git -C "$SRC" rev-parse "origin/$BRANCH")" ]; then
     git -C "$SRC" reset -q --hard "origin/$BRANCH" && changed=true
+    # Eski sürümlerin dosyaları diskte birikmesin (disk dolarsa kurulum yapılamaz).
+    git -C "$SRC" reflog expire --expire=now --all >/dev/null 2>&1 || true
+    git -C "$SRC" gc -q --prune=now >/dev/null 2>&1 || true
   fi
 else
-  [ "${1:-}" = --from-panel ] && note "GitHub'a ulaşılamadı; mevcut sürümle devam ediliyor"
+  note "GitHub'a ulaşılamadı; mevcut sürümle devam ediliyor"
 fi
 
-if [ "$changed" = true ] || [ "${1:-}" = --from-panel ]; then
-  note "uygulanıyor (yeni sürüm: $changed)"
+HEADNOW="$(git -C "$SRC" rev-parse HEAD 2>/dev/null || echo yok)"
+APPLIED="$(cat "$STATE/applied" 2>/dev/null || true)"
+# Son uygulama başarısız olduysa (ya da hiç kaydı yoksa) 20 dakikada bir yeniden denenir; eskiden yeni bir yükleme
+# gelene kadar sunucu eski sürümde kalıyordu.
+retry=false
+if [ "$changed" = false ] && [ "$APPLIED" != "$HEADNOW" ]; then
+  if [ ! -f "$STATE/apply-attempt" ] || [ -n "$(find "$STATE/apply-attempt" -mmin +20 2>/dev/null)" ]; then retry=true; fi
+fi
+
+if [ "$changed" = true ] || [ "$retry" = true ] || [ "${1:-}" = --from-panel ]; then
+  note "uygulanıyor (yeni sürüm: $changed, yeniden deneme: $retry)"
+  touch "$STATE/apply-attempt"
   FROM_PANEL=0; [ "${1:-}" = --from-panel ] && FROM_PANEL=1
   if TRLIVE_FROM_PANEL=$FROM_PANEL bash "$SRC/deploy/oracle/install.sh" --apply; then
+    echo "$HEADNOW" > "$STATE/applied"
     note "tamam · sürüm $(git -C "$SRC" rev-parse --short HEAD)"
   else
-    note "HATA: kurulum tamamlanamadı (ayrıntı: kurulum kaydı)"
+    note "HATA: kurulum tamamlanamadı. Kurulum kaydının son satırları:"
+    sleep 2
+    tail -n 15 "$STATE/install.log" 2>/dev/null | sed 's/^/    /' >> "$STATE/update.log"
   fi
 fi
+# Uygulama içindeki yönetim sayfası (süper yönetici) güncelleme isteği yazabilsin ve kayıtları okuyabilsin.
+# Yalnızca izni yanlışsa dokunulur (her dokunuş "panel isteği" sayılıp sunucuyu yeniden başlatırdı).
+[ "$(stat -c %a "$STATE/update" 2>/dev/null)" = 666 ] || { systemctl stop trlive-apply.path 2>/dev/null; touch "$STATE/update" && chmod 666 "$STATE/update"; systemctl start trlive-apply.path 2>/dev/null; } || true
+chmod 644 "$STATE/update.log" "$STATE/install.log" 2>/dev/null || true
 # Ses sunucusu testi (panelde "Ses sunucusu testi" bölümünde görünür).
 bash "$SRC/deploy/oracle/diag.sh" >/dev/null 2>&1 || true
 tail -n 200 "$STATE/update.log" > "$STATE/update.log.tmp" 2>/dev/null && mv "$STATE/update.log.tmp" "$STATE/update.log"
