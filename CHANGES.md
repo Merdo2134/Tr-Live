@@ -1,3 +1,11 @@
+## v2.61.0 — Hediyeler yüksek kalitede
+- 107 hediyenin hepsi baştan üretildi: 720x1280 (eskisinin ~2 katı piksel), kaynağın kendi kare hızı (en çok 30 kare/sn),
+  ~4 kat bit hızı. Şeffaflık yeniden yapıldı: kenarlarda koyu hale yok, koyu sis / ışık hüzmeleri leke yerine yarı saydam;
+  ülke hediyeleri ve Ramazan arabası tam ekran sahne.
+- Daha önce eklenen paket hediyelerinin yalnızca görüntüsü yenisiyle değişir (ad, fiyat, sekme korunur); eski dosyalar silinir.
+- Telefona hepsi birden inmez: en ucuz 24 hediye ve hediye panelinde açılan sekmenin ilk 16 hediyesi önce iner.
+- Paketler TR-Live-paket-1 … 17 (çerçeveler + yeni hediyeler).
+
 ## v2.60.0 — Yuvarlak uygulama simgesi, yeni giriş ekranı
 - Uygulama simgesi telefonda yuvarlak halkayı tamamen doldurur (siyah daire + logo, uyarlanabilir simge). Ana ekrandaki ad
   "TR Live". Açılış ekranı siyah zemin + logo (beyaz parlama yok). apk_build.yml güncellendi (elle yüklenmeli).

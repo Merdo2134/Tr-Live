@@ -101,7 +101,7 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
       if (!mounted) return;
       setState(() {
         _gifts = listOf(r['gifts']);
-        MediaCache.prefetch([for (final g in _gifts) Api.absoluteUrl(g['animationUrl'] as String?)], first: true);
+        MediaCache.prefetch([for (final g in _tabGifts.take(16)) Api.absoluteUrl(g['animationUrl'] as String?)], first: true);
         _globalMin = BigInt.tryParse((r['globalMinCoins'] ?? '1000').toString()) ?? BigInt.from(1000);
         final lucky = mapOf(r['lucky']);
         _luckyReceiverBps = (lucky?['receiverBps'] as num?)?.toInt() ?? _luckyReceiverBps;
@@ -448,6 +448,8 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
                 _page = 0;
                 _gift = _tabGifts.isNotEmpty ? _tabGifts.first : null;
               });
+              // Açılan sekmenin ilk hediyeleri önce iner.
+              MediaCache.prefetch([for (final g in _tabGifts.take(16)) Api.absoluteUrl(g['animationUrl'] as String?)], first: true);
               if (_pages.hasClients) _pages.jumpToPage(0);
             },
             child: Container(

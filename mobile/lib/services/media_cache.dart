@@ -87,7 +87,8 @@ class MediaCache {
 
   static bool _giftsWarmed = false;
 
-  /// Tüm hediye animasyonlarını (bir kez) telefona indirir; hediye gelince anında oynar.
+  /// En ucuz (en sık gönderilen) 24 hediyenin animasyonunu (bir kez) telefona indirir; hediye gelince anında oynar.
+  /// Hepsi indirilmez: yüksek kaliteli hediyeler büyüktür, diğerleri gelince / panelde görününce iner.
   static Future<void> warmGifts({bool force = false}) async {
     if (_giftsWarmed && !force) return;
     try {
@@ -95,7 +96,9 @@ class MediaCache {
       final list = r['gifts'];
       if (list is! List) return;
       _giftsWarmed = true;
-      prefetch([for (final g in list) if (g is Map) Api.absoluteUrl(g['animationUrl'] as String?)]);
+      final gifts = [for (final g in list) if (g is Map) g]
+        ..sort((a, b) => (num.tryParse('${a['coinPrice']}') ?? 0).compareTo(num.tryParse('${b['coinPrice']}') ?? 0));
+      prefetch([for (final g in gifts.take(24)) Api.absoluteUrl(g['animationUrl'] as String?)]);
     } catch (_) {/* internet yoksa sonra denenir */}
   }
 
