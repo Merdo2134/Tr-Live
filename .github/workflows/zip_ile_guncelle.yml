@@ -2,7 +2,7 @@ name: Zip ile güncelle
 
 # Kullanım (token gerekmez): depoya GitHub sitesinden "Add file > Upload files" ile TR-Live-v....zip dosyasını ANA DİZİNE yükleyin.
 # Bu iş akışı zip'i açar, projeyi içindekiyle birebir eşitler (eski/fazla dosyalar silinir), zip'i siler ve APK derlemesini başlatır.
-# TR-Live-paket-*.zip dosyaları (hazır hediye / çerçeve) ayrıca yüklenir; içindekiler eklenir ve sonraki güncellemelerde korunur.
+# TR-Live-paket-*.zip (hazır hediye paketi) buraya değil, uygulamadaki Yönetim → Katalog sayfasından yüklenir.
 # Not: .github/workflows klasörü GitHub kuralı gereği buradan güncellenemez; bir iş akışı dosyası değiştiyse onu elle yükleyin.
 on:
   push:
@@ -36,44 +36,34 @@ jobs:
           set -euo pipefail
           DID=0
           MAIN=0
-          # 1) Paket zipleri (TR-Live-paket-*.zip: hazır hediye / çerçeve dosyaları) olduğu gibi eklenir.
-          #    Büyük dosyalar ana zip'e konmaz (GitHub sitesi 25 MB'tan büyük dosya yüklemez).
+          # Hazır hediye paketleri (TR-Live-paket-*.zip) artık depoya konmaz: uygulamadan, Yönetim → Katalog →
+          # "Hazır hediye paketi yükle" ile doğrudan sunucuya yüklenir. Buraya yüklenenler silinir (depo şişmesin).
           for P in ./TR-Live-paket-*.zip; do
             [ -e "$P" ] || continue
-            echo "Paket: $P"
-            unzip -o -q "$P" -d .
+            echo "::warning::$P depoya eklenmedi. Paketleri uygulamadan yükleyin: Yönetim → Katalog → Hazır hediye paketi yükle."
             rm -f "$P"
             DID=1
           done
-          # 2) Ana zip: proje içindekiyle birebir eşitlenir; daha önce eklenen paket klasörleri korunur.
           # Birden fazla sürüm zip'i varsa en yüksek sürüm kullanılır (diğerleri silinir).
           ZIP="$(ls ./TR-Live-v*.zip 2>/dev/null | sort -V | tail -1 || true)"
           if [ -n "$ZIP" ]; then
             echo "Zip: $ZIP"
             T="$(mktemp -d)"
-            KEEP="$(mktemp -d)"
             unzip -q "$ZIP" -d "$T"
             [ -f "$T/mobile/pubspec.yaml" ] || { echo "HATA: zip beklenen yapıda değil (mobile/pubspec.yaml yok)"; exit 1; }
             [ -f "$T/backend/package.json" ] || { echo "HATA: zip beklenen yapıda değil (backend/package.json yok)"; exit 1; }
-            if [ -d backend/src/samples ]; then
-              find backend/src/samples -mindepth 1 -maxdepth 1 -type d -name 'pack*' -exec cp -a {} "$KEEP/" \;
-            fi
-            # .git ve .github dışındaki her şeyi sil, zip içeriğini (.github hariç) kopyala
+            # .git ve .github dışındaki her şeyi sil, zip içeriğini (.github hariç) kopyala (eski paket klasörleri de gider)
             find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.github' -exec rm -rf {} +
             rm -rf "$T/.github"
             cp -a "$T/." .
-            mkdir -p backend/src/samples
-            for D in "$KEEP"/pack*; do
-              [ -e "$D" ] || continue
-              cp -an "$D" backend/src/samples/
-            done
+            rm -rf backend/src/samples/pack*
             rm -f ./TR-Live-v*.zip
             DID=1
             MAIN=1
           fi
+          if [ "$DID" != 1 ]; then echo "Ana dizinde zip yok; yapılacak bir şey yok."; echo "NOZIP=1" >> "$GITHUB_ENV"; exit 0; fi
           # Yalnız paket yüklendiyse uygulama değişmedi: APK yeniden derlenmez.
           [ "$MAIN" = 1 ] || echo "PKONLY=1" >> "$GITHUB_ENV"
-          if [ "$DID" != 1 ]; then echo "Ana dizinde zip yok; yapılacak bir şey yok."; echo "NOZIP=1" >> "$GITHUB_ENV"; exit 0; fi
           grep -m1 '^version:' mobile/pubspec.yaml | tee /tmp/ver.txt
 
       - name: Değişiklikleri kaydet
