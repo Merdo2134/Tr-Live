@@ -1,3 +1,43 @@
+## v2.57.0 — Müzik çalar, bildirimler, aile sohbeti (2. bölüm)
+- Müzik çalar baştan: "Müzik" listesi (N PARÇA, arama, düzenle), "Telefondan Ekle" (telefondaki ses dosyaları otomatik
+  taranır, Ekle / Eklendi, Tümünü ekle), "Şimdi Çalıyor" (dönen plak, ilerleme, önceki / oynat / sonraki, Karıştır /
+  Tümü / Tek, ses düzeyi, kapatma). Listeden dokunulan şarkı odada çalar, bitince sıradaki kendiliğinden çalar.
+  Odada alt çubuk; aşağı kaydırınca / küçültünce dönen plak balonu.
+- Mesajlar: "Bildirimler" kartı (beğeni, yorum, takipçi, arkadaşlık, aile, arkadaş oda açtı) ve okunmamış rozeti.
+  Anlar'da beğeni ve yorum bildirim olarak düşer.
+- Aile Sohbeti: Mesajlar'da aile üyelerinin kendi arasında yazıştığı sohbet. Aile başkanı "Üyelere Bildirim / Davet"
+  ile tüm üyelere bildirim gönderir (isterse açık odasına davet).
+- Etkinlik Promosyonu duyuruları parlak çerçeveli, görselli kart; bağlantı "Hemen katıl" ile açılır.
+- Çoklu hediye: mikten mike giden hediye, adet kadar (en çok 7) art arda uçan simge, "xN" yazısı ve parıltıyla gider.
+- Kulaklık: kablolu / Bluetooth kulaklık takılıyken ses medya modunda çalışır (uğultu ve kesilme olmasın);
+  kulaklık çıkınca otomatik normal moda döner. Bluetooth'ta konuşurken telefonun kendi mikrofonu kullanılır.
+- apk_build.yml: müzik dosyası tarama izni ve Android 10 dosya erişimi eklendi (elle yüklenmeli).
+
+## v2.56.0 — Oda düzeni, yeni logo (1. bölüm)
+- Oda sahibi çıksa da içeride yardımcı sahip / moderatör varsa oda kapanmaz; son yönetici de çıkınca kapanır.
+  Sahip "Odayı kapat" ile her zaman kapatabilir.
+- Arka planda başka uygulamaya geçince mikrofon artık kapanmıyor (başka uygulamanın ses açması arama sanılıyordu).
+- Sistem duyurusu ve oda duyurusu odaya ilk girişte 12 sn görünür, sonra kalkar.
+- Oda ayarları: Odayı temizle, Sohbet yasağı, Oda kilitleme, Oda gizleme, Ses ve efektler, Müzik, Mikrofon modu, Tema,
+  Odayı paylaş, Odayı kapat. Oda sesi düğmesi alt çubukta (oyunlar ayarlardaki Ludo'da).
+- Sohbet yazı alanı koyu ve yuvarlak; uçan yazı anahtarı, emoji, renkli gönder düğmesi, 3 satıra kadar.
+- Ses ve efektler: bir görsel ya da ses kapatılınca o an oynayan da hemen durur.
+- Yeni logo: giriş sayfası ve uygulama simgesi (apk_build.yml güncellendi, elle yüklenmeli).
+
+## v2.55.5 — Balon yerine sabit bildirim
+- Uygulamadan çıkınca ekranda balon çıkmaz. Odadayken üstte sabit "… odasındasınız · dönmek için dokun" bildirimi
+  durur; dokununca odaya dönülür. Tek izin: bildirim izni (Android'in kendi penceresi, bir kez). Balon izni sorulmaz.
+
+## v2.55.4 — Daha az izin sorusu
+- Odaya girerken yalnızca bir kez "Diğer uygulamaların üzerinde göster" (odaya dönme balonu) izni sorulur.
+  Bildirim, pil ve telefon izinleri artık sorulmaz. Mikrofon izni yalnızca mikrofona ilk çıkışta istenir.
+
+## v2.55.3 — Arka planda odadan düşme
+- Arka plan servisi artık arka plandayken kapatılıp yeniden açılmıyor (Android 12+ buna izin vermediği için servis
+  kapalı kalıyor, telefon uygulamanın internetini kesiyordu). Servis odaya girerken mümkünse mikrofon türüyle açılır;
+  gerekirse yalnızca uygulama ekrandayken yeniden kurulur. Uygulamaya dönünce servis kapanmışsa yeniden açılır.
+- Pil kısıtlaması kalkana kadar günde en fazla bir kez hatırlatılır.
+
 ## v2.55.2 — Yönetim: giriş bilgileri
 - Yönetim → kullanıcı → "Giriş bilgileri / şifre" (yalnızca yönetici): kullanıcı adı, telefon numarası ve yeni şifre
   verilebilir. Şifre gösterilmez; değişince kullanıcının tüm oturumları kapanır. İşlem kayda geçer.

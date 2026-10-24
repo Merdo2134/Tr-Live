@@ -47,10 +47,36 @@ class _GiftRibbonOverlayState extends State<GiftRibbonOverlay> {
   void initState() {
     super.initState();
     _sub = SocketService.instance.events.listen(_onEvent);
+    EffectPrefs.version.addListener(_onPrefs);
+  }
+
+  /// "Ses ve efektler"de bir görsel kapatılınca o an oynayan da hemen kalkar.
+  void _onPrefs() {
+    if (!mounted) return;
+    setState(() {
+      if (!EffectPrefs.giftAnim) {
+        for (final t in _animTimers.values) {
+          t.cancel();
+        }
+        _animTimers.clear();
+        _anims.clear();
+        _active.clear();
+      }
+      if (!EffectPrefs.entranceFx && _entrance != null) {
+        final effect = mapOf(_entrance!['effect']);
+        final swip = effect?['kind'] == 'wip_vehicle' && (wipLevelOf(effect?['level']) ?? 0) >= 11;
+        if (!swip) {
+          _entranceTimer?.cancel();
+          _entrance = null;
+        }
+      }
+      if (!EffectPrefs.giftRibbon) _queue.clear();
+    });
   }
 
   @override
   void dispose() {
+    EffectPrefs.version.removeListener(_onPrefs);
     _sub?.cancel();
     _timer?.cancel();
     _entranceTimer?.cancel();

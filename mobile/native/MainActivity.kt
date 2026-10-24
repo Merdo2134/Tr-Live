@@ -4,11 +4,14 @@ import android.Manifest
 import android.annotation.TargetApi
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
@@ -32,6 +35,25 @@ class MainActivity : FlutterActivity() {
     private var modeBusy = false
     private var lastSent: Boolean? = null
     private var polling = false
+    private var headsetSink: EventChannel.EventSink? = null
+    private var deviceCallback: AudioDeviceCallback? = null
+
+    /// Kablolu kulaklık / kulaklık girişi / USB kulaklık / Bluetooth kulaklık bağlı mı.
+    private fun headsetConnected(): Boolean {
+        return try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+            am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+                it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     private val modePoll = object : Runnable {
         override fun run() {
@@ -67,6 +89,60 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(null)
                 }
+                "scanAudio" -> {
+                    // Telefondaki ses dosyaları (MediaStore). İzin yoksa istenir; Flutter tekrar taratır.
+                    val perm = if (Build.VERSION.SDK_INT >= 33) "android.permission.READ_MEDIA_AUDIO" else Manifest.permission.READ_EXTERNAL_STORAGE
+                    if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) {
+                        try {
+                            requestPermissions(arrayOf(perm), 7342)
+                        } catch (e: Exception) {
+                        }
+                        result.success(mapOf("permission" to false))
+                    } else {
+                        Thread {
+                            val files = ArrayList<Map<String, Any?>>()
+                            try {
+                                @Suppress("DEPRECATION")
+                                val proj = arrayOf(
+                                    MediaStore.Audio.Media.DATA,
+                                    MediaStore.Audio.Media.TITLE,
+                                    MediaStore.Audio.Media.ARTIST,
+                                    MediaStore.Audio.Media.DURATION,
+                                    MediaStore.Audio.Media.SIZE,
+                                    MediaStore.Audio.Media.DISPLAY_NAME,
+                                )
+                                val cursor = contentResolver.query(
+                                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                    proj,
+                                    MediaStore.Audio.Media.DURATION + " >= 20000",
+                                    null,
+                                    MediaStore.Audio.Media.DISPLAY_NAME + " COLLATE NOCASE ASC",
+                                )
+                                cursor?.use { c ->
+                                    while (c.moveToNext() && files.size < 3000) {
+                                        val path = c.getString(0) ?: continue
+                                        files.add(
+                                            mapOf(
+                                                "path" to path,
+                                                "title" to c.getString(1),
+                                                "artist" to c.getString(2),
+                                                "durationMs" to c.getLong(3),
+                                                "size" to c.getLong(4),
+                                                "name" to c.getString(5),
+                                            ),
+                                        )
+                                    }
+                                }
+                            } catch (e: Exception) {
+                            }
+                            main.post { result.success(mapOf("permission" to true, "files" to files)) }
+                        }.start()
+                    }
+                }
+                "headsetConnected" -> result.success(headsetConnected())
+                "hasMicPermission" -> {
+                    result.success(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+                }
                 "requestPhoneState" -> {
                     if (hasPhonePermission()) {
                         result.success(true)
@@ -81,6 +157,40 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Kulaklık (kablolu / Bluetooth) takılınca / çıkarılınca true / false gönderilir.
+        EventChannel(messenger, "trlive/headset").setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, sink: EventChannel.EventSink?) {
+                headsetSink = sink
+                sink?.success(headsetConnected())
+                val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+                val cb = object : AudioDeviceCallback() {
+                    override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                        headsetSink?.success(headsetConnected())
+                    }
+
+                    override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                        headsetSink?.success(headsetConnected())
+                    }
+                }
+                try {
+                    am.registerAudioDeviceCallback(cb, main)
+                    deviceCallback = cb
+                } catch (e: Exception) {
+                }
+            }
+
+            override fun onCancel(arguments: Any?) {
+                headsetSink = null
+                val cb = deviceCallback
+                if (cb != null) {
+                    try {
+                        (getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.unregisterAudioDeviceCallback(cb)
+                    } catch (e: Exception) {
+                    }
+                }
+                deviceCallback = null
+            }
+        })
         EventChannel(messenger, "trlive/phone_call").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, sink: EventChannel.EventSink?) {
                 events = sink
@@ -104,6 +214,12 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         stopWatch()
+        try {
+            deviceCallback?.let { (getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.unregisterAudioDeviceCallback(it) }
+        } catch (e: Exception) {
+        }
+        deviceCallback = null
+        headsetSink = null
         super.onDestroy()
     }
 

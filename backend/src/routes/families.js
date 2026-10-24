@@ -16,6 +16,8 @@ import { WEEK_DATE } from '../services/family.js';
 import { IMAGE_TYPES, saveUpload, removeUpload } from '../services/images.js';
 import { hub } from '../realtime.js';
 import { notifyUser } from '../services/notify.js';
+import { cleanMultiline } from '../text_safety.js';
+import { screenText } from '../services/moderation.js';
 
 export const router = Router();
 router.use(requireAuth);
@@ -460,4 +462,81 @@ router.post('/:familyId/cashback/claim', async (req, res) => {
     return { amount: amount.toString(), coins: String(left) };
   });
   res.json({ ok: true, ...result });
+});
+
+// ---------- Aile sohbeti (yalnızca aile üyeleri, kendi aralarında) ----------
+const chatJson = (m, viewerId) => ({ id: String(m.msg_id), text: m.body, createdAt: m.msg_created_at, user: publicUser(m, viewerId) });
+
+router.get('/:familyId/chat', async (req, res) => {
+  const id = uuid(req.params.familyId, 'Aile');
+  if (!(await myRole(id, req.user.id))) throw fail('Aile sohbetini yalnızca aile üyeleri görebilir.', 403);
+  const before = /^\d{1,18}$/.test(String(req.query.before ?? '')) ? String(req.query.before) : null;
+  const r = await query(
+    `SELECT m.id AS msg_id, m.body, m.created_at AS msg_created_at, ${USER_PUBLIC_COLUMNS}
+     FROM family_messages m JOIN users u ON u.id = m.user_id ${USER_PUBLIC_JOINS}
+     WHERE m.family_id = $1 AND ($2::bigint IS NULL OR m.id < $2::bigint)
+     ORDER BY m.id DESC LIMIT 50`,
+    [id, before],
+  );
+  res.json({ messages: r.rows.reverse().map((m) => chatJson(m, req.user.id)) });
+});
+
+router.post('/:familyId/chat', userLimit('family_chat', 40, 60e3), async (req, res) => {
+  const id = uuid(req.params.familyId, 'Aile');
+  if (!(await myRole(id, req.user.id))) throw fail('Aile sohbetine yalnızca aile üyeleri yazabilir.', 403);
+  const body = cleanMultiline(req.body?.text, 500);
+  if (!body) throw fail('Mesaj boş olamaz.');
+  await screenText(req.user, body, 'family_chat');
+  const m = (await query(
+    `INSERT INTO family_messages(family_id, user_id, body) VALUES($1,$2,$3) RETURNING id, created_at`, [id, req.user.id, body],
+  )).rows[0];
+  await query(`UPDATE family_members SET chat_seen_id = $3 WHERE family_id = $1 AND user_id = $2`, [id, req.user.id, m.id]);
+  const row = (await query(`SELECT ${USER_PUBLIC_COLUMNS} FROM users u ${USER_PUBLIC_JOINS} WHERE u.id = $1`, [req.user.id])).rows[0];
+  const msg = chatJson({ ...row, msg_id: m.id, body, msg_created_at: m.created_at }, null);
+  const members = (await query(`SELECT user_id FROM family_members WHERE family_id = $1`, [id])).rows;
+  for (const x of members) hub.sendToUser(x.user_id, { type: 'family_chat', familyId: id, message: msg });
+  res.status(201).json({ message: chatJson({ ...row, msg_id: m.id, body, msg_created_at: m.created_at }, req.user.id) });
+});
+
+// Okunmamış aile mesajı sayısı (Mesajlar'daki rozet) ve okundu işareti.
+router.get('/:familyId/chat/unread', async (req, res) => {
+  const id = uuid(req.params.familyId, 'Aile');
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM family_messages m JOIN family_members fm ON fm.family_id = m.family_id AND fm.user_id = $2
+     WHERE m.family_id = $1 AND m.id > fm.chat_seen_id AND m.user_id <> $2`,
+    [id, req.user.id],
+  );
+  res.json({ unread: r.rows[0].n });
+});
+
+router.post('/:familyId/chat/seen', async (req, res) => {
+  const id = uuid(req.params.familyId, 'Aile');
+  await query(
+    `UPDATE family_members SET chat_seen_id = COALESCE((SELECT MAX(id) FROM family_messages WHERE family_id = $1), 0)
+     WHERE family_id = $1 AND user_id = $2`,
+    [id, req.user.id],
+  );
+  res.json({ ok: true });
+});
+
+// Aile bildirimi / daveti: yalnızca aile sahibi gönderir; tüm üyelere bildirim olarak düşer (Mesajlar → Bildirimler).
+// Sahibin açık bir odası varsa bildirime eklenir: dokunan üye odaya girer.
+router.post('/:familyId/notice', userLimit('family_notice', 10, 3600e3), async (req, res) => {
+  const id = uuid(req.params.familyId, 'Aile');
+  if ((await myRole(id, req.user.id)) !== 'owner') throw fail('Aile bildirimini yalnızca aile başkanı gönderebilir.', 403);
+  const body = cleanMultiline(req.body?.text, 200);
+  if (!body) throw fail('Bildirim metni boş olamaz.');
+  await screenText(req.user, body, 'family_notice');
+  const f = await activeFamily(id);
+  let roomId = null;
+  if (req.body?.withRoom === true) {
+    roomId = (await query(
+      `SELECT id FROM rooms WHERE owner_id = $1 AND is_active = TRUE AND is_hidden = FALSE ORDER BY created_at DESC LIMIT 1`, [req.user.id],
+    )).rows[0]?.id ?? null;
+  }
+  const members = (await query(`SELECT user_id FROM family_members WHERE family_id = $1 AND user_id <> $2`, [id, req.user.id])).rows;
+  for (const m of members) {
+    await notifyUser(m.user_id, 'family_notice', `👪 ${f.name}`, body, { familyId: id, ...(roomId ? { roomId } : {}) });
+  }
+  res.json({ ok: true, sent: members.length, withRoom: Boolean(roomId) });
 });

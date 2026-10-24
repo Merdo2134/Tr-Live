@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
@@ -246,8 +247,62 @@ class LocalMusic {
     } catch (_) {/* yoksay */}
   }
 
-  /// Dosyayı odaya yükler. [playNow]: yetkili ise hemen çalar, değilse sıraya ekler.
-  Future<void> sendToRoom(String roomId, LocalTrack t, {required bool playNow}) async {
+  /// Telefonda taranan ses dosyalarını "Müziklerim"e ekler (kopyalanmaz; dosya telefondaki yerinde kalır).
+  Future<int> addDevice(List<DeviceAudio> files) async {
+    await load();
+    final list = [...tracks.value];
+    final have = {for (final t in list) t.path};
+    var n = 0;
+    for (final f in files) {
+      if (have.contains(f.path) || f.size > maxBytes) continue;
+      list.add(LocalTrack(path: f.path, title: f.title, artist: f.artist, durationMs: f.durationMs, sizeBytes: f.size));
+      have.add(f.path);
+      n++;
+    }
+    tracks.value = list;
+    await _save();
+    return n;
+  }
+
+  /// Telefondaki ses dosyalarını tarar (Android müzik kitaplığı). İzin yoksa izin penceresi açılır ve null döner.
+  /// Tarama yapılamıyorsa (eski derleme) boş liste yerine `[]` ve [scanUnsupported] true olur.
+  static bool scanUnsupported = false;
+  static Future<List<DeviceAudio>?> scanDevice() async {
+    try {
+      final r = await const MethodChannel('trlive/device').invokeMethod<Map<dynamic, dynamic>>('scanAudio');
+      if (r == null) return const [];
+      if (r['permission'] != true) return null;
+      final out = <DeviceAudio>[];
+      for (final raw in (r['files'] as List? ?? const [])) {
+        if (raw is! Map) continue;
+        final path = raw['path']?.toString();
+        if (path == null || path.isEmpty) continue;
+        final name = (raw['name'] ?? path.split('/').last).toString();
+        final parsed = parseName(name);
+        var title = (raw['title'] ?? '').toString().trim();
+        var artist = (raw['artist'] ?? '').toString().trim();
+        if (title.isEmpty) title = parsed.title;
+        if (artist.isEmpty || artist == '<unknown>') artist = parsed.artist;
+        out.add(DeviceAudio(
+          path: path,
+          title: title,
+          artist: artist,
+          durationMs: (raw['durationMs'] as num?)?.toInt() ?? 0,
+          size: (raw['size'] as num?)?.toInt() ?? 0,
+          ext: name.contains('.') ? name.split('.').last.toLowerCase() : 'mp3',
+        ));
+      }
+      return out;
+    } on MissingPluginException {
+      scanUnsupported = true;
+      return const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Dosyayı odaya yükler. [playNow]: yetkili ise hemen çalar, değilse sıraya ekler. Sunucudaki şarkı kimliğini döndürür.
+  Future<String> sendToRoom(String roomId, LocalTrack t, {required bool playNow}) async {
     final file = File(t.path);
     if (!await file.exists()) throw ApiException('Dosya telefonda bulunamadı. Listeden kaldırıp yeniden ekleyin.');
     final size = await file.length();
@@ -265,5 +320,17 @@ class LocalMusic {
     } else {
       await Api.post('/api/rooms/$roomId/music/queue', {'trackId': id});
     }
+    return id.toString();
   }
+}
+
+/// Telefonda taranan ses dosyası.
+class DeviceAudio {
+  final String path;
+  final String title;
+  final String artist;
+  final int durationMs;
+  final int size;
+  final String ext;
+  const DeviceAudio({required this.path, required this.title, required this.artist, required this.durationMs, required this.size, required this.ext});
 }

@@ -228,6 +228,7 @@ class _FamilyPageState extends State<FamilyPage> {
             for (final (key, label) in [
               ('edit', 'Bilgileri Düzenle'),
               ('requests', 'İstek Ayarları'),
+              if (role == 'owner') ('notice', 'Üyelere Bildirim / Davet'),
               if (role == 'owner') ('disband', 'Aileyi Dağıt') else ('leave', 'Aileden Ayrıl'),
             ])
               Padding(
@@ -252,6 +253,8 @@ class _FamilyPageState extends State<FamilyPage> {
       await _push(FamilyEditPage(family: f));
     } else if (a == 'requests') {
       await _requestSettings(f);
+    } else if (a == 'notice') {
+      await _sendNotice();
     } else if (a == 'disband' || a == 'leave') {
       final disband = a == 'disband';
       final ok = await confirm(
@@ -271,6 +274,44 @@ class _FamilyPageState extends State<FamilyPage> {
       widget.onLeft!();
     } else {
       Navigator.maybePop(context);
+    }
+  }
+
+  /// Aile başkanı: tüm üyelere bildirim (Mesajlar → Bildirimler). İstenirse açık odasına davet eder.
+  Future<void> _sendNotice() async {
+    final ctl = TextEditingController();
+    var withRoom = true;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setS) => AlertDialog(
+          title: const Text('Üyelere bildirim'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: ctl, maxLength: 200, maxLines: 3, decoration: const InputDecoration(hintText: 'Örn: Herkes odama gelsin, etkinlik başlıyor!')),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: withRoom,
+              onChanged: (v) => setS(() => withRoom = v ?? false),
+              title: const Text('Açık odama davet et'),
+              subtitle: const Text('Bildirime dokunan üye odana girer.', style: TextStyle(fontSize: 12)),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Gönder')),
+          ],
+        ),
+      ),
+    );
+    final text = ctl.text.trim();
+    ctl.dispose();
+    if (ok != true || text.isEmpty || !mounted) return;
+    final r = await guard(context, () => Api.post('/api/families/$_id/notice', {'text': text, 'withRoom': withRoom}));
+    if (r != null && mounted) {
+      final sent = (r['sent'] as num?)?.toInt() ?? 0;
+      toast(context, withRoom && r['withRoom'] != true
+          ? '$sent üyeye gönderildi (açık odan olmadığı için davetsiz).'
+          : '$sent üyeye bildirim gönderildi.');
     }
   }
 

@@ -311,10 +311,12 @@ class _LoginScreenState extends State<LoginScreen> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.workspace_premium, size: 84, color: Pal.amber),
-                  const SizedBox(height: 4),
-                  const Text('TR LIVE', style: TextStyle(fontSize: 38, fontWeight: FontWeight.w800, letterSpacing: 4, color: Pal.text, fontFamily: 'serif')),
-                  const SizedBox(height: 8),
+                  // Uygulama logosu (taç + TR Live + "Sınırları aşan anlara").
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Image.asset('assets/images/app_logo.webp', width: 220, height: 220, fit: BoxFit.cover, filterQuality: FilterQuality.medium),
+                  ),
+                  const SizedBox(height: 12),
                   Text(
                     _mode == _Mode.start ? 'Hoş geldin' : (_mode == _Mode.username ? (_register ? 'Kullanıcı adıyla kayıt' : 'Kullanıcı adıyla giriş') : (_register ? 'Telefonla kayıt' : 'Telefonla giriş')),
                     style: const TextStyle(fontSize: 18, color: Pal.textDim),

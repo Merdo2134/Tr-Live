@@ -17,6 +17,8 @@ class EffectPrefs {
   static bool giftSound = true;
   /// Odada "oda sesini kapat" seçiliyken hediye / araç sesleri de çalmaz (kaydedilmez; odadan çıkınca açılır).
   static final ValueNotifier<bool> roomMuted = ValueNotifier<bool>(false);
+  /// Ayar değişince artar: o an oynayan görsel / ses hemen durur (sonrakini beklemeden).
+  static final ValueNotifier<int> version = ValueNotifier<int>(0);
 
   static const _keys = {
     'fx_gift_anim': 0,
@@ -53,6 +55,7 @@ class EffectPrefs {
       default:
         return;
     }
+    version.value++;
     try {
       await (await SharedPreferences.getInstance()).setBool(key, value);
     } catch (_) {}

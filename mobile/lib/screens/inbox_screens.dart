@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api.dart';
 import '../services/inbox_service.dart';
 import '../services/presence_service.dart';
@@ -9,6 +10,7 @@ import '../widgets/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/presence_widgets.dart';
 import 'messages_screen.dart';
+import 'notification_screens.dart';
 import 'social_screens.dart';
 import 'support_screens.dart';
 import 'user_screens.dart';
@@ -62,6 +64,9 @@ class _MessagesHomeState extends State<MessagesHome> {
   List<Map<String, dynamic>> _conv = [];
   Map<String, dynamic> _sum = {};
   int _support = 0;
+  int _notify = 0; // okunmamış bildirim
+  Map<String, dynamic>? _family; // üyesi olduğum aile (aile sohbeti kartı)
+  int _familyUnread = 0;
   bool _loading = true;
   String? _error;
   StreamSubscription? _sub;
@@ -86,7 +91,7 @@ class _MessagesHomeState extends State<MessagesHome> {
         });
         return;
       }
-      if (e['type'] == 'support_message' || e['type'] == 'agency_invite' || e['type'] == 'cp_request') {
+      if (e['type'] == 'support_message' || e['type'] == 'agency_invite' || e['type'] == 'cp_request' || e['type'] == 'notify' || e['type'] == 'family_chat') {
         _loadBadges();
         return;
       }
@@ -146,10 +151,20 @@ class _MessagesHomeState extends State<MessagesHome> {
     try {
       final s = await Api.get('/api/inbox-summary');
       final u = await Api.get('/api/support/unread');
+      final n = await Api.get('/api/me/notifications/unread').catchError((_) => <String, dynamic>{});
+      final fam = mapOf((await Api.get('/api/families/mine').catchError((_) => <String, dynamic>{}))['family']);
+      var famUnread = 0;
+      if (fam?['id'] != null) {
+        final fu = await Api.get('/api/families/${fam!['id']}/chat/unread').catchError((_) => <String, dynamic>{});
+        famUnread = (fu['unread'] as num?)?.toInt() ?? 0;
+      }
       if (!mounted) return;
       setState(() {
         _sum = s;
         _support = (u['unread'] as num?)?.toInt() ?? 0;
+        _notify = (n['unread'] as num?)?.toInt() ?? 0;
+        _family = fam;
+        _familyUnread = famUnread;
       });
     } catch (_) {/* rozetler olmasa da kartlar çalışır */}
   }
@@ -170,7 +185,12 @@ class _MessagesHomeState extends State<MessagesHome> {
     final ch = (w * 0.236).clamp(80.0, 112.0).toDouble();
     final gap = (w * 0.016).clamp(5.0, 9.0).toDouble();
     final icon = cw * 0.44;
+    final fam = _family;
     final items = <_InboxCard>[
+      _InboxCard('Bildirimler', const Color(0xFF1F2A55), _icon(Icons.notifications_active_rounded, const Color(0xFF60A5FA), icon), _notify, () => _push(const NotificationsPage())),
+      if (fam != null)
+        _InboxCard('Aile\nSohbeti', const Color(0xFF3A1F4F), _icon(Icons.groups_rounded, const Color(0xFFC084FC), icon), _familyUnread,
+            () => _push(FamilyChatPage(familyId: fam['id'].toString(), familyName: (fam['name'] ?? 'Aile').toString()))),
       // Ajans daveti: yalnızca bekleyen davet varken görünür (yanıt buradan verilir).
       if (_n('agency') > 0)
         _InboxCard('Ajans\ndaveti', const Color(0xFF3A1F55), _icon(Icons.business_center_rounded, const Color(0xFFB794F4), icon), _n('agency'), () => _push(const AgencyInvitesScreen())),
@@ -627,7 +647,16 @@ class _OfficialChannelScreenState extends State<OfficialChannelScreen> {
     return list;
   }
 
-  void _openLink(String url) {
+  /// Bağlantı tarayıcıda / ilgili uygulamada açılır; açılamazsa kopyalanır.
+  Future<void> _openLink(String url) async {
+    final uri = Uri.tryParse(url);
+    var ok = false;
+    if (uri != null) {
+      try {
+        ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+    if (ok || !mounted) return;
     Clipboard.setData(ClipboardData(text: url));
     toast(context, 'Bağlantı kopyalandı.');
   }
@@ -681,6 +710,7 @@ class _OfficialChannelScreenState extends State<OfficialChannelScreen> {
         SizedBox(width: w * 0.08),
       ]);
     }
+    if (widget.kind == 'event') return _eventCard(title, text, img, link);
     // Kart: üstte görsel, altta başlık ve metin.
     return Container(
       clipBehavior: Clip.antiAlias,
@@ -701,6 +731,93 @@ class _OfficialChannelScreenState extends State<OfficialChannelScreen> {
           ]),
         ),
       ]),
+    );
+  }
+
+  /// Etkinlik duyurusu: altın-pembe parlak çerçeve, görselin üstünde başlık, "ETKİNLİK" etiketi ve büyük düğme.
+  Widget _eventCard(String title, String text, String? img, String? link) {
+    final head = Stack(children: [
+      AspectRatio(
+        aspectRatio: 1.7,
+        child: img != null
+            ? NetImg(img, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const ColoredBox(color: Color(0xFF3A0F72)))
+            : const DecoratedBox(
+                decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF6D28D9), Color(0xFFDB2777), Color(0xFFF59E0B)])),
+                child: Center(child: Icon(Icons.emoji_events_rounded, color: Colors.white70, size: 72)),
+              ),
+      ),
+      // Alttan karartma: başlık görselin üstünde okunsun.
+      const Positioned.fill(
+        child: DecoratedBox(
+          decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00000000), Color(0x00000000), Color(0xCC000000)])),
+        ),
+      ),
+      Positioned(
+        left: 12,
+        top: 12,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [Color(0xFFFFD54F), Color(0xFFFF8F00)]),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [BoxShadow(color: Color(0x66FF8F00), blurRadius: 8)],
+          ),
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.local_fire_department_rounded, size: 15, color: Color(0xFF3A1600)),
+            SizedBox(width: 3),
+            Text('ETKİNLİK', style: TextStyle(color: Color(0xFF3A1600), fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 1)),
+          ]),
+        ),
+      ),
+      if (title.isNotEmpty)
+        Positioned(
+          left: 14,
+          right: 14,
+          bottom: 12,
+          child: Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 20, height: 1.2, shadows: [Shadow(color: Colors.black87, blurRadius: 6)]),
+          ),
+        ),
+    ]);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(colors: [Color(0xFFFFD54F), Color(0xFFFF4F9A), Color(0xFF8B5CF6)]),
+        boxShadow: const [BoxShadow(color: Color(0x55FF4F9A), blurRadius: 16, offset: Offset(0, 4))],
+      ),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(color: const Color(0xFF14102A), borderRadius: BorderRadius.circular(18)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          head,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              if (text.isNotEmpty) Text(text, style: const TextStyle(fontSize: 15, height: 1.4, color: Color(0xFFE5E7EB))),
+              if (link != null) ...[
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: () => _openLink(link),
+                  child: Container(
+                    height: 44,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      gradient: const LinearGradient(colors: [Color(0xFFFF4F9A), Color(0xFF8B5CF6)]),
+                    ),
+                    child: const Text('Hemen katıl', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15.5)),
+                  ),
+                ),
+              ],
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 

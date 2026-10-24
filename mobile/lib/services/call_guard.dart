@@ -16,15 +16,15 @@ class CallGuard {
   // Açık oda sayısı: oda değiştirirken yeni oda eskisi kapanmadan açılabilir; son oda kapanınca bırakılır.
   int _users = 0;
   Timer? _poll;
-  bool _focusPaused = false; // ses odağı "geçici kesinti" dedi
   bool _phoneMode = false; // telefonun ses modu: çalıyor / görüşmede
   bool _native = false; // Android'in arama durumu (MainActivity: TelephonyManager + ses modu)
   StreamSubscription<dynamic>? _nativeSub;
-  static const _device = MethodChannel('trlive/device');
   static const _phoneCall = EventChannel('trlive/phone_call');
   static bool _askedPermission = false;
 
-  void _update() => inCall.value = _focusPaused || _phoneMode || _native;
+  // Ses odağı kaybı arama sayılmaz: başka uygulamaya geçip video/müzik açınca da odak gider ve mikrofon yanlışlıkla
+  // kapanıyordu (arka planda konuşma sesi gitmiyordu). Arama yalnızca telefonun arama durumu / ses modundan anlaşılır.
+  void _update() => inCall.value = _phoneMode || _native;
 
   /// Asıl arama sinyali: Android'in kendi arama durumu. Oda sesi sistemi ses odağını kendisi aldığı için
   /// odak sinyali çoğu telefonda uygulamaya hiç gelmiyor; bu yol her durumda çalışır ("telefon durumu" izniyle).
@@ -41,11 +41,10 @@ class CallGuard {
   /// "Telefon durumu" iznini (bir kez) ister. Diğer izin pencereleri kapandıktan sonra çağrılır
   /// (Android aynı anda iki izin penceresi açmaz; ikincisi sessizce reddedilir).
   Future<void> requestPhonePermission() async {
+    // Ek izin penceresi açılmaz (kullanıcıyı yormamak için). Telefon izni zaten verilmişse arama durumu ondan da okunur;
+    // verilmemişse arama telefonun ses modundan anlaşılır.
     if (_askedPermission || defaultTargetPlatform != TargetPlatform.android) return;
     _askedPermission = true;
-    try {
-      await _device.invokeMethod<bool>('requestPhoneState');
-    } catch (_) {/* eski APK */}
   }
 
   /// Android'in ses modunu saniyede bir okur: zil çalıyorsa ya da normal telefon görüşmesi sürüyorsa arama var.
@@ -89,11 +88,7 @@ class CallGuard {
         androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
         androidWillPauseWhenDucked: false,
       ));
-      _sub ??= s.interruptionEventStream.listen((e) {
-        // Bitiş olayı ya da kalıcı / kısma türü kesinti bayrağı temizler (ses takılı kalmasın).
-        _focusPaused = e.begin && e.type == AudioInterruptionType.pause;
-        _update();
-      });
+      _sub ??= s.interruptionEventStream.listen((_) {/* yalnızca odak sinyalini almak için */});
       // Sinyalleri alabilmek için uygulama ses odağını ister.
       await s.setActive(true);
     } catch (_) {/* desteklenmeyen cihaz: arama algılanmaz, oda yine çalışır */}
@@ -110,7 +105,6 @@ class CallGuard {
     await _nativeSub?.cancel();
     _nativeSub = null;
     _native = false;
-    _focusPaused = false;
     _phoneMode = false;
     inCall.value = false;
     try {

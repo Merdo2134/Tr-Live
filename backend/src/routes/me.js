@@ -113,7 +113,38 @@ router.get('/notifications/pending', async (req, res) => {
   res.json({ lastId: last, notifications: r.rows.reverse() });
 });
 
-const NOTIFY_PREF_KEYS = ['friend', 'follow', 'room'];
+// Mesajlar → Bildirimler: son 30 günün bildirimleri (en yeniden eskiye), sayfalı.
+router.get('/notifications', async (req, res) => {
+  const before = /^\d{1,18}$/.test(String(req.query.before ?? '')) ? String(req.query.before) : null;
+  const r = await query(
+    `SELECT id::text, kind, title, body, data, created_at FROM user_notifications
+     WHERE user_id = $1 AND created_at > NOW() - INTERVAL '30 days' AND ($2::bigint IS NULL OR id < $2::bigint)
+     ORDER BY id DESC LIMIT 50`,
+    [req.user.id, before],
+  );
+  const seen = (await query(`SELECT notify_seen_id::text AS s FROM users WHERE id = $1`, [req.user.id])).rows[0]?.s ?? '0';
+  res.json({ seenId: seen, notifications: r.rows.map((x) => ({ id: x.id, kind: x.kind, title: x.title, body: x.body, data: x.data ?? {}, createdAt: x.created_at })) });
+});
+
+// Okunmamış bildirim sayısı (Mesajlar'daki rozet).
+router.get('/notifications/unread', async (req, res) => {
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM user_notifications n JOIN users u ON u.id = n.user_id
+     WHERE n.user_id = $1 AND n.id > u.notify_seen_id AND n.created_at > NOW() - INTERVAL '30 days'`,
+    [req.user.id],
+  );
+  res.json({ unread: r.rows[0].n });
+});
+
+router.post('/notifications/seen', async (req, res) => {
+  await query(
+    `UPDATE users SET notify_seen_id = GREATEST(notify_seen_id, COALESCE((SELECT MAX(id) FROM user_notifications WHERE user_id = $1), 0)) WHERE id = $1`,
+    [req.user.id],
+  );
+  res.json({ ok: true });
+});
+
+const NOTIFY_PREF_KEYS = ['friend', 'follow', 'room', 'moment', 'family'];
 router.get('/notify-prefs', async (req, res) => {
   const p = req.user.notify_prefs ?? {};
   res.json({ prefs: Object.fromEntries(NOTIFY_PREF_KEYS.map((k) => [k, p[k] !== false])) });

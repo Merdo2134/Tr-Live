@@ -55,7 +55,7 @@ class _AnimAssetState extends State<AnimAsset> {
 
   /// Arama başlayınca çalan hediye / araç sesi hemen susar.
   void _onCall() {
-    if (CallGuard.instance.inCall.value || EffectPrefs.roomMuted.value) _audio?.pause().catchError((_) {});
+    if (CallGuard.instance.inCall.value || EffectPrefs.roomMuted.value || !EffectPrefs.giftSound) _audio?.pause().catchError((_) {});
   }
 
   @override
@@ -63,6 +63,7 @@ class _AnimAssetState extends State<AnimAsset> {
     super.initState();
     CallGuard.instance.inCall.addListener(_onCall);
     EffectPrefs.roomMuted.addListener(_onCall);
+    EffectPrefs.version.addListener(_onCall);
     if (widget.cache) {
       _resolve();
     } else if (_isMp4) {
@@ -74,6 +75,7 @@ class _AnimAssetState extends State<AnimAsset> {
   void dispose() {
     CallGuard.instance.inCall.removeListener(_onCall);
     EffectPrefs.roomMuted.removeListener(_onCall);
+    EffectPrefs.version.removeListener(_onCall);
     _doneTimer?.cancel();
     _audio?.dispose();
     _audio = null;

@@ -24,6 +24,9 @@ class MusicService {
   int _gen = 0; // her yeni durum/odadan çıkış sayacı artırır; eski (geç gelen) işlemler sonucu ezmesin
 
   AudioPlayer get _p => _player ??= AudioPlayer();
+
+  /// Müziği dinlenen oda.
+  String? get roomId => _roomId;
   bool _callHooked = false;
 
   /// Çalınacak ses düzeyi: kullanıcı kıstıysa ya da telefon araması sürüyorsa 0.

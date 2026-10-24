@@ -19,6 +19,8 @@ import '../services/effect_prefs.dart';
 import '../services/inbox_service.dart';
 import '../services/media_cache.dart';
 import '../services/music_service.dart';
+import '../services/room_playlist.dart';
+import '../services/headset_audio.dart';
 import '../services/room_dock.dart';
 import '../services/session.dart';
 import '../services/socket_service.dart';
@@ -35,7 +37,7 @@ import '../widgets/video_grid.dart';
 import 'gift_sheet.dart';
 import 'ludo_screen.dart';
 import 'pk_sheet.dart';
-import 'music_sheet.dart';
+import 'music_screens.dart';
 import 'inbox_screens.dart';
 import '../widgets/level_badge.dart';
 import 'user_screens.dart';
@@ -69,6 +71,11 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   bool _closing = false;
   bool _rejoining = false;
   Timer? _beat;
+  /// Sistem duyurusu ve oda duyurusu: odaya ilk girişte birkaç saniye görünür, sonra kalkar (aynı oturumda aynı odaya
+  /// yeniden girince hiç gösterilmez).
+  static final Set<String> _noticeSeen = {};
+  bool _showHeads = true;
+  Timer? _headsTimer;
 
   lk.Room? _lk;
   bool _lkConnecting = false;
@@ -178,8 +185,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _headsTimer?.cancel();
     CallGuard.instance.inCall.removeListener(_onPhoneCall);
     CallGuard.instance.stop();
+    HeadsetAudio.instance.stop();
     EffectPrefs.roomMuted.value = false;
     _beat?.cancel();
     _lkTick?.cancel();
@@ -194,6 +203,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     _sub?.cancel();
     _chatCtl.dispose();
     _chatScroll.dispose();
+    RoomPlaylist.instance.bind(null); // önce: liste odadan çıkılırken sıradakini çalmasın
     MusicService.instance.unbind();
     SocketService.instance.unsubscribeRoom();
     if (_joined) {
@@ -251,7 +261,16 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       _loadMessages();
       _loadExtras();
       MusicService.instance.bind(widget.roomId);
+      RoomPlaylist.instance.bind(widget.roomId);
       _startHeartbeat();
+      if (_noticeSeen.contains(widget.roomId)) {
+        if (mounted) setState(() => _showHeads = false);
+      } else {
+        _noticeSeen.add(widget.roomId);
+        _headsTimer = Timer(const Duration(seconds: 12), () {
+          if (mounted) setState(() => _showHeads = false);
+        });
+      }
       BackgroundService.instance
           .ensurePermissions((msg, action) => confirm(context, msg, action: action))
           .catchError((_) {})
@@ -474,7 +493,12 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
   Future<void> _onBack() async {
     if (_closing) return;
     if (_myRole == 'owner') {
-      final ok = await confirm(context, 'Odadan ayrılırsanız oda kapanır. Devam edilsin mi?', action: 'Odayı kapat');
+      final ok = await confirm(
+        context,
+        'Odadan ayrılırsanız ve içeride yönetici (yardımcı sahip / moderatör) yoksa oda kapanır. Yönetici varsa oda açık kalır; '
+        'döndüğünüzde yine oda sahibi olarak girersiniz. Odayı tamamen kapatmak için menüden "Odayı kapat"ı kullanın.',
+        action: 'Ayrıl',
+      );
       if (!ok || !mounted) return;
     }
     // Ağ yavaşsa çıkış düğmesi 20 sn donmasın: oda hemen kapanır, "leave" isteğini dispose() gönderir.
@@ -802,6 +826,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       final token = t['token'] as String?;
       if (url == null || url.isEmpty || token == null) throw ApiException('Ses sunucusu yapılandırılmamış.');
       await _loadNoisePref();
+      await HeadsetAudio.instance.start(); // kulaklık takılıysa yüksek kaliteli ses modu (bağlanmadan önce)
       room = lk.Room(roomOptions: lk.RoomOptions(adaptiveStream: true, dynacast: true, defaultAudioCaptureOptions: _audioOptions));
       room.addListener(_onLkChanged);
       await room.connect(url, token);
@@ -1083,7 +1108,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
       final rid = mapOf(r is Map ? r['user'] : null)?['id']?.toString();
       // Mikrofonda değilse (odadaysa) seyirci sayısı rozetine uçar.
       final to = centerOf(rid) ?? (rid == null ? null : centerOfBox(_viewersKey));
-      if (to != null) fresh.add(_GiftFlightData(++_flightSeq, icon, from, to));
+      final qty = _asInt(r is Map ? r['quantity'] : null) ?? _asInt(e['quantity']) ?? 1;
+      if (to != null) fresh.add(_GiftFlightData(++_flightSeq, icon, from, to, qty < 1 ? 1 : qty));
     }
     if (fresh.isEmpty) return;
     setState(() => _flights.addAll(fresh));
@@ -1348,7 +1374,25 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
         final pkFree = _pk == null || !['pending', 'active'].contains(_pk!['status']);
         final queueMode = !_onSeat && !_canSeatManage && (_micRequest || _noFreeSeat);
         final tools = <Widget>[
-          feature(_roomMuted ? Icons.volume_off : Icons.volume_up, _roomMuted ? 'Sesi\nAç' : 'Sesi\nKapat', () => run(_toggleRoomSound), color: _roomMuted ? Colors.redAccent : null),
+          // Sıra: Odayı temizle, Sohbet yasağı, Oda kilitleme, Oda gizleme, Ses ve efektler, Müzik, Mikrofon Modu, Tema,
+          // Odayı paylaş, Odayı kapat. (Oda sesini kapatma alt çubukta.)
+          if (_isManager) feature(Icons.cleaning_services, 'Odayı\nTemizle', () => need(_isManager, _clearChat)),
+          if (_isOwnerOrCohost) feature(chatOn ? Icons.speaker_notes_off : Icons.chat, chatOn ? 'Sohbet\nYasağı' : 'Sohbeti\nAç', () => need(_isOwnerOrCohost, () => _patchRoom({'chatEnabled': !chatOn})), color: chatOn ? null : Colors.greenAccent),
+          if (_myRole == 'owner') feature(locked ? Icons.lock : Icons.lock_open, 'Oda\nKilitleme', () => need(_myRole == 'owner', _roomPassword), color: locked ? Colors.orangeAccent : null),
+          if (_myRole == 'owner') feature(hidden ? Icons.visibility_off : Icons.visibility, 'Oda\nGizleme', () => need(_myRole == 'owner', _toggleHidden), color: hidden ? Colors.orangeAccent : null),
+          feature(Icons.graphic_eq, 'Ses ve\nEfektler', () => run(_effectsAndSound)),
+          if (_isManager) feature(Icons.library_music, 'Müzik', () => run(_openMusic)),
+          if (_isOwnerOrCohost && !_isLive) feature(Icons.mic_external_on, _isVideo ? 'Yayın\nModu' : 'Mikrofon\nModu', () {
+            Navigator.pop(sheet);
+            // Alt pencerenin kapanma animasyonu bitmeden yenisini açmak bazı cihazlarda açılmıyor; kısa bekle.
+            Future.delayed(const Duration(milliseconds: 300), () {
+              if (mounted) _micMode();
+            });
+          }),
+          if (_isOwnerOrCohost) feature(Icons.palette, 'Tema', () => need(_isOwnerOrCohost, _roomThemes)),
+          feature(Icons.share, 'Odayı\nPaylaş', () => run(_shareRoom)),
+          if (_myRole == 'owner') feature(Icons.power_settings_new, 'Odayı\nKapat', () => run(_closeRoom), color: Colors.redAccent),
+          // Koltuk / kamera araçları (duruma göre).
           if (_onSeat && _isVideo)
             feature(_camOn ? Icons.videocam : Icons.videocam_off, 'Kamera', () => run(() {
                   setState(() => _camOn = !_camOn);
@@ -1359,27 +1403,6 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             feature(_inQueue ? Icons.hourglass_bottom : Icons.front_hand, _inQueue ? (_micRequest ? 'İsteği\nGeri Al' : 'Sıradan\nÇık') : (_micRequest ? 'Mikrofon\nİste' : 'Sıraya\nGir'), () => run(_toggleQueue), color: _inQueue ? Colors.orangeAccent : Colors.greenAccent),
           if (_onSeat) feature(Icons.mic_off, 'Mikrofondan\nİn', () => run(_leaveMic)),
           if (_canSeatManage && _micRequest) feature(Icons.how_to_reg, 'Mikrofon\nİstekleri', () => run(_micRequestsSheet), color: Colors.greenAccent),
-          feature(Icons.share, 'Yayını\nPaylaş', () => run(_shareRoom)),
-          feature(Icons.graphic_eq, 'Efekt\nve Ses', () => run(_effectsAndSound)),
-          if (_isOwnerOrCohost) feature(chatOn ? Icons.speaker_notes_off : Icons.chat, chatOn ? 'Sohbet\nYasağı' : 'Sohbeti\nAç', () => need(_isOwnerOrCohost, () => _patchRoom({'chatEnabled': !chatOn})), color: chatOn ? null : Colors.greenAccent),
-          if (_isManager) feature(Icons.library_music, 'Müzik\nSeç', () => run(_openMusic)),
-          if (_isManager) feature(Icons.cleaning_services, 'Sohbet\nTemizleme', () => need(_isManager, _clearChat)),
-          if (_myRole == 'owner') feature(locked ? Icons.lock : Icons.lock_open, 'Oda\nKilidi', () => need(_myRole == 'owner', _roomPassword), color: locked ? Colors.orangeAccent : null),
-          if (_isOwnerOrCohost) feature(Icons.palette, 'Özel\nTemalar', () => need(_isOwnerOrCohost, _roomThemes)),
-          if (_myRole == 'owner') feature(hidden ? Icons.visibility_off : Icons.visibility, 'Oda\nGizleme', () => need(_myRole == 'owner', _toggleHidden), color: hidden ? Colors.orangeAccent : null),
-          if (_isOwnerOrCohost && !_isLive) feature(Icons.mic_external_on, _isVideo ? 'Yayın\nModu' : 'Mikrofon\nModu', () {
-            if (!_isOwnerOrCohost) {
-              Navigator.pop(sheet);
-              toast(context, 'Mikrofon modunu yalnızca oda sahibi ve yardımcı sahip değiştirebilir.', error: true);
-              return;
-            }
-            Navigator.pop(sheet);
-            // Alt pencerenin kapanma animasyonu bitmeden yenisini açmak bazı cihazlarda açılmıyor; kısa bekle.
-            Future.delayed(const Duration(milliseconds: 300), () {
-              if (mounted) _micMode();
-            });
-          }),
-          if (_myRole == 'owner') feature(Icons.power_settings_new, 'Odayı\nKapat', () => run(_closeRoom), color: Colors.redAccent),
         ];
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.82),
@@ -1500,7 +1523,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     if (room != null && mounted) setState(() => _room = {...?_room, ...room});
   }
 
-  void _openMusic() => showMusicSheet(context, roomId: widget.roomId, canManage: _isManager, canQueue: _onSeat);
+  void _openMusic() => openRoomMusic(context, roomId: widget.roomId, canManage: _isManager);
+
+  /// Odadaki müzik: alt çubuk (açık) ya da küçültülünce sürüklenebilir dönen plak.
+  static final ValueNotifier<bool> _musicBarOpen = ValueNotifier<bool>(true);
 
   Future<void> _clearChat() async {
     if (!await confirm(context, 'Odadaki tüm sohbet mesajları herkes için silinsin mi?', action: 'Temizle')) return;
@@ -1731,8 +1757,8 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     final ann = (_room?['announcement'] ?? '').toString().trim();
     final maxW = w * 0.78;
     final heads = <Widget>[
-      if (_appNotice.isNotEmpty && !overlay) _noticeCard(maxW),
-      if (ann.isNotEmpty) _announcementCard(ann, maxW),
+      if (_showHeads && _appNotice.isNotEmpty && !overlay) _noticeCard(maxW),
+      if (_showHeads && ann.isNotEmpty) _announcementCard(ann, maxW),
     ];
     final head = heads.length;
     if (_messages.isEmpty && head == 0) return const SizedBox.shrink();
@@ -1832,13 +1858,17 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     _scrollChatToEnd(force: true);
   }
 
-  /// Yazı alanı (Yoho): klavyenin hemen üstünde beyaz şerit; boşluğa dokununca kapanır.
+  /// Yazı alanı: klavyenin hemen üstünde koyu şerit (uygulama renkleri); boşluğa dokununca kapanır.
+  /// Solda "Uçan yazı" anahtarı, ortada yuvarlak yazı kutusu (emoji düğmesi içinde), sağda renkli gönder düğmesi.
   Widget _inputBar() {
+    final canSend = !_sending && !_chatMuted;
     return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+      decoration: const BoxDecoration(
+        color: Color(0xF2111827),
+        border: Border(top: BorderSide(color: Color(0x33FFFFFF), width: 0.6)),
+      ),
       child: Row(children: [
-        IconButton(tooltip: 'Kapat', onPressed: _closeInput, icon: const Icon(Icons.keyboard_hide_outlined, color: Colors.black54)),
         // Uçan yazı anahtarı: açıkken mesaj odanın üstünden uçarak geçer (ücretli).
         GestureDetector(
           onTap: () {
@@ -1847,18 +1877,16 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            margin: const EdgeInsets.only(right: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+            width: 40,
+            height: 40,
+            margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
+              shape: BoxShape.circle,
               gradient: _flyMode ? const LinearGradient(colors: [Color(0xFFFF4081), Color(0xFF7C4DFF)]) : null,
-              color: _flyMode ? null : const Color(0xFFF1F2F4),
+              color: _flyMode ? null : const Color(0x1FFFFFFF),
+              border: Border.all(color: _flyMode ? Colors.white54 : Colors.white24),
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.send_rounded, size: 15, color: _flyMode ? Colors.white : Colors.black45),
-              const SizedBox(width: 3),
-              Text('Uçan', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _flyMode ? Colors.white : Colors.black54)),
-            ]),
+            child: Icon(Icons.flight_takeoff_rounded, size: 19, color: _flyMode ? Colors.white : Colors.white70),
           ),
         ),
         Expanded(
@@ -1867,23 +1895,44 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             autofocus: true,
             maxLength: _flyMode ? 80 : 300,
             enabled: !_chatMuted,
+            minLines: 1,
+            maxLines: 3,
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => _sendChat(),
-            style: const TextStyle(color: Colors.black87),
+            cursorColor: const Color(0xFF1FD6F5),
+            style: const TextStyle(color: Colors.white, fontSize: 15),
             decoration: InputDecoration(
               isDense: true,
               counterText: '',
-              hintText: _chatMuted ? 'Sohbette susturuldunuz' : (_flyMode ? (_flyCost > 0 ? 'Uçan yazı ($_flyCost Coin)' : 'Uçan yazı') : 'Selam...'),
-              hintStyle: const TextStyle(color: Colors.black38),
+              hintText: _chatMuted ? 'Sohbette susturuldunuz' : (_flyMode ? (_flyCost > 0 ? 'Uçan yazı · $_flyCost Coin' : 'Uçan yazı') : 'Bir şeyler yaz...'),
+              hintStyle: const TextStyle(color: Colors.white38),
               filled: true,
-              fillColor: const Color(0xFFF1F2F4),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide.none),
-              suffixIcon: IconButton(onPressed: _chatOpen ? _emojiSheet : null, icon: const Icon(Icons.sentiment_satisfied_alt, color: Colors.black54)),
+              fillColor: const Color(0x1AFFFFFF),
+              contentPadding: const EdgeInsets.fromLTRB(16, 11, 4, 11),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: Color(0x26FFFFFF))),
+              disabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: Color(0x14FFFFFF))),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: Color(0x991FD6F5))),
+              suffixIcon: IconButton(onPressed: _chatOpen ? _emojiSheet : null, icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.white70)),
             ),
           ),
         ),
-        IconButton(onPressed: _sending || _chatMuted ? null : _sendChat, icon: const Icon(Icons.send, color: Color(0xFF16A34A))),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: canSend ? _sendChat : null,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: canSend ? const LinearGradient(colors: [Color(0xFF1FD6F5), Color(0xFFFF4F9A)]) : null,
+              color: canSend ? null : Colors.white12,
+              boxShadow: canSend ? const [BoxShadow(color: Color(0x551FD6F5), blurRadius: 10)] : null,
+            ),
+            child: _sending
+                ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
+          ),
+        ),
       ]),
     );
   }
@@ -3347,24 +3396,16 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           child: circle(Icons.mail_outline, 'Mesajlar', () => showInboxSheet(context)),
         ),
       );
-      final games = Tooltip(
-        message: 'Oyunlar',
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: _openGames,
-          child: Container(
-            decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFFEC4899), Color(0xFFF59E0B)])),
-            child: Icon(Icons.sports_esports, color: Colors.white, size: d * 0.56),
-          ),
-        ),
-      );
+      // Oda sesi (yalnızca bu cihazda): konuşanlar, müzik ve hediye sesleri. Oyunlar araçlar menüsünde.
+      final sound = circle(_roomMuted ? Icons.volume_off : Icons.volume_up, _roomMuted ? 'Oda sesini aç' : 'Oda sesini kapat', _toggleRoomSound,
+          color: _roomMuted ? Colors.redAccent : null);
       final menu = circle(Icons.grid_view_rounded, 'Oda araçları', _openTools);
 
       const step = 0.1435;
       final right = <Widget>[
         at(0.5, gift, size: g.giftBtn),
         at(0.5 + step, mail),
-        at(0.5 + step * 2, games),
+        at(0.5 + step * 2, sound),
         at(0.5 + step * 3, menu),
       ];
       final List<Widget> left;
@@ -3476,7 +3517,26 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 Positioned(left: 0, right: 0, top: MediaQuery.sizeOf(context).height * 0.36, child: EntranceStrip(queue: _entrance)),
-                MusicBubble(onOpen: _openMusic),
+                // Müzik: alt çubuk ya da küçültülmüş dönen plak (boş yerler dokunmayı engellemez).
+                Positioned.fill(
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _musicBarOpen,
+                    builder: (context, open, _) => Stack(children: [
+                      if (open && !_inputOpen)
+                        Positioned(
+                          left: 10,
+                          right: 10,
+                          bottom: g.barH + MediaQuery.paddingOf(context).bottom + 6,
+                          child: RoomMusicBar(
+                            canManage: _isManager,
+                            onOpen: () => showNowPlaying(context, roomId: widget.roomId, canManage: _isManager),
+                            onMinimize: () => _musicBarOpen.value = false,
+                          ),
+                        ),
+                      if (!open) MusicBubble(onOpen: () => _musicBarOpen.value = true),
+                    ]),
+                  ),
+                ),
                 for (final f in _flights)
                   _GiftFlight(key: ValueKey(f.id), data: f, onDone: () {
                     if (mounted) setState(() => _flights.removeWhere((x) => x.id == f.id));
@@ -3513,15 +3573,20 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
 }
 
 
+/// Sunucudan sayı ya da yazı olarak gelebilen adet.
+int? _asInt(Object? v) => v is num ? v.toInt() : int.tryParse('${v ?? ''}');
+
 class _GiftFlightData {
   final int id;
   final String icon;
   final Offset from;
   final Offset to;
-  _GiftFlightData(this.id, this.icon, this.from, this.to);
+  final int quantity;
+  _GiftFlightData(this.id, this.icon, this.from, this.to, [this.quantity = 1]);
 }
 
-/// Hediye ikonunun gönderenden alıcıya uçuşu: hafif yay çizer, büyüyüp küçülür, varınca kaybolur.
+/// Hediye ikonunun gönderenden alıcının mikrofonuna uçuşu (Yoho): çoklu gönderimde ikonlar art arda bir kuyruk
+/// hâlinde uçar (her birinde "xN"), öndekinin çevresinde altın parıltılar; varınca alıcının koltuğunda büyüyüp söner.
 class _GiftFlight extends StatefulWidget {
   final _GiftFlightData data;
   final VoidCallback onDone;
@@ -3532,8 +3597,11 @@ class _GiftFlight extends StatefulWidget {
 }
 
 class _GiftFlightState extends State<_GiftFlight> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1300))
-    ..forward().whenComplete(widget.onDone);
+  late final int _copies = widget.data.quantity <= 1 ? 1 : math.min(widget.data.quantity, 7);
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: 1300 + (_copies - 1) * 120),
+  )..forward().whenComplete(widget.onDone);
 
   @override
   void dispose() {
@@ -3541,30 +3609,83 @@ class _GiftFlightState extends State<_GiftFlight> with SingleTickerProviderState
     super.dispose();
   }
 
+  Widget _label(double size) => Text(
+        'x${widget.data.quantity}',
+        style: TextStyle(
+          fontSize: size * 0.34,
+          fontWeight: FontWeight.w900,
+          fontStyle: FontStyle.italic,
+          color: const Color(0xFFFFE066),
+          shadows: const [Shadow(color: Color(0xFF7A3B00), blurRadius: 2, offset: Offset(1, 1)), Shadow(color: Colors.black54, blurRadius: 4)],
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final d = widget.data;
+    final n = _copies;
+    final fly = n <= 1 ? 1.0 : 0.72; // her ikonun uçuş payı (toplam sürenin oranı)
+    final gap = n <= 1 ? 0.0 : (1 - fly) / (n - 1);
     return Positioned.fill(
       child: IgnorePointer(
         child: RepaintBoundary(
           child: AnimatedBuilder(
-          animation: _c,
-          builder: (_, __) {
-            final t = Curves.easeInOutCubic.transform(_c.value);
-            final arc = -60 * (1 - (2 * t - 1) * (2 * t - 1)); // ortada yukarı kavis
-            final pos = Offset.lerp(d.from, d.to, t)! + Offset(0, arc);
-            final size = 54.0 * (0.8 + 0.7 * (1 - (2 * t - 1).abs()));
-            final opacity = _c.value > 0.85 ? (1 - _c.value) / 0.15 : 1.0;
-            return Stack(children: [
-              Positioned(
-                left: pos.dx - size / 2,
-                top: pos.dy - size / 2,
-                width: size,
-                height: size,
-                child: Opacity(opacity: opacity.clamp(0.0, 1.0), child: NetImg(d.icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const SizedBox.shrink())),
-              ),
-            ]);
-          },
+            animation: _c,
+            builder: (_, __) {
+              final v = _c.value;
+              final items = <Widget>[];
+              // Arkadakiler önce çizilir; öndeki (ilk çıkan) en üstte.
+              for (var k = n - 1; k >= 0; k--) {
+                final start = k * gap;
+                if (v < start) continue;
+                final local = ((v - start) / fly).clamp(0.0, 1.0);
+                final last = k == n - 1;
+                if (local >= 1 && !last) continue; // vardı; son ikon varışta biraz kalır
+                final t = Curves.easeInOutCubic.transform(local);
+                final arc = -70 * (1 - (2 * t - 1) * (2 * t - 1)); // ortada yukarı kavis
+                final pos = Offset.lerp(d.from, d.to, t)! + Offset(0, arc);
+                var size = 58.0 * (0.85 + 0.55 * (1 - (2 * t - 1).abs()));
+                var opacity = 1.0;
+                if (last && local >= 0.92) {
+                  // Varış: alıcının koltuğunda büyüyüp söner.
+                  final p = ((local - 0.92) / 0.08).clamp(0.0, 1.0);
+                  size *= 1 + 0.5 * p;
+                  opacity = 1 - p;
+                }
+                if (k == 0 && local < 1) {
+                  // Öndeki ikonun çevresinde altın parıltılar.
+                  for (var j = 0; j < 6; j++) {
+                    final ang = j * math.pi / 3 + v * 6;
+                    final rad = size * (0.55 + 0.12 * math.sin(v * 20 + j));
+                    final sp = pos + Offset(math.cos(ang) * rad, math.sin(ang) * rad);
+                    final ss = 4.0 + 3 * (0.5 + 0.5 * math.sin(v * 30 + j * 2));
+                    items.add(Positioned(
+                      left: sp.dx - ss / 2,
+                      top: sp.dy - ss / 2,
+                      width: ss,
+                      height: ss,
+                      child: const DecoratedBox(
+                        decoration: BoxDecoration(shape: BoxShape.circle, color: Color(0xFFFFD54F), boxShadow: [BoxShadow(color: Color(0xAAFFC107), blurRadius: 6)]),
+                      ),
+                    ));
+                  }
+                }
+                items.add(Positioned(
+                  left: pos.dx - size / 2,
+                  top: pos.dy - size / 2,
+                  width: size,
+                  height: size,
+                  child: Opacity(
+                    opacity: opacity,
+                    child: Stack(clipBehavior: Clip.none, children: [
+                      Positioned.fill(child: NetImg(d.icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const SizedBox.shrink())),
+                      if (d.quantity > 1) Positioned(right: -size * 0.28, bottom: -size * 0.08, child: _label(size)),
+                    ]),
+                  ),
+                ));
+              }
+              return Stack(children: items);
+            },
           ),
         ),
       ),

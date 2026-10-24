@@ -39,9 +39,16 @@ export async function leaveRoom(userId, roomId) {
   await closeMicSessions(userId, roomId);
   await query(`DELETE FROM room_mic_queue WHERE room_id = $1 AND user_id = $2`, [roomId, userId]);
   await forfeitUserInRoom(userId, roomId).catch((e) => console.error('Oyundan çıkarma hatası:', e.message));
-  if (r.rows[0].role === 'owner') {
-    await closeRoom(roomId);
-    return true;
+  // Oda, sahibi ya da bir yöneticisi (yardımcı sahip / moderatör) içerideyken açık kalır. Sahip çıkınca içeride yönetici
+  // varsa oda kapanmaz (sahip dönünce yine sahip olarak girer); son yönetici de çıkınca ve sahip yoksa kapanır.
+  if (['owner', 'cohost', 'moderator'].includes(r.rows[0].role)) {
+    const staffLeft = (await query(
+      `SELECT 1 FROM room_members WHERE room_id = $1 AND role IN ('owner','cohost','moderator') LIMIT 1`, [roomId],
+    )).rowCount > 0;
+    if (!staffLeft) {
+      await closeRoom(roomId);
+      return true;
+    }
   }
   // Hayalet (SWIP) dinleyicinin çıkışı duyurulmaz (girişi de duyurulmamıştı).
   if (r.rows[0].microphone || !r.rows[0].ghost) hub.broadcastRoom(roomId, { type: 'room_member_left', roomId, userId });

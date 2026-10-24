@@ -8,6 +8,7 @@ import { cleanMultiline } from '../text_safety.js';
 import { screenText } from '../services/moderation.js';
 import { publicUser, USER_PUBLIC_COLUMNS, USER_PUBLIC_JOINS } from '../views.js';
 import { saveUpload, removeUpload, IMAGE_TYPES, OWN_IMAGE_RE } from '../services/images.js';
+import { notifyUser } from '../services/notify.js';
 
 export const router = Router();
 const PAGE = 20;
@@ -146,13 +147,17 @@ router.delete('/posts/:id', requireAuth, async (req, res) => {
 
 async function setLike(req, res, like) {
   const id = uuid(req.params.id);
-  const post = (await query(`SELECT 1 FROM posts WHERE id = $1 AND is_removed = FALSE`, [id])).rowCount;
+  const post = (await query(`SELECT user_id FROM posts WHERE id = $1 AND is_removed = FALSE`, [id])).rows[0];
   if (!post) throw fail('Gönderi bulunamadı.', 404);
   const q = like
     ? `INSERT INTO post_likes(post_id, user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`
     : `DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2`;
   const changed = (await query(q, [id, req.user.id])).rowCount;
   if (changed) await query(`UPDATE posts SET like_count = GREATEST(0, like_count + $2) WHERE id = $1`, [id, like ? 1 : -1]);
+  // Anı sahibine "beğendi" bildirimi (kendi beğenisi ve gizli kullanıcı hariç).
+  if (changed && like && post.user_id !== req.user.id && !req.user.is_hidden) {
+    notifyUser(post.user_id, 'post_like', '❤️ Anın beğenildi', `${req.user.display_name || req.user.username} anını beğendi.`, { postId: id, userId: req.user.id });
+  }
   const n = (await query(`SELECT like_count FROM posts WHERE id = $1`, [id])).rows[0].like_count;
   res.json({ liked: like, likeCount: n });
 }
@@ -174,9 +179,12 @@ router.post('/posts/:id/comments', requireAuth, userLimit('post_comment', 60, 36
   const id = uuid(req.params.id);
   const body = await checkText(req.user, req.body?.text, 300, 'comment');
   if (!body) throw fail('Yorum boş olamaz.');
-  const post = (await query(`SELECT 1 FROM posts WHERE id = $1 AND is_removed = FALSE`, [id])).rowCount;
+  const post = (await query(`SELECT user_id FROM posts WHERE id = $1 AND is_removed = FALSE`, [id])).rows[0];
   if (!post) throw fail('Gönderi bulunamadı.', 404);
   const c = (await query(`INSERT INTO post_comments(post_id, user_id, body) VALUES($1,$2,$3) RETURNING id, created_at`, [id, req.user.id, body])).rows[0];
   await query(`UPDATE posts SET comment_count = comment_count + 1 WHERE id = $1`, [id]);
+  if (post.user_id !== req.user.id && !req.user.is_hidden) {
+    notifyUser(post.user_id, 'post_comment', '💬 Anına yorum', `${req.user.display_name || req.user.username}: ${body}`, { postId: id, userId: req.user.id });
+  }
   res.status(201).json({ comment: { id: c.id, text: body, createdAt: c.created_at } });
 });

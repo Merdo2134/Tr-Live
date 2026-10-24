@@ -1,5 +1,5 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 // NotificationVisibility iki pakette de var; balon için flutter_overlay_window'unki kullanılır.
 import 'package:flutter_foreground_task/flutter_foreground_task.dart' hide NotificationVisibility;
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
@@ -19,9 +19,23 @@ class BackgroundService with WidgetsBindingObserver {
 
   bool _inited = false;
   bool _running = false;
-  bool _withMic = false;
+  bool _withMic = false; // servis "mikrofon" türüyle mi çalışıyor
+  bool _wantMic = false; // kullanıcı mikrofonda mı
+  bool _foreground = true; // uygulama ekranda mı (Android 12+ arka plandan servis başlatmaya izin vermez)
+  bool _wasHidden = false; // gerçekten arka plana gidildi mi (bildirim perdesi / izin penceresi sayılmaz)
+
+  /// Mikrofon izni verilmiş mi (verilmemişse "mikrofon" türlü servis denenmez; Android 14 reddeder ve 5 sn bekletir).
+  Future<bool> _micAllowed() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return true;
+    try {
+      return await const MethodChannel('trlive/device').invokeMethod<bool>('hasMicPermission') ?? false;
+    } on MissingPluginException {
+      return true; // ana ekran kodu yok (eski derleme): mikrofon türü yine denenir, olmazsa yalnız medya türü açılır
+    } catch (_) {
+      return false;
+    }
+  }
   String _roomName = 'Oda';
-  StreamSubscription? _overlaySub;
 
   /// Uygulama açılırken bir kez çağrılır.
   void init() {
@@ -47,16 +61,6 @@ class BackgroundService with WidgetsBindingObserver {
     } catch (e, s) {
       ErrorLog.add('Arka plan servisi hazırlanamadı', e, s);
     }
-    try {
-      // Balona dokunulunca uygulamayı öne getir.
-      // Önceki dinleyici varsa kapatılır (tek dinleyici kalsın).
-      _overlaySub?.cancel();
-      _overlaySub = FlutterOverlayWindow.overlayListener.listen((data) {
-        if (data == 'open') FlutterForegroundTask.launchApp();
-      });
-    } catch (e, s) {
-      ErrorLog.add('Balon dinleyicisi kurulamadı', e, s);
-    }
   }
 
   // ---------- Oda açılınca / kapanınca ----------
@@ -71,49 +75,80 @@ class BackgroundService with WidgetsBindingObserver {
 
   Future<void> roomOpened(String name) => _queue(() async {
         _roomName = name;
+        if (_running) {
+          // Oda değişti: servis açık kalır, yalnız bildirim yazısı güncellenir.
+          try {
+            await FlutterForegroundTask.updateService(notificationText: '$name odasındasınız · dönmek için dokun');
+          } catch (_) {}
+          return;
+        }
         await _startService();
       });
 
   Future<void> roomClosed() => _queue(() async {
         _withMic = false;
-        await _hideBubble();
+        _wantMic = false;
         await _stopService();
       });
 
-  /// Mikrofona çıkınca/inince servis türü güncellenir (Android mikrofonu yalnızca "microphone" türlü servise açık tutar).
+  /// Mikrofona çıkınca/inince çağrılır. Servis mümkünse baştan "mikrofon" türüyle açılır; bu yüzden çoğu zaman
+  /// hiçbir şey yapılmaz. Servisi yeniden başlatmak gerekiyorsa yalnızca uygulama ekrandayken yapılır:
+  /// arka planda kapatılan servis Android 12+ tarafından yeniden açtırılmaz ve oda bağlantısı düşer.
   Future<void> micChanged(bool onMic) => _queue(() async {
-        if (_withMic == onMic) return;
-        _withMic = onMic;
-        if (_running) {
-          await _stopService();
+        _wantMic = onMic;
+        if (!_running && _foreground && RoomDock.isOpen) {
           await _startService();
+          return;
         }
+        if (!onMic || _withMic || !_running || !_foreground || !await _micAllowed()) return;
+        await _restart();
       });
 
+  Future<void> _restart() async {
+    await _stopService();
+    await _startService();
+  }
+
+  /// Servis; mikrofon izni varsa mikrofon + medya türüyle, yoksa yalnız medya türüyle açılır.
   Future<void> _startService() async {
     if (_running) return;
+    if (await _micAllowed() && await _tryStart(withMic: true)) return;
+    await _tryStart(withMic: false);
+  }
+
+  Future<bool> _tryStart({required bool withMic}) async {
     try {
-      final types = <ForegroundServiceTypes>[
-        ForegroundServiceTypes.mediaPlayback,
-        if (_withMic) ForegroundServiceTypes.microphone,
-      ];
       final result = await FlutterForegroundTask.startService(
         serviceId: 4721,
-        serviceTypes: types,
+        serviceTypes: [ForegroundServiceTypes.mediaPlayback, if (withMic) ForegroundServiceTypes.microphone],
         notificationTitle: 'TR Live',
-        notificationText: '$_roomName odasındasınız',
+        notificationText: '$_roomName odasındasınız · dönmek için dokun',
       );
       _running = result is ServiceRequestSuccess;
+      if (_running) _withMic = withMic;
+      if (result is ServiceRequestFailure && !withMic) ErrorLog.add('Ön plan servisi başlatılamadı', result.error, StackTrace.current);
+      return _running;
     } catch (e, s) {
       _running = false;
-      ErrorLog.add('Ön plan servisi başlatılamadı', e, s);
-      // Mikrofon izni yoksa microphone türü reddedilebilir; yalnız dinleme türüyle yeniden dene.
-      if (_withMic) {
-        _withMic = false;
-        await _startService();
-      }
+      // Mikrofon izni yoksa "mikrofon" türü reddedilir; yalnız medya türüyle denenir (hata kaydı gerekmez).
+      if (!withMic) ErrorLog.add('Ön plan servisi başlatılamadı', e, s);
+      return false;
     }
   }
+
+  /// Uygulama ekrana dönünce: servis bir sebeple kapandıysa yeniden açılır; mikrofondayken servis mikrofon türünde
+  /// değilse (izin sonradan verildi) şimdi yükseltilir.
+  Future<void> _ensureOnResume() => _queue(() async {
+        if (!RoomDock.isOpen || !_foreground) return;
+        try {
+          _running = await FlutterForegroundTask.isRunningService;
+        } catch (_) {}
+        if (!_running) {
+          await _startService();
+        } else if (_wantMic && !_withMic && _foreground && await _micAllowed()) {
+          await _restart();
+        }
+      });
 
   Future<void> _stopService() async {
     try {
@@ -124,69 +159,33 @@ class BackgroundService with WidgetsBindingObserver {
     _running = false;
   }
 
-  // ---------- İzinler (kullanıcıya bir kez sorulur) ----------
-  /// Odaya ilk girişte çağrılır: bildirim, pil kısıtlaması ve "diğer uygulamaların üzerinde göster" izni.
+  // ---------- İzin (bir kez) ----------
+  /// Odaya ilk girişte çağrılır. Tek izin: bildirim (Android 13+). Odadayken üstte sabit "… odasındasınız" bildirimi
+  /// görünür; dokununca odaya dönülür. Balon ve pil izni yoktur. Android'in kendi penceresi açılır, ek soru sorulmaz.
   Future<void> ensurePermissions(Future<bool> Function(String message, String action) ask) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('asked_notification') ?? false) return;
+      await prefs.setBool('asked_notification', true);
       if (await FlutterForegroundTask.checkNotificationPermission() != NotificationPermission.granted) {
         await FlutterForegroundTask.requestNotificationPermission();
       }
-      if (!(prefs.getBool('asked_battery') ?? false)) {
-        await prefs.setBool('asked_battery', true);
-        if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations &&
-            await ask('Oda kapanmasın diye arka planda kısıtlanmamanız gerekir. Pil kısıtlamasını kaldırmak için izin verin.', 'İzin ver')) {
-          await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-        }
-      }
-      if (!(prefs.getBool('asked_overlay') ?? false)) {
-        await prefs.setBool('asked_overlay', true);
-        if (!await FlutterOverlayWindow.isPermissionGranted() &&
-            await ask('Başka uygulamadayken odanın üstünde küçük bir balon kalması için "Diğer uygulamaların üzerinde göster" iznini açın.', 'Ayarları aç')) {
-          await FlutterOverlayWindow.requestPermission();
-        }
-      }
     } catch (e, s) {
-      ErrorLog.add('İzinler istenemedi', e, s);
-    }
-  }
-
-  // ---------- Yüzen balon ----------
-  Future<void> _showBubble() async {
-    try {
-      if (!RoomDock.isOpen || !await FlutterOverlayWindow.isPermissionGranted()) return;
-      if (await FlutterOverlayWindow.isActive()) return;
-      await FlutterOverlayWindow.showOverlay(
-        enableDrag: true,
-        overlayTitle: 'TR Live',
-        overlayContent: '$_roomName odasındasınız',
-        flag: OverlayFlag.defaultFlag,
-        visibility: NotificationVisibility.visibilityPublic,
-        positionGravity: PositionGravity.auto,
-        height: 190,
-        width: 190,
-      );
-    } catch (e, s) {
-      ErrorLog.add('Balon gösterilemedi', e, s);
-    }
-  }
-
-  Future<void> _hideBubble() async {
-    try {
-      if (await FlutterOverlayWindow.isActive()) await FlutterOverlayWindow.closeOverlay();
-    } catch (e, s) {
-      ErrorLog.add('Balon kapatılamadı', e, s);
+      ErrorLog.add('Bildirim izni istenemedi', e, s);
     }
   }
 
   // ---------- Uygulama ön/arka plan ----------
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      _showBubble();
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _foreground = false;
+      _wasHidden = true;
     } else if (state == AppLifecycleState.resumed) {
-      _hideBubble();
-      SocketService.instance.reconnectNow();
+      _foreground = true;
+      _ensureOnResume();
+      if (_wasHidden) SocketService.instance.reconnectNow();
+      _wasHidden = false;
     }
   }
 }
