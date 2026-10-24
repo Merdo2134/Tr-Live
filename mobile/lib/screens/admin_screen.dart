@@ -174,6 +174,65 @@ Widget mediaPreview(String? url, {bool frame = false, double size = 170}) {
   );
 }
 
+/// Hediyenin küçük resmi (png); dokununca animasyon ayrı pencerede oynar (listede hepsi birden oynayıp donmasın).
+Widget giftThumb(BuildContext context, Map<String, dynamic> g, double size) {
+  final icon = Api.absoluteUrl((g['iconUrl'] as String?)?.trim().isNotEmpty == true ? g['iconUrl'] as String : null);
+  return GestureDetector(
+    onTap: () => previewAnimation(context, g['name']?.toString() ?? '', g['animationUrl'] as String?, format: g['animationFormat'] as String?),
+    child: Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF0B3C5D), Color(0xFF061A2B)]),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Stack(alignment: Alignment.center, children: [
+        if (icon != null)
+          Padding(
+            padding: EdgeInsets.all(size * 0.08),
+            child: NetImg(icon, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.card_giftcard, color: Colors.white38, size: 40)),
+          )
+        else
+          const Icon(Icons.card_giftcard, color: Colors.white38, size: 40),
+        Positioned(
+          right: 6,
+          bottom: 6,
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
+            child: const Icon(Icons.play_arrow, size: 18, color: Colors.white),
+          ),
+        ),
+      ]),
+    ),
+  );
+}
+
+/// Animasyonu ayrı pencerede oynatır (önizleme).
+void previewAnimation(BuildContext context, String name, String? url, {String? format}) {
+  final u = Api.absoluteUrl(url != null && url.trim().isNotEmpty ? url.trim() : null);
+  if (u == null) {
+    toast(context, 'Bu hediyenin animasyon dosyası yok.', error: true);
+    return;
+  }
+  showDialog<void>(
+    context: context,
+    builder: (c) => Dialog(
+      backgroundColor: const Color(0xFF15151A),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 12),
+          SizedBox(width: 270, height: 420, child: AnimAsset(url: u, format: format, repeat: true, fit: BoxFit.contain)),
+          const SizedBox(height: 10),
+          FilledButton(onPressed: () => Navigator.pop(c), child: const Text('Kapat')),
+        ]),
+      ),
+    ),
+  );
+}
+
 /// Katalogdaki tüm hediye ve çerçeveleri önizlemeyle listeler; açıp kapatma ve "bana ver" burada.
 class CatalogListPage extends StatefulWidget {
   const CatalogListPage({super.key});
@@ -262,7 +321,15 @@ class _CatalogListPageState extends State<CatalogListPage> {
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(children: [
-          Expanded(child: LayoutBuilder(builder: (c, box) => Center(child: mediaPreview((frame ? it['imageUrl'] : it['animationUrl'] ?? it['iconUrl']) as String?, frame: frame, size: box.biggest.shortestSide)))),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (c, box) => Center(
+                child: frame
+                    ? mediaPreview(it['imageUrl'] as String?, frame: true, size: box.biggest.shortestSide)
+                    : giftThumb(context, it, box.biggest.shortestSide),
+              ),
+            ),
+          ),
           const SizedBox(height: 6),
           Text(it['name'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
           if (!frame) Text('${fmtNumber(it['coinPrice'])} coin · ${it['category']}${it['playMode'] == 'seat' ? ' · mikte' : ''}', style: const TextStyle(color: Colors.white54, fontSize: 12)),

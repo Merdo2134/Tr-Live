@@ -1,3 +1,10 @@
+## v2.64.1 — Katalog donması, oda duyuruları, hediye düğmesi
+- Katalog önizlemede hediyeler artık küçük resim (png) olarak görünür; animasyon yalnızca karta dokununca ayrı pencerede
+  oynar (169 hediyenin hepsi birden oynayıp sayfayı donduruyordu).
+- Oda duyurusu ve uygulama duyurusu: odaya ilk girişte kısa süre, ayrıca sohbette kimsenin yazısı yokken (ör. sohbet
+  temizlenince) görünür; biri yazınca kalkar.
+- Oda içi hediye kutusu düğmesi eski (mor-mavi) haline döndü.
+
 ## v2.64.0 — Siyah-altın tema, gizli depoda sunucu güncellemesi
 - Uygulamanın tamamı giriş ekranındaki siyah-altın renklere geçti: zemin sıcak siyah, vurgu rengi altın (düğmeler, sekmeler,
   seçili simgeler, anahtarlar, yazı alanları), ikinci vurgu turuncu-altın. Mavi/mor degradeler (hediye düğmesi, gönder,

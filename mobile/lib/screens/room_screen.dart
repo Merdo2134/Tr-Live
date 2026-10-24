@@ -1789,9 +1789,13 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
     // Sabit başlık kartları: uygulama uyarı duyurusu ve oda duyurusu.
     final ann = (_room?['announcement'] ?? '').toString().trim();
     final maxW = w * 0.78;
+    // Duyurular: odaya ilk girişte kısa süre, ayrıca sohbette kimsenin yazısı yokken (ör. sohbet temizlenince) görünür;
+    // biri yazınca kalkar.
+    final noText = !_messages.any((m) => m['join'] != true && m['follow'] != true && m['system'] != true);
+    final showHeads = _showHeads || noText;
     final heads = <Widget>[
-      if (_showHeads && _appNotice.isNotEmpty && !overlay) _noticeCard(maxW),
-      if (_showHeads && ann.isNotEmpty) _announcementCard(ann, maxW),
+      if (showHeads && _appNotice.isNotEmpty && !overlay) _noticeCard(maxW),
+      if (showHeads && ann.isNotEmpty) _announcementCard(ann, maxW),
     ];
     final head = heads.length;
     if (_messages.isEmpty && head == 0) return const SizedBox.shrink();
@@ -3412,10 +3416,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           child: Container(
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: kGoldLight),
-              boxShadow: [BoxShadow(color: Color(0x66E6B13A), blurRadius: 10)],
+              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF8B5CF6), Color(0xFF6366F1), Color(0xFF38BDF8)]),
+              boxShadow: [BoxShadow(color: Color(0x667C3AED), blurRadius: 10)],
             ),
-            child: Icon(Icons.redeem, color: Pal.onBright, size: g.giftBtn * 0.54),
+            child: Icon(Icons.redeem, color: Colors.white, size: g.giftBtn * 0.54),
           ),
         ),
       );
