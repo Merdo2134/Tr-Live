@@ -578,6 +578,61 @@ router.post('/catalog/:kind/:id/active', requireSuperAdmin, async (req, res) => 
   res.json({ ok: true });
 });
 
+// Ad / fiyat düzenleme (hediye, çerçeve, mağaza ürünü). Gönderilmeyen alan değişmez.
+const GIFT_TABS = ['event', 'popular', 'private', 'vip', 'lucky', 'cp'];
+router.post('/gifts/:id/edit', requireSuperAdmin, async (req, res) => {
+  const id = uuid(req.params.id, 'Kimlik');
+  const b = req.body ?? {};
+  const name = b.name === undefined ? null : text(b.name, 'Ad', { min: 2, max: 80, required: true });
+  const price = b.coinPrice === undefined ? null : bigAmount(b.coinPrice, 'Fiyat').toString();
+  const category = b.category === undefined ? null : oneOf(b.category, GIFT_TABS, 'Hediye sekmesi');
+  const r = await query(
+    `UPDATE gifts SET name = COALESCE($2, name), coin_price = COALESCE($3::bigint, coin_price), category = COALESCE($4, category) WHERE id = $1 RETURNING id`,
+    [id, name, price, category],
+  );
+  if (!r.rowCount) throw fail('Hediye bulunamadı.', 404);
+  res.json({ ok: true });
+});
+router.post('/frames/:id/edit', requireSuperAdmin, async (req, res) => {
+  const id = uuid(req.params.id, 'Kimlik');
+  const name = text(req.body?.name, 'Ad', { min: 2, max: 100, required: true });
+  const r = await tx(async (c) => {
+    const u = await c.query(`UPDATE frames SET name = $2 WHERE id = $1 RETURNING id`, [id, name]);
+    if (u.rowCount) await c.query(`UPDATE store_items SET name = $2 WHERE category = 'frame' AND ref_id = $1`, [id, name]);
+    return u;
+  });
+  if (!r.rowCount) throw fail('Çerçeve bulunamadı.', 404);
+  res.json({ ok: true });
+});
+router.post('/store/items/:id/edit', requireSuperAdmin, async (req, res) => {
+  const id = uuid(req.params.id, 'Kimlik');
+  const b = req.body ?? {};
+  const name = b.name === undefined ? null : text(b.name, 'Ad', { min: 2, max: 100, required: true });
+  // Mağaza ürününün fiyatı 0 olabilir (yalnızca yöneticinin verdiği ürünler).
+  const price = b.priceCoins === undefined ? null
+    : (/^0+$/.test(String(b.priceCoins).trim()) ? '0' : bigAmount(b.priceCoins, 'Fiyat').toString());
+  const days = b.durationDays === undefined ? null : positiveInt(b.durationDays, 'Süre (gün)', 3650);
+  if (b.forSale !== undefined && typeof b.forSale !== 'boolean') throw fail('forSale true/false olmalı.');
+  const forSale = b.forSale === undefined ? null : b.forSale;
+  const r = await tx(async (c) => {
+    const u = await c.query(
+      `UPDATE store_items SET name = COALESCE($2, name), price_coins = COALESCE($3::bigint, price_coins),
+         duration_days = COALESCE($4::int, duration_days),
+         for_sale = COALESCE($5::boolean, for_sale) AND category <> 'badge' AND COALESCE($3::bigint, price_coins) > 0
+       WHERE id = $1 RETURNING category, ref_id`,
+      [id, name, price, days, forSale],
+    );
+    const it = u.rows[0];
+    if (it && name && it.ref_id) {
+      if (it.category === 'frame') await c.query(`UPDATE frames SET name = $2 WHERE id = $1`, [it.ref_id, name]);
+      if (it.category === 'entrance_effect') await c.query(`UPDATE entrance_effects SET name = $2 WHERE id = $1`, [it.ref_id, name]);
+    }
+    return u;
+  });
+  if (!r.rowCount) throw fail('Ürün bulunamadı.', 404);
+  res.json({ ok: true });
+});
+
 // ---------------- Bayi (yalnızca yönetici) ----------------
 router.get('/dealers', requireSuperAdmin, async (req, res) => {
   const r = await query(

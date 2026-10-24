@@ -28,7 +28,7 @@ router.get('/items', async (req, res) => {
   const category = req.query.category ? String(req.query.category) : null;
   if (category && !STORE_CATEGORIES.includes(category)) throw fail('Geçersiz kategori.');
   const r = await query(
-    `SELECT * FROM store_items WHERE is_active = TRUE AND for_sale = TRUE AND category <> 'badge' AND ($1::text IS NULL OR category = $1)
+    `SELECT * FROM store_items WHERE is_active = TRUE AND for_sale = TRUE AND price_coins > 0 AND category <> 'badge' AND ($1::text IS NULL OR category = $1)
      ORDER BY sort_order, created_at DESC LIMIT 200`,
     [category],
   );
@@ -40,7 +40,7 @@ router.post('/buy', userLimit('store_buy', 30, 3600e3), idempotent('store_buy'),
   const itemId = uuid(req.body?.itemId, 'Ürün');
   const toUserId = req.body?.toUserId ? uuid(req.body.toUserId, 'Alıcı') : req.user.id;
   const result = await tx(async (c) => {
-    const item = (await c.query(`SELECT * FROM store_items WHERE id = $1 AND is_active = TRUE AND for_sale = TRUE AND category <> 'badge'`, [itemId])).rows[0];
+    const item = (await c.query(`SELECT * FROM store_items WHERE id = $1 AND is_active = TRUE AND for_sale = TRUE AND price_coins > 0 AND category <> 'badge'`, [itemId])).rows[0];
     if (!item) throw fail('Ürün bulunamadı.', 404);
     if (toUserId !== req.user.id) {
       const u = (await c.query(`SELECT account_status FROM users WHERE id = $1`, [toUserId])).rows[0];

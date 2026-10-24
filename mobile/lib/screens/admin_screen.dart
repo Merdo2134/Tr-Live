@@ -75,6 +75,72 @@ Future<String?> autoIconFromAnimation(BuildContext context, String animUrl) asyn
   }
 }
 
+/// Hediye / çerçeve / mağaza ürünü düzenleme penceresi. [price] null ise fiyat alanı, [category] null ise sekme seçimi,
+/// [days] null ise süre alanı, [forSale] null ise "mağazada satılsın" anahtarı gösterilmez. Değişen alanları döndürür.
+Future<Map<String, dynamic>?> editItemDialog(BuildContext context, {required String title, required String name, String? price, String? category, int? days, bool? forSale}) async {
+  final nameC = TextEditingController(text: name);
+  final priceC = TextEditingController(text: price ?? '');
+  final daysC = TextEditingController(text: days?.toString() ?? '');
+  var cat = category;
+  var sale = forSale;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setS) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: nameC, maxLength: 80, decoration: const InputDecoration(labelText: 'Ad', counterText: '')),
+            if (price != null)
+              TextField(controller: priceC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Fiyat (coin)')),
+            if (days != null)
+              TextField(controller: daysC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Süre (gün)')),
+            if (cat != null)
+              DropdownButtonFormField<String>(
+                value: cat,
+                decoration: const InputDecoration(labelText: 'Hediye sekmesi'),
+                items: const [
+                  DropdownMenuItem(value: 'popular', child: Text('Popüler')),
+                  DropdownMenuItem(value: 'event', child: Text('Etkinlik')),
+                  DropdownMenuItem(value: 'private', child: Text('Kişiye Özel')),
+                  DropdownMenuItem(value: 'vip', child: Text('Vip (WIP 3+)')),
+                  DropdownMenuItem(value: 'lucky', child: Text('Şanslı')),
+                  DropdownMenuItem(value: 'cp', child: Text('CP (yakınlık 1,5 kat)')),
+                ],
+                onChanged: (v) => setS(() => cat = v ?? cat),
+              ),
+            if (sale != null)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Mağazada satılsın'),
+                value: sale!,
+                onChanged: (v) => setS(() => sale = v),
+              ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Kaydet')),
+        ],
+      ),
+    ),
+  );
+  final out = <String, dynamic>{
+    'name': nameC.text.trim(),
+    if (price != null) 'price': priceC.text.trim(),
+    if (days != null) 'days': daysC.text.trim(),
+    if (cat != null) 'category': cat,
+    if (sale != null) 'forSale': sale,
+  };
+  // Pencere kapanış animasyonu bitince bırakılır (kapanırken alanlar hâlâ çiziliyor olabilir).
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    nameC.dispose();
+    priceC.dispose();
+    daysC.dispose();
+  });
+  return ok == true ? out : null;
+}
+
 /// Yüklenen dosyanın canlı önizlemesi (hediye animasyonu veya çerçeve).
 Widget mediaPreview(String? url, {bool frame = false, double size = 170}) {
   final u = Api.absoluteUrl(url != null && url.trim().isNotEmpty ? url.trim() : null);
@@ -147,6 +213,20 @@ class _CatalogListPageState extends State<CatalogListPage> {
     }
   }
 
+  Future<void> _edit(Map<String, dynamic> it, {required bool frame}) async {
+    final v = frame
+        ? await editItemDialog(context, title: 'Çerçeveyi düzenle', name: it['name'].toString())
+        : await editItemDialog(context, title: 'Hediyeyi düzenle', name: it['name'].toString(), price: it['coinPrice']?.toString() ?? '', category: (it['category'] ?? 'popular').toString());
+    if (v == null || !mounted) return;
+    final price = (v['price'] ?? '').toString();
+    final body = <String, dynamic>{'name': v['name'], if (!frame && price.isNotEmpty) 'coinPrice': price, if (!frame) 'category': v['category']};
+    final r = await guard(context, () => Api.post('/api/admin/${frame ? 'frames' : 'gifts'}/${it['id']}/edit', body));
+    if (r != null && mounted) {
+      toast(context, 'Kaydedildi.');
+      _load();
+    }
+  }
+
   Future<void> _grantSelf(Map<String, dynamic> f) async {
     final r = await guard(context, () => Api.post('/api/admin/users/${Session.id}/inventory', {'itemType': 'frame', 'itemKey': f['id'], 'itemName': f['name']}));
     if (r != null && mounted) toast(context, '"${f['name']}" envanterine eklendi.');
@@ -168,6 +248,7 @@ class _CatalogListPageState extends State<CatalogListPage> {
           ]),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             if (frame) TextButton(onPressed: () => _grantSelf(it), child: const Text('Bana ver')),
+            TextButton(onPressed: () => _edit(it, frame: frame), child: const Text('Düzenle')),
             TextButton(style: TextButton.styleFrom(foregroundColor: Colors.redAccent), onPressed: () => _delete(frame ? 'frames' : 'gifts', it), child: const Text('Sil')),
           ]),
         ]),
@@ -1419,10 +1500,36 @@ class StoreItemsPage extends StatefulWidget {
 class _StoreItemsPageState extends State<StoreItemsPage> {
   int _v = 0;
 
+  Future<void> _edit(Map<String, dynamic> it) async {
+    final badge = it['category'] == 'badge';
+    final v = await editItemDialog(
+      context,
+      title: 'Ürünü düzenle',
+      name: it['name'].toString(),
+      price: it['priceCoins']?.toString() ?? '',
+      days: (it['durationDays'] as num?)?.toInt() ?? 14,
+      forSale: badge ? null : it['forSale'] != false,
+    );
+    if (v == null || !mounted) return;
+    final price = (v['price'] ?? '').toString();
+    final days = (v['days'] ?? '').toString();
+    final body = <String, dynamic>{
+      'name': v['name'],
+      if (price.isNotEmpty) 'priceCoins': price,
+      if (days.isNotEmpty) 'durationDays': days,
+      if (!badge) 'forSale': v['forSale'],
+    };
+    final r = await guard(context, () => Api.post('/api/admin/store/items/${it['id']}/edit', body));
+    if (r != null && mounted) {
+      toast(context, 'Kaydedildi.');
+      setState(() => _v++);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mağaza ürünleri (silmek için sola kaydır)')),
+      appBar: AppBar(title: const Text('Mağaza ürünleri (dokun: düzenle · sola kaydır: sil)')),
       body: AsyncBody<List<Map<String, dynamic>>>(
         version: _v,
         load: () async => listOf((await Api.get('/api/admin/store/items'))['items']),
@@ -1451,15 +1558,21 @@ class _StoreItemsPageState extends State<StoreItemsPage> {
                       }
                       return false;
                     },
-                    child: SwitchListTile(
-                    secondary: SizedBox(width: 48, height: 48, child: mediaPreview(it['imageUrl'] as String?, frame: it['category'] == 'frame', size: 48)),
+                    child: ListTile(
+                    leading: SizedBox(width: 48, height: 48, child: mediaPreview(it['imageUrl'] as String?, frame: it['category'] == 'frame', size: 48)),
                     title: Text(it['name'].toString()),
                     subtitle: Text('${it['category']} · ${fmtNumber(it['priceCoins'])} coin · ${it['durationDays']} gün${it['forSale'] == false ? ' · mağazada değil' : ''}'),
-                    value: it['isActive'] == true,
-                    onChanged: (v) async {
-                      final r = await guard(context, () => Api.post('/api/admin/store/items/${it['id']}/active', {'isActive': v}));
-                      if (r != null && mounted) setState(() => _v++);
-                    },
+                    onTap: () => _edit(it),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton(tooltip: 'Düzenle', icon: const Icon(Icons.edit_outlined), onPressed: () => _edit(it)),
+                      Switch(
+                        value: it['isActive'] == true,
+                        onChanged: (v) async {
+                          final r = await guard(context, () => Api.post('/api/admin/store/items/${it['id']}/active', {'isActive': v}));
+                          if (r != null && mounted) setState(() => _v++);
+                        },
+                      ),
+                    ]),
                   ),
                   ),
               ]),

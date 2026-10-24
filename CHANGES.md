@@ -1,3 +1,16 @@
+## v2.58.1 — Derleme hatası düzeltmesi
+- APK derlemesi "defaultTargetPlatform tanımsız" hatasıyla duruyordu (arka plan servisi dosyasında eksik içe aktarma). Düzeltildi.
+
+## v2.58.0 — Yeni hediye ve çerçeveler, yönetimde düzenleme
+- Gönderilen videolardan siyah arka plan kaldırıldı, şeffaf yapıldı ve uygulamaya eklendi (sunucu açılınca bir kez eklenir):
+  - 12 hareketli çerçeve (Coins Mağazası → çerçeve, 30 gün, 5.000 coin). Avatar her çerçevenin ortasına oturur.
+  - 107 sesli tam ekran hediye (hepsi aynı ölçüde, 540x960): Popüler, Etkinlik (ülkeler, Ramazan, Yeni Yıl), CP (yüzük, düğün, gelinlik) ve VIP
+    (arabalar, aslan, ejderha, yat...) sekmelerinde. Kendi arka planı olan sahneler kenarları yumuşatılmış tam ekran oynar.
+- Hediye ve çerçeve dosyaları büyük olduğu için ayrı "TR-Live-paket-N.zip" dosyalarıyla gelir; zip_ile_guncelle.yml
+  bunları ekler ve sonraki güncellemelerde korur (yml elle yüklenmeli).
+- Yönetim: hediyelerin adı, fiyatı ve sekmesi; çerçevelerin adı; mağaza ürünlerinin adı, fiyatı, süresi ve satışta olup
+  olmadığı düzenlenebilir (Katalog önizleme → Düzenle, Mağaza ürünleri → dokun).
+
 ## v2.57.0 — Müzik çalar, bildirimler, aile sohbeti (2. bölüm)
 - Müzik çalar baştan: "Müzik" listesi (N PARÇA, arama, düzenle), "Telefondan Ekle" (telefondaki ses dosyaları otomatik
   taranır, Ekle / Eklendi, Tümünü ekle), "Şimdi Çalıyor" (dönen plak, ilerleme, önceki / oynat / sonraki, Karıştır /

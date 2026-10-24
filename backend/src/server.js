@@ -50,6 +50,7 @@ import { startAvatarSweeper } from './services/avatar_sweeper.js';
 import { startPkTicker } from './services/pk.js';
 import { startGameTicker } from './services/games.js';
 import { closeStaleMicSessions } from './services/mic.js';
+import { seedAssetPacks } from './asset_packs.js';
 import { firewall, bodyGuard, ipLimit, loadBans, startFirewallJanitor, wsClientIp, isBanned, noteViolation } from './firewall.js';
 
 validateConfig();
@@ -236,6 +237,7 @@ const idemJanitor = setInterval(nonOverlapping(() => pruneIdempotencyKeys().catc
 idemJanitor.unref();
 loadBans().then((n) => n && console.log(`${n} aktif IP yasağı yüklendi.`)).catch((e) => console.error('IP yasakları yüklenemedi:', e.message));
 promoteBootstrapAdmins().catch((e) => console.error('ADMIN_USERNAMES uygulanamadı:', e.message));
+seedAssetPacks().then((n) => n && console.log(`${n} hazır hediye / çerçeve eklendi.`)).catch((e) => console.error('Hazır paket eklenemedi:', e.message));
 
 server.listen(config.port, () => console.log(`TR Live backend ${config.port} portunda çalışıyor.`));
 

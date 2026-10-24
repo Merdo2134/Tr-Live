@@ -46,11 +46,42 @@ class MediaCache {
     });
   }
 
+  static final List<String> _queue = [];
+  static final Set<String> _queued = {};
+  static int _running = 0;
+  static const int _parallel = 3;
+
   /// Arka planda önceden indirir (hediye paneli açılınca); hatalar yutulur.
-  static void prefetch(Iterable<String?> urls) {
+  /// Aynı anda en fazla 3 dosya indirilir (çok sayıda hediye telefonu ve interneti boğmasın).
+  /// [first] true: sıranın başına eklenir (hediye paneli açıkken o hediyeler önce insin).
+  static void prefetch(Iterable<String?> urls, {bool first = false}) {
+    final add = <String>[];
     for (final u in urls) {
       if (u == null || u.isEmpty) continue;
-      get(u).then((_) {}, onError: (_) {});
+      if (_queued.contains(u)) {
+        if (first && _queue.remove(u)) add.add(u);
+        continue;
+      }
+      _queued.add(u);
+      add.add(u);
+    }
+    if (first) {
+      _queue.insertAll(0, add);
+    } else {
+      _queue.addAll(add);
+    }
+    _pump();
+  }
+
+  static void _pump() {
+    while (_running < _parallel && _queue.isNotEmpty) {
+      final u = _queue.removeAt(0);
+      _running++;
+      get(u).then((_) {}, onError: (_) {}).whenComplete(() {
+        _running--;
+        _queued.remove(u);
+        _pump();
+      });
     }
   }
 

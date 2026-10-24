@@ -101,7 +101,7 @@ class _GiftSheetState extends State<_GiftSheet> with SingleTickerProviderStateMi
       if (!mounted) return;
       setState(() {
         _gifts = listOf(r['gifts']);
-        MediaCache.prefetch([for (final g in _gifts) Api.absoluteUrl(g['animationUrl'] as String?)]);
+        MediaCache.prefetch([for (final g in _gifts) Api.absoluteUrl(g['animationUrl'] as String?)], first: true);
         _globalMin = BigInt.tryParse((r['globalMinCoins'] ?? '1000').toString()) ?? BigInt.from(1000);
         final lucky = mapOf(r['lucky']);
         _luckyReceiverBps = (lucky?['receiverBps'] as num?)?.toInt() ?? _luckyReceiverBps;
