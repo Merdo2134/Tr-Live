@@ -130,14 +130,16 @@ async function convertPlain(file, info, scene, [W, H]) {
   const fps = Math.min(MAX_FPS, Math.round(info.fps) || MAX_FPS);
   const fit = `scale=${W}:${H}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`;
   const pad = `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black`;
+  // Oynatıcı renkleri ön-çarpımlı bekler (renk = asıl renk x şeffaflık); aksi halde yarı saydam yerler aşırı parlak çıkar.
   const graph = scene
-    // Sahne: içerik opak, kenarları yumuşak; boş kalan yer şeffaf.
-    ? `[0:v]fps=${fps},${fit},split[s1][s2];[s1]${pad},format=yuv420p[c];`
-      + `[s2]format=gray,lut=c0=255,${pad},boxblur=10:2,format=yuv420p[a];[a][c]hstack=inputs=2[v]`
-    // Siyah arka plan: maske = en parlak renk kanalı (siyah → şeffaf, parlak → opak).
+    // Sahne: içerik opak, kenarları yumuşak (renk de kenarda aynı oranda koyulaşır); boş kalan yer şeffaf.
+    ? `[0:v]fps=${fps},${fit},split[s1][s2];[s1]${pad},format=gbrp[cc];`
+      + `[s2]format=gray,lut=c0=255,${pad},boxblur=10:2,format=gbrp,split[a1][a2];`
+      + `[cc][a1]blend=all_mode=multiply,format=yuv420p[c];[a2]format=yuv420p[a];[a][c]hstack=inputs=2[v]`
+    // Siyah arka plan: maske = en parlak renk kanalı (siyah → şeffaf, parlak → opak); renk aynı ölçekle (ön-çarpımlı).
     : `[0:v]fps=${fps},${fit},${pad},format=gbrp,split[c0][m];[m]extractplanes=r+g+b[r][g][b];`
       + `[r][g]blend=all_mode=lighten[rg];[rg][b]blend=all_mode=lighten,lut=c0='clip((val-16)*1.07,0,255)',format=yuv420p[a];`
-      + `[c0]format=yuv420p[c];[a][c]hstack=inputs=2[v]`;
+      + `[c0]lutrgb=r='clip((val-16)*1.07,0,255)':g='clip((val-16)*1.07,0,255)':b='clip((val-16)*1.07,0,255)',format=yuv420p[c];[a][c]hstack=inputs=2[v]`;
   return withTemp(Buffer.alloc(0), 'tmp', async (_f, dir) => {
     const out = path.join(dir, 'out.mp4');
     await run('ffmpeg', ['-v', 'error', '-y', '-i', file, '-filter_complex', graph, '-map', '[v]', '-map', '0:a?',
@@ -154,7 +156,7 @@ async function iconFromRects(file, info, rgb, mask) {
   const sh = Math.max(2, Math.round((rgb[3] * sw) / rgb[2]) & ~1);
   const raw = await run('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-filter_complex',
     `[0:v]split[x][y];[x]crop=${rgb[2]}:${rgb[3]}:${rgb[0]}:${rgb[1]},scale=${sw}:${sh},format=rgb24[c];`
-    + `[y]crop=${mask[2]}:${mask[3]}:${mask[0]}:${mask[1]},scale=${sw}:${sh},format=gray[a];[c][a]alphamerge,format=rgba[o]`,
+    + `[y]crop=${mask[2]}:${mask[3]}:${mask[0]}:${mask[1]},scale=${sw}:${sh},format=gray[a];[c][a]alphamerge,format=rgba,unpremultiply=inplace=1[o]`,
     '-map', '[o]', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { timeoutMs: 60000 });
   if (raw.length !== sw * sh * 4) return null;
   // içeriğin kutusu

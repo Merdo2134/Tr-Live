@@ -1,3 +1,13 @@
+## v2.62.0 — Hediye görüntü bozulması giderildi
+- Asıl sebep: şeffaf video oynatıcısı renkleri "ön-çarpımlı" (renk x şeffaflık) bekliyor; hediyeler düz renkle
+  üretilmişti. Bu yüzden yarı saydam yerler (sis, toz, gökyüzü, ışık) aşırı parlak, lekeli ve bloklu görünüyordu.
+- 107 hediyenin hepsi doğru biçimde yeniden üretildi (720x1280, kaynak kare hızı, yüksek kalite). Kontrol telefonun
+  yaptığı birleştirmeyle, oda zemini üzerinde yapıldı.
+- Arka planlı sahnelerde (aslan vb.) kenara değen siyah boş şeritler şeffaf.
+- Sunucunun yüklemede otomatik şeffaf yapması da aynı biçime düzeltildi (yeni yüklenen videolar doğru görünür).
+- Giriş ekranında logonun kenarlarının kesilmesi düzeltildi (yalnız köşeler yumuşakça kaybolur).
+- Paketler: TR-Live-paket-1 … N (çerçeveler + yeni hediyeler). Eklenmiş hediyelerin yalnızca görüntüsü yenilenir.
+
 ## v2.61.0 — Hediyeler yüksek kalitede
 - 107 hediyenin hepsi baştan üretildi: 720x1280 (eskisinin ~2 katı piksel), kaynağın kendi kare hızı (en çok 30 kare/sn),
   ~4 kat bit hızı. Şeffaflık yeniden yapıldı: kenarlarda koyu hale yok, koyu sis / ışık hüzmeleri leke yerine yarı saydam;

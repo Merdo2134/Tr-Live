@@ -2,3 +2,5 @@ backend/src/samples/pack1/** export-ignore
 backend/src/samples/pack1 export-ignore
 backend/src/samples/pack2/** export-ignore
 backend/src/samples/pack2 export-ignore
+backend/src/samples/pack3/** export-ignore
+backend/src/samples/pack3 export-ignore

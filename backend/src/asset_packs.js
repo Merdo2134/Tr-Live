@@ -3,12 +3,12 @@ import { tx } from './database.js';
 import { ensureVapc } from './services/media.js';
 
 // Hazır paket: siyah arka planlı videolardan şeffaf yapılmış çerçeveler (pack1: 300x300 hareketli webp) ve hediyeler
-// (pack2: yüksek kalite, hepsi aynı ölçüde 720x1280, şeffaf mp4 / VAP).
+// (pack3: yüksek kalite, hepsi aynı ölçüde 720x1280, şeffaf mp4 / VAP, renkler oynatıcının beklediği ön-çarpımlı biçimde).
 // Sunucu açılışında eklenmemiş olanlar bir kez eklenir; ad ve fiyat yönetim panelinden düzenlenebilir.
-// pack1'in ilk (düşük kaliteli) hediyeleri eklenmişse pack2 gelince aynı hediyenin dosyaları yenisiyle değiştirilir
+// Önceki sürümler (pack1 / pack2) eklenmişse pack3 gelince aynı hediyenin dosyaları yenisiyle değiştirilir
 // (ad, fiyat, sekme ve geçmiş kayıtlar korunur).
 const DIR = new URL('./samples/pack1/', import.meta.url);
-const DIR2 = new URL('./samples/pack2/', import.meta.url);
+const DIR3 = new URL('./samples/pack3/', import.meta.url);
 const FRAME_PRICE = 5000;
 const FRAME_DAYS = 30;
 const FRAMES = [
@@ -184,44 +184,36 @@ export async function seedAssetPacks() {
     })) added++;
   }
   for (const [file, name, price, category] of GIFTS) {
-    if (!has(DIR2, `${file}.mp4`, `${file}_icon.png`)) continue;
-    if (await once(`pack2:${file}`, async (c) => {
-      const old = (await c.query(`SELECT 1 FROM asset_seeds WHERE key = $1`, [`pack1:${file}`])).rowCount > 0;
-      const icon = await putMedia(c, 'png', 'image/png', 'png', read(`${file}_icon.png`, DIR2), file);
-      const anim = await putMedia(c, 'mp4', 'video/mp4', 'mp4', ensureVapc(read(`${file}.mp4`, DIR2), 'left').buf, file);
-      if (!old) {
-        await c.query(`INSERT INTO asset_seeds(key) VALUES($1) ON CONFLICT DO NOTHING`, [`pack1:${file}`]);
+    if (!has(DIR3, `${file}.mp4`, `${file}_icon.png`)) continue;
+    if (await once(`pack3:${file}`, async (c) => {
+      const seen = (await c.query(`SELECT 1 FROM asset_seeds WHERE key = ANY($1)`, [[`pack1:${file}`, `pack2:${file}`]])).rowCount > 0;
+      const icon = await putMedia(c, 'png', 'image/png', 'png', read(`${file}_icon.png`, DIR3), file);
+      const anim = await putMedia(c, 'mp4', 'video/mp4', 'mp4', ensureVapc(read(`${file}.mp4`, DIR3), 'left').buf, file);
+      if (!seen) {
+        await c.query(`INSERT INTO asset_seeds(key) VALUES($1),($2) ON CONFLICT DO NOTHING`, [`pack1:${file}`, `pack2:${file}`]);
         await c.query(
           `INSERT INTO gifts(name, coin_price, icon_url, animation_url, animation_format, has_alpha, category) VALUES($1,$2,$3,$4,'mp4',TRUE,$5)`,
           [name, price, icon, anim, category],
         );
         return;
       }
-      // Eski (pack1) sürüm eklenmişti: aynı hediyeyi bul (paketle gelen dosyayı kullanan ve aynı adlı), dosyalarını değiştir.
-      const g = (await c.query(
+      // Daha önce eklenmiş hediyeyi bul: 1) dosya anahtarıyla (pack2), 2) aynı adla, 3) eski pack1 dosyasının boyutuyla.
+      const pick = (where, params) => c.query(
         `SELECT g.id, g.icon_url, g.animation_url FROM gifts g
           JOIN media_files m ON g.animation_url = '/media/' || m.id || '.mp4'
-         WHERE g.name = $1 AND m.meta->>'purpose' = 'asset_pack' ORDER BY g.is_active DESC LIMIT 1`,
-        [name],
-      )).rows[0];
-      // Ad değiştirildiyse: eski paket dosyasının boyutuyla eşleştir (eski dosya sunucuda duruyorsa).
-      let g2 = g;
-      if (!g2 && has(DIR, `${file}.mp4`)) {
-        const size = ensureVapc(read(`${file}.mp4`), 'left').buf.length;
-        g2 = (await c.query(
-          `SELECT g.id, g.icon_url, g.animation_url FROM gifts g
-            JOIN media_files m ON g.animation_url = '/media/' || m.id || '.mp4'
-           WHERE m.meta->>'purpose' = 'asset_pack' AND m.size_bytes = $1 ORDER BY g.is_active DESC LIMIT 1`,
-          [size],
-        )).rows[0];
-      }
-      if (!g2) {
-        // Silinmiş: yeni dosyalar kullanılmaz (yer kaplamasın).
+         WHERE m.meta->>'purpose' = 'asset_pack' AND m.id <> $1::uuid AND ${where} ORDER BY g.is_active DESC LIMIT 1`,
+        [MEDIA_ID.exec(anim)[1], ...params],
+      ).then((r) => r.rows[0]);
+      let g = await pick(`m.meta->>'key' = $2`, [file]);
+      if (!g) g = await pick('g.name = $2', [name]);
+      if (!g && has(DIR, `${file}.mp4`)) g = await pick('m.size_bytes = $2', [ensureVapc(read(`${file}.mp4`), 'left').buf.length]);
+      if (!g) {
+        // Yönetici silmiş: yeni dosyalar kullanılmaz (yer kaplamasın).
         for (const u of [icon, anim]) await c.query(`DELETE FROM media_files WHERE id = $1`, [MEDIA_ID.exec(u)[1]]);
         return;
       }
-      await c.query(`UPDATE gifts SET icon_url = $2, animation_url = $3 WHERE id = $1`, [g2.id, icon, anim]);
-      for (const u of [g2.icon_url, g2.animation_url]) {
+      await c.query(`UPDATE gifts SET icon_url = $2, animation_url = $3 WHERE id = $1`, [g.id, icon, anim]);
+      for (const u of [g.icon_url, g.animation_url]) {
         const m = MEDIA_ID.exec(u ?? '');
         if (m) await c.query(`DELETE FROM media_files WHERE id = $1 AND meta->>'purpose' = 'asset_pack'`, [m[1]]);
       }

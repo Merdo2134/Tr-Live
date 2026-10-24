@@ -386,7 +386,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                         ),
                         child: ShaderMask(
                           blendMode: BlendMode.dstIn,
-                          shaderCallback: (r) => const RadialGradient(colors: [Colors.white, Colors.white, Colors.transparent], stops: [0, 0.62, 0.72]).createShader(r),
+                          // Yalnızca köşeler yumuşakça kaybolur; yazı ve taç kesilmez.
+                          shaderCallback: (r) => const RadialGradient(radius: 0.71, colors: [Colors.white, Colors.white, Colors.transparent], stops: [0, 0.66, 1.0]).createShader(r),
                           child: Image.asset('assets/images/app_logo.webp', fit: BoxFit.cover, filterQuality: FilterQuality.medium),
                         ),
                       ),
