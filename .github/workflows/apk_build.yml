@@ -227,15 +227,26 @@ jobs:
               target.write_text(body)
               print(f"MainActivity yazıldı: {target} (paket {pkg})")
 
-          # 4) Uygulama simgesi (mobile/native/res/mipmap-*/ic_launcher.png): flutter create'in varsayılan simgesinin yerine.
+          # 4) Uygulama simgesi (mobile/native/res): yuvarlak/uyarlanabilir simge (siyah daire + logo) ve eski telefonlar için png.
           import shutil
           res_src = pathlib.Path("native/res")
           if res_src.exists():
-              for f in res_src.rglob("ic_launcher.png"):
-                  dst = pathlib.Path("android/app/src/main/res") / f.parent.name / f.name
+              n = 0
+              for f in res_src.rglob("*"):
+                  if not f.is_file() or f.name.startswith("."):
+                      continue
+                  dst = pathlib.Path("android/app/src/main/res") / f.relative_to(res_src)
                   dst.parent.mkdir(parents=True, exist_ok=True)
                   shutil.copyfile(f, dst)
-              print("Uygulama simgesi kopyalandı")
+                  n += 1
+              print(f"Uygulama simgesi kopyalandı ({n} dosya)")
+              mf = pathlib.Path("android/app/src/main/AndroidManifest.xml")
+              s = mf.read_text()
+              if "android:roundIcon" not in s:
+                  s = s.replace('android:icon="@mipmap/ic_launcher"', 'android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"', 1)
+              # Ana ekranda görünen ad
+              s = re.sub(r'android:label="[^"]*"', 'android:label="TR Live"', s, count=1)
+              mf.write_text(s)
           PY
 
       - name: Sunucu adresini doğrula
