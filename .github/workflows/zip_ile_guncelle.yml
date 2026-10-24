@@ -22,10 +22,13 @@ concurrency:
 jobs:
   guncelle:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Depoyu indir
         uses: actions/checkout@v4
+        with:
+          # Tetikleyen eski commit değil, dalın en güncel hali (art arda yüklenen zip'lerin hepsi görünsün).
+          ref: main
 
       - name: Zip'i bul, aç ve projeyi eşitle
         shell: bash
@@ -43,7 +46,8 @@ jobs:
             DID=1
           done
           # 2) Ana zip: proje içindekiyle birebir eşitlenir; daha önce eklenen paket klasörleri korunur.
-          ZIP="$(ls -t ./TR-Live-v*.zip 2>/dev/null | head -1 || true)"
+          # Birden fazla sürüm zip'i varsa en yüksek sürüm kullanılır (diğerleri silinir).
+          ZIP="$(ls ./TR-Live-v*.zip 2>/dev/null | sort -V | tail -1 || true)"
           if [ -n "$ZIP" ]; then
             echo "Zip: $ZIP"
             T="$(mktemp -d)"
@@ -83,7 +87,15 @@ jobs:
           if git diff --cached --quiet; then echo "Değişiklik yok."; exit 0; fi
           VER="$(sed 's/version: *//' /tmp/ver.txt)"
           git commit -q -m "TR Live v${VER} (zip ile güncellendi)"
-          git push
+          # Bu sırada yeni bir dosya yüklendiyse dal ilerlemiş olur: en güncel hale taşıyıp tekrar dene.
+          for i in 1 2 3 4 5; do
+            if git push origin HEAD:main; then exit 0; fi
+            echo "Gönderilemedi (dal ilerlemiş), tekrar deneniyor ($i)…"
+            sleep $((i * 3))
+            git fetch -q origin main
+            git rebase -q origin/main || { git rebase --abort || true; echo "::error::Birleştirilemedi"; exit 1; }
+          done
+          echo "::error::5 denemede gönderilemedi"; exit 1
 
       - name: APK derlemesini başlat
         if: env.NOZIP != '1' && env.PKONLY != '1'
