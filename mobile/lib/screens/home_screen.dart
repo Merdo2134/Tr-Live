@@ -560,7 +560,7 @@ class _SpinningRoomCoverState extends State<_SpinningRoomCover> with SingleTicke
   Widget build(BuildContext context) {
     final fallback = Container(
       alignment: Alignment.center,
-      decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF7C4DFF), Color(0xFFFF4081)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
+      decoration: const BoxDecoration(gradient: LinearGradient(colors: kGoldDeep, begin: Alignment.topLeft, end: Alignment.bottomRight)),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Icon(Icons.graphic_eq, color: Colors.white, size: 22),
         Text(widget.initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15)),

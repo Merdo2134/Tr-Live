@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api.dart';
+import 'app_theme.dart';
 import 'common.dart';
 import 'cosmetics.dart';
 import 'fig.dart';
@@ -171,7 +172,7 @@ class _ContributionsState extends State<_Contributions> {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(17 * k),
-                    gradient: _total == total ? const LinearGradient(colors: [Color(0xFFB45CFF), Color(0xFF6A3BFF)]) : null,
+                    gradient: _total == total ? const LinearGradient(colors: kGoldDeep) : null,
                   ),
                   child: Text(label, style: TextStyle(color: _total == total ? Colors.white : Colors.white60, fontWeight: FontWeight.w800, fontSize: 14 * k)),
                 ),

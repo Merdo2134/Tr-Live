@@ -68,7 +68,7 @@ class _IncomeCenterScreenState extends State<IncomeCenterScreen> {
                 : Padding(
                     padding: const EdgeInsets.only(right: 10),
                     child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00A8FF), shape: const StadiumBorder()),
+                      style: FilledButton.styleFrom(backgroundColor: Pal.cyan, foregroundColor: Pal.onBright, shape: const StadiumBorder()),
                       onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BroadcastSummaryScreen())),
                       child: const Text('Canlı Kayıt'),
                     ),
@@ -104,7 +104,7 @@ class _IncomeCenterScreenState extends State<IncomeCenterScreen> {
               const SizedBox(height: 16),
               Row(children: [
                 Expanded(
-                  child: _bigBtn('Elmas Bozdurma', const [Color(0xFF00A8FF), Color(0xFF7FE0FF)], () async {
+                  child: _bigBtn('Elmas Bozdurma', kGoldDeep, () async {
                     await WalletScreen.exchange(context, diamonds, () async => setState(() => _version++));
                   }),
                 ),
@@ -351,9 +351,9 @@ class WithdrawScreen extends StatelessWidget {
           const kycText = {'none': 'Doğrulanmadı', 'pending': 'İnceleniyor', 'approved': 'Onaylı', 'rejected': 'Reddedildi'};
           return ListView(padding: const EdgeInsets.all(16), children: [
             Row(children: [
-              Expanded(child: _card('Bu dönem tahmini maaş', fmtMoney(p['estimatedCents'] ?? 0, cur), const [Color(0xFF00A8FF), Color(0xFF7FE0FF)])),
+              Expanded(child: _card('Bu dönem tahmini maaş', fmtMoney(p['estimatedCents'] ?? 0, cur), kGoldDeep)),
               const SizedBox(width: 12),
-              Expanded(child: _card('Toplam elmas', fmtNumber(b['totalDiamonds']), const [Color(0xFF7C4DFF), Color(0xFFB388FF)])),
+              Expanded(child: _card('Toplam elmas', fmtNumber(b['totalDiamonds']), const [Color(0xFF3A2E14), Color(0xFF6B5320)])),
             ]),
             const SizedBox(height: 16),
             ListTile(

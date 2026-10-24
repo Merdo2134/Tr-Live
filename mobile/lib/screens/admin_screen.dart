@@ -1683,6 +1683,45 @@ class _AssetPackPageState extends State<AssetPackPage> {
     }
   }
 
+  /// Depo gizliyken sunucunun güncellemeyi indirebilmesi için GitHub erişim anahtarı (yalnızca okuma).
+  Future<void> _gitToken() async {
+    final ctl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('GitHub erişim anahtarı'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text(
+              'Depo gizliyken sunucu güncellemeleri bu anahtarla indirir.\n\n'
+              'GitHub → sağ üstte profil → Settings → Developer settings → Personal access tokens → Fine-grained tokens → '
+              'Generate new token:\n'
+              '• Repository access: Only select repositories → Tr-Live\n'
+              '• Permissions → Contents: Read-only\n'
+              '• Expiration: en uzun süre\n\n'
+              'Anahtarı deponun sahibi olan hesapta (Merdo2134) oluştur. Oluşan anahtarı (github_pat_ ile başlar) buraya yapıştır. Anahtar yalnızca sunucuya kaydedilir, uygulamada '
+              'görünmez. Boş bırakıp kaydedersen silinir.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            TextField(controller: ctl, obscureText: true, autocorrect: false, enableSuggestions: false, decoration: const InputDecoration(labelText: 'Anahtar')),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Vazgeç')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Kaydet')),
+        ],
+      ),
+    );
+    final token = ctl.text.trim();
+    WidgetsBinding.instance.addPostFrameCallback((_) => ctl.dispose());
+    if (ok != true || !mounted) return;
+    final r = await guard(context, () => Api.post('/api/admin/server/git-token', {'token': token}));
+    if (r == null || !mounted) return;
+    toast(context, r['saved'] == true ? 'Anahtar kaydedildi. Sunucu birkaç dakika içinde güncellemeyi dener.' : 'Anahtar silindi.');
+    _loadServer();
+  }
+
   Future<void> _updateServer() async {
     final r = await guard(context, () => Api.post('/api/admin/server/update'));
     if (r == null || !mounted) return;
@@ -1826,6 +1865,16 @@ class _AssetPackPageState extends State<AssetPackPage> {
                         label: Text(_showLogs ? 'Kayıtları gizle' : 'Kayıtlar'),
                       ),
                     ),
+                  ]),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Icon(_server?['gitToken'] == true ? Icons.key : Icons.key_off, size: 18, color: _server?['gitToken'] == true ? Colors.greenAccent : Colors.white54),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(_server?['gitToken'] == true ? 'GitHub erişim anahtarı kayıtlı' : 'GitHub erişim anahtarı yok (depo gizliyse gerekli)',
+                          style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                    ),
+                    TextButton(onPressed: _gitToken, child: Text(_server?['gitToken'] == true ? 'Değiştir' : 'Gir')),
                   ]),
                   if (_showLogs) ...[
                     const SizedBox(height: 8),

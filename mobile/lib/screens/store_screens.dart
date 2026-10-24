@@ -39,7 +39,7 @@ Widget _catBar(List<List<String>> cats, String sel, int labelIndex, ValueChanged
               padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.center,
               decoration: BoxDecoration(color: sel == c[0] ? Pal.cyan : Colors.transparent, borderRadius: BorderRadius.circular(18)),
-              child: Text(c[labelIndex], style: TextStyle(fontWeight: FontWeight.w700, color: sel == c[0] ? const Color(0xFF00212A) : Pal.textDim)),
+              child: Text(c[labelIndex], style: TextStyle(fontWeight: FontWeight.w700, color: sel == c[0] ? Pal.onBright : Pal.textDim)),
             ),
           ),
         ),
@@ -252,7 +252,7 @@ class _StoreScreenState extends State<StoreScreen> {
           child: Container(
             height: 44,
             alignment: Alignment.center,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: on ? const LinearGradient(colors: [Color(0xFF00A8FF), Color(0xFF7FE0FF)]) : null, color: on ? null : Colors.white12),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: on ? const LinearGradient(colors: kGoldDeep) : null, color: on ? null : Colors.white12),
             child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: on ? Colors.white : Colors.white70)),
           ),
         ),

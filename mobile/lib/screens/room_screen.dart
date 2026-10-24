@@ -1459,7 +1459,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
                         () => pkFree ? run(() => showPkChallengeSheet(context, roomId: widget.roomId)) : toast(context, 'Zaten bir PK sürüyor.', error: true),
                         colors: const [Color(0xFF1A237E), Color(0xFF0D0D1A), Color(0xFFB71C1C)],
                       ),
-                    tile(const Text('🎲', style: TextStyle(fontSize: 30)), 'Ludo', () => run(_openGames), colors: const [Color(0xFF7C4DFF), Color(0xFF2962FF)]),
+                    tile(const Text('🎲', style: TextStyle(fontSize: 30)), 'Ludo', () => run(_openGames), colors: kGoldDeep),
                     tile(Image.asset('assets/images/lucky_pouch.webp', width: 48, height: 48), 'Şanslı Çanta', () => run(() => showBagSend(context, widget.roomId)), colors: const [Color(0xFF3A1010), Color(0xFF1A0808)]),
                   ]),
                   const SizedBox(height: 16),
@@ -1915,7 +1915,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: _flyMode ? const LinearGradient(colors: [Color(0xFFFF4081), Color(0xFF7C4DFF)]) : null,
+              gradient: _flyMode ? const LinearGradient(colors: kGoldDeep) : null,
               color: _flyMode ? null : const Color(0x1FFFFFFF),
               border: Border.all(color: _flyMode ? Colors.white54 : Colors.white24),
             ),
@@ -1932,7 +1932,7 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             maxLines: 3,
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => _sendChat(),
-            cursorColor: const Color(0xFF1FD6F5),
+            cursorColor: Pal.cyan,
             style: const TextStyle(color: Colors.white, fontSize: 15),
             decoration: InputDecoration(
               isDense: true,
@@ -1957,9 +1957,9 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
             height: 44,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: canSend ? const LinearGradient(colors: [Color(0xFF1FD6F5), Color(0xFFFF4F9A)]) : null,
+              gradient: canSend ? const LinearGradient(colors: kGoldDeep) : null,
               color: canSend ? null : Colors.white12,
-              boxShadow: canSend ? const [BoxShadow(color: Color(0x551FD6F5), blurRadius: 10)] : null,
+              boxShadow: canSend ? const [BoxShadow(color: Color(0x55E6B13A), blurRadius: 10)] : null,
             ),
             child: _sending
                 ? const Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -3412,10 +3412,10 @@ class _RoomScreenState extends State<RoomScreen> with WidgetsBindingObserver {
           child: Container(
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF8B5CF6), Color(0xFF6366F1), Color(0xFF38BDF8)]),
-              boxShadow: [BoxShadow(color: Color(0x667C3AED), blurRadius: 10)],
+              gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: kGoldLight),
+              boxShadow: [BoxShadow(color: Color(0x66E6B13A), blurRadius: 10)],
             ),
-            child: Icon(Icons.redeem, color: Colors.white, size: g.giftBtn * 0.54),
+            child: Icon(Icons.redeem, color: Pal.onBright, size: g.giftBtn * 0.54),
           ),
         ),
       );

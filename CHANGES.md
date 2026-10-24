@@ -1,3 +1,12 @@
+## v2.64.0 — Siyah-altın tema, gizli depoda sunucu güncellemesi
+- Uygulamanın tamamı giriş ekranındaki siyah-altın renklere geçti: zemin sıcak siyah, vurgu rengi altın (düğmeler, sekmeler,
+  seçili simgeler, anahtarlar, yazı alanları), ikinci vurgu turuncu-altın. Mavi/mor degradeler (hediye düğmesi, gönder,
+  uçan yazı, mesaj balonları, gelir ve mağaza düğmeleri, profil kısayolları) altın degradeye çevrildi. Varsayılan oda
+  zemini siyah-altın. Elmas simgeleri ve diğer oda temaları olduğu gibi.
+- Sunucu, depo gizliyken de güncellenebilir: Yönetim → Katalog → "Hazır hediye paketi" → Sunucu → "GitHub erişim
+  anahtarı" (yalnızca okuma izinli anahtar; yalnızca sunucuya kaydedilir, uygulamada görünmez). Depo gizli yapılmadan önce
+  sunucunun bu sürüme bir kez güncellenmiş olması gerekir.
+
 ## v2.63.1 — Sunucu güncellemesinin takılması giderildi
 - Sunucu bir güncellemeyi kuramazsa bir sonraki yüklemeye kadar eski sürümde kalıyordu (v2.59'dan beri sunucu güncellenmemişti).
   Artık başarısız kurulum 20 dakikada bir kendiliğinden yeniden denenir ve hatanın sebebi kayda yazılır.

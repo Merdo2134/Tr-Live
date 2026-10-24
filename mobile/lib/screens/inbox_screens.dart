@@ -392,7 +392,7 @@ class TeamAvatar extends StatelessWidget {
         width: size,
         height: size,
         alignment: Alignment.center,
-        decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF22C55E), Color(0xFF1FD6F5)])),
+        decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: kGoldDeep)),
         child: Text('TR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: size * 0.4, height: 1.0)),
       );
 }
@@ -787,8 +787,8 @@ class _OfficialChannelScreenState extends State<OfficialChannelScreen> {
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        gradient: const LinearGradient(colors: [Color(0xFFFFD54F), Color(0xFFFF4F9A), Color(0xFF8B5CF6)]),
-        boxShadow: const [BoxShadow(color: Color(0x55FF4F9A), blurRadius: 16, offset: Offset(0, 4))],
+        gradient: const LinearGradient(colors: kGoldLight),
+        boxShadow: const [BoxShadow(color: Color(0x55E6B13A), blurRadius: 16, offset: Offset(0, 4))],
       ),
       child: Container(
         clipBehavior: Clip.antiAlias,
@@ -808,7 +808,7 @@ class _OfficialChannelScreenState extends State<OfficialChannelScreen> {
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(22),
-                      gradient: const LinearGradient(colors: [Color(0xFFFF4F9A), Color(0xFF8B5CF6)]),
+                      gradient: const LinearGradient(colors: kGoldDeep),
                     ),
                     child: const Text('Hemen katıl', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15.5)),
                   ),

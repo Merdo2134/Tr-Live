@@ -11,7 +11,7 @@ class RoomThemeDef {
 
 /// Sunucudaki izinli tema listesiyle birebir aynı anahtarlar.
 const roomThemes = <RoomThemeDef>[
-  RoomThemeDef('default', 'Varsayılan', [Color(0xFF14121F), Color(0xFF14121F)]),
+  RoomThemeDef('default', 'Varsayılan', [Color(0xFF0E0B07), Color(0xFF1A140A)]),
   RoomThemeDef('neon', 'Neon', [Color(0xFF12002B), Color(0xFF00334E), Color(0xFF3A0050)]),
   RoomThemeDef('galaxy', 'Galaksi', [Color(0xFF05051A), Color(0xFF1B1347), Color(0xFF3B1E6E)]),
   RoomThemeDef('sunset', 'Gün batımı', [Color(0xFF2B0E1F), Color(0xFF7A2B3A), Color(0xFFB5542E)]),

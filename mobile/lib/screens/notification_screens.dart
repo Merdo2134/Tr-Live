@@ -275,7 +275,7 @@ class _FamilyChatPageState extends State<FamilyChatPage> {
                                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                                           decoration: BoxDecoration(
                                             color: mine ? null : Pal.surfaceHi,
-                                            gradient: mine ? const LinearGradient(colors: [Color(0xFF1FB8D6), Color(0xFF8B5CF6)]) : null,
+                                            gradient: mine ? const LinearGradient(colors: kGoldDeep) : null,
                                             borderRadius: BorderRadius.circular(16),
                                           ),
                                           child: Text((m['text'] ?? '').toString(), style: const TextStyle(color: Colors.white, fontSize: 15)),

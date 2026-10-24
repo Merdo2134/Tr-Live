@@ -346,7 +346,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Row(children: [
         card(const [Color(0xFFFFE259), Color(0xFFFFC107)], const Icon(Icons.monetization_on, color: Color(0xFFB26A00), size: 34), p['coins'], 'Coins Yükleme', const Color(0xFF3B2A00), () => _open(const CoinsCenterScreen())),
         const SizedBox(width: 10),
-        card(const [Color(0xFF5E6B8C), Color(0xFF8A94AD)], const Icon(Icons.diamond, color: Colors.cyanAccent, size: 32), p['diamonds'], 'Gelir Merkezi', Colors.white, () => _open(const IncomeCenterScreen())),
+        card(const [Color(0xFF3A2E14), Color(0xFF6B5320)], const Icon(Icons.diamond, color: Colors.cyanAccent, size: 32), p['diamonds'], 'Gelir Merkezi', Colors.white, () => _open(const IncomeCenterScreen())),
       ]),
     );
   }
@@ -377,8 +377,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Row(children: [
         tile(Icons.military_tech, Colors.amber, 'Leveller', () => _open(const LevelsScreen())),
         tile(Icons.groups, Colors.orangeAccent, 'Aile', () => _open(const FamilyScreen())),
-        tile(Icons.workspace_premium, Colors.lightBlueAccent, wip == null ? 'WIP' : wipLabel(wipLevelOf(wip['level'])), () => _open(const WipScreen())),
-        tile(Icons.checkroom, Colors.pinkAccent, 'Görünüm', () => _open(const AppearanceScreen())),
+        tile(Icons.workspace_premium, Pal.cyan, wip == null ? 'WIP' : wipLabel(wipLevelOf(wip['level'])), () => _open(const WipScreen())),
+        tile(Icons.checkroom, Pal.cyan, 'Görünüm', () => _open(const AppearanceScreen())),
       ]),
     );
   }
@@ -401,12 +401,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Column(children: [
         row(Icons.storefront, Colors.orangeAccent, 'Mağaza', () => _open(const StoreScreen())),
         // Yayıncı Merkezi: yalnızca ajans davetini kabul etmiş (onaylı) yayıncılar. Başvuru yok; davet Mesajlar'a düşer.
-        if (isBroadcaster) row(Icons.podcasts, Colors.pinkAccent, 'Yayıncı Merkezi', () => _open(const AgencyScreen(mode: 'broadcaster'))),
+        if (isBroadcaster) row(Icons.podcasts, Pal.cyan, 'Yayıncı Merkezi', () => _open(const AgencyScreen(mode: 'broadcaster'))),
         // Ajans Merkezi: yalnızca ajans sahibi (ajansı yönetici açar). Ajans sahibi aynı zamanda yayıncı da olabilir.
-        if (agencyOwned != null) row(Icons.business, Colors.lightBlueAccent, 'Ajans Merkezi', () => _open(const AgencyScreen(mode: 'agency')), sub: '${agencyOwned['name']} · ${const {'pending': 'İnceleniyor', 'active': 'Aktif', 'suspended': 'Askıda', 'rejected': 'Reddedildi'}[agencyOwned['status']] ?? agencyOwned['status']}'),
+        if (agencyOwned != null) row(Icons.business, Pal.cyan, 'Ajans Merkezi', () => _open(const AgencyScreen(mode: 'agency')), sub: '${agencyOwned['name']} · ${const {'pending': 'İnceleniyor', 'active': 'Aktif', 'suspended': 'Askıda', 'rejected': 'Reddedildi'}[agencyOwned['status']] ?? agencyOwned['status']}'),
         row(Icons.shield_outlined, const Color(0xFFFF4FA8), 'Koruyuculuğum', () => _open(MyGuardianScreen(profileBuilder: (id) => UserProfileScreen(userId: id))), sub: 'Koruyucuların ve koruduğun kişiler'),
         row(Icons.task_alt, Colors.greenAccent, 'Günlük Görevler', () => showDailySheet(context)),
-        if (isDealer) row(Icons.store_mall_directory, Colors.tealAccent, 'Bayi paneli', () => _open(const DealerScreen())),
+        if (isDealer) row(Icons.store_mall_directory, Pal.cyan, 'Bayi paneli', () => _open(const DealerScreen())),
         if (Session.isStaff) row(Icons.admin_panel_settings, Colors.redAccent, Session.isAdmin ? 'Yönetim paneli' : 'Yardımcı admin paneli', () => _open(const AdminScreen())),
       ]),
     );

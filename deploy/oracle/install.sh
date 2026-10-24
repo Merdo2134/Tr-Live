@@ -191,6 +191,7 @@ if [ "${FREE_KB:-0}" -lt 5000000 ]; then
   log "Temizlikten sonra boş disk: $(( $(df -Pk / | awk 'NR==2{print $4}') / 1024 )) MB"
 fi
 mkdir -p "$STATE"
+[ -e "$STATE/git-token" ] || install -m 622 /dev/null "$STATE/git-token" 2>/dev/null || true
 [ "$(stat -c %a "$STATE/update" 2>/dev/null)" = 666 ] || { systemctl stop trlive-apply.path 2>/dev/null; touch "$STATE/update" && chmod 666 "$STATE/update"; systemctl start trlive-apply.path 2>/dev/null; } || true
 log "Servisler derleniyor ve başlatılıyor (ilk seferde birkaç dakika sürer)"
 $COMPOSE up -d --build --remove-orphans

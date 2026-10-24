@@ -41,7 +41,7 @@ class _FeedScreenState extends State<FeedScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 9),
             decoration: BoxDecoration(color: sel ? Pal.cyan : Colors.transparent, borderRadius: BorderRadius.circular(20)),
-            child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1, style: TextStyle(fontWeight: FontWeight.w800, color: sel ? const Color(0xFF00212A) : Pal.textDim)))),
+            child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1, style: TextStyle(fontWeight: FontWeight.w800, color: sel ? Pal.onBright : Pal.textDim)))),
           ),
         ),
       );

@@ -17,7 +17,24 @@ else
 fi
 
 changed=false
-if git -C "$SRC" fetch -q --depth 1 origin "$BRANCH" 2>>"$STATE/update.log"; then
+# Depo gizliyse: uygulamadaki yönetim sayfasından girilen GitHub erişim anahtarı (yalnızca okuma) kullanılır.
+# Anahtar komut satırında görünmesin diye git ayarı ortam değişkeniyle verilir.
+[ -e "$STATE/git-token" ] || install -m 622 /dev/null "$STATE/git-token" 2>/dev/null || true
+chmod 622 "$STATE/git-token" 2>/dev/null || true
+export GIT_TERMINAL_PROMPT=0
+GH_TOKEN_VALUE="$(tr -d ' \r\n' 2>/dev/null < "$STATE/git-token" || true)"
+if [ -n "$GH_TOKEN_VALUE" ]; then
+  export GIT_CONFIG_COUNT=1
+  export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+  GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN_VALUE" | base64 | tr -d '\n')"
+  export GIT_CONFIG_VALUE_0
+fi
+unset GH_TOKEN_VALUE
+# Anahtarla indirilemezse (süresi dolmuş / silinmiş) anahtarsız da denenir (depo açıksa yine güncellenir).
+if git -C "$SRC" fetch -q --depth 1 origin "$BRANCH" 2>>"$STATE/update.log" \
+   || { [ -n "${GIT_CONFIG_COUNT:-}" ] && note "anahtarla indirilemedi (süresi dolmuş olabilir); anahtarsız deneniyor" \
+        && unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 \
+        && git -C "$SRC" fetch -q --depth 1 origin "$BRANCH" 2>>"$STATE/update.log"; }; then
   if [ "$(git -C "$SRC" rev-parse HEAD)" != "$(git -C "$SRC" rev-parse "origin/$BRANCH")" ]; then
     git -C "$SRC" reset -q --hard "origin/$BRANCH" && changed=true
     # Eski sürümlerin dosyaları diskte birikmesin (disk dolarsa kurulum yapılamaz).
@@ -25,8 +42,9 @@ if git -C "$SRC" fetch -q --depth 1 origin "$BRANCH" 2>>"$STATE/update.log"; the
     git -C "$SRC" gc -q --prune=now >/dev/null 2>&1 || true
   fi
 else
-  note "GitHub'a ulaşılamadı; mevcut sürümle devam ediliyor"
+  note "GitHub'a ulaşılamadı (depo gizliyse uygulamadan GitHub erişim anahtarı girin); mevcut sürümle devam ediliyor"
 fi
+unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
 
 HEADNOW="$(git -C "$SRC" rev-parse HEAD 2>/dev/null || echo yok)"
 APPLIED="$(cat "$STATE/applied" 2>/dev/null || true)"

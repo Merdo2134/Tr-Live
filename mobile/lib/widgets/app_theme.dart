@@ -1,23 +1,30 @@
 import 'package:flutter/material.dart';
 
 /// Uygulamanın tek renk ve stil kaynağı. Renkleri değiştirmek için yalnızca bu dosyayı düzenleyin.
+/// Siyah-altın tema (logo ve giriş ekranıyla aynı). Adlar eski kalıp korunmuştur: "cyan" ana vurgu rengidir (artık altın).
 class Pal {
-  static const bg = Color(0xFF0A1424); // koyu lacivert zemin
-  static const surface = Color(0xFF0F1D31); // kart ve çubuk yüzeyi
-  static const surfaceHi = Color(0xFF14263D);
-  static const outline = Color(0xFF1C5873); // ince turkuaz çerçeve
-  static const cyan = Color(0xFF1FD6F5); // ana vurgu
-  static const pink = Color(0xFFFF4F9A); // canlı / rozet
+  static const bg = Color(0xFF0B0906); // sıcak siyah zemin
+  static const surface = Color(0xFF17130C); // kart ve çubuk yüzeyi
+  static const surfaceHi = Color(0xFF221B10);
+  static const outline = Color(0xFF4D3C1C); // ince koyu altın çerçeve
+  static const cyan = Color(0xFFF2B92A); // ana vurgu (altın)
+  static const pink = Color(0xFFFF9F1C); // ikinci vurgu (turuncu-altın): canlı / rozet
   static const amber = Color(0xFFFFC43D); // bildirim / altın
-  static const purple = Color(0xFFB45CFF);
+  static const purple = Color(0xFFC8901A); // koyu altın
   static const red = Color(0xFFE5483D);
-  static const text = Color(0xFFEAF4FA);
-  static const textDim = Color(0xFF8AA5BB); // koyu zeminlerde en az 4.5:1 kontrast (WCAG AA)
+  static const text = Color(0xFFF6EFDF);
+  static const textDim = Color(0xFFB3A584); // koyu zeminlerde en az 4.5:1 kontrast (WCAG AA)
   static const green = Color(0xFF22C55E); // onay / başarı
   static const orange = Color(0xFFFF7A18); // sıcak vurgu (canlı rozet, oda kartı)
   static const gold = Color(0xFFFFD54F); // Coin
-  static const onBright = Color(0xFF00212A); // açık renkli zeminlerin üstündeki yazı (cyan, altın, yeşil)
+  static const onBright = Color(0xFF1C1405); // açık renkli zeminlerin üstündeki yazı (altın, yeşil)
 }
+
+/// Koyu altın degrade: üzerindeki yazı beyaz ve kalın.
+const kGoldDeep = [Color(0xFFCC9419), Color(0xFF7E5409)];
+
+/// Açık altın degrade (giriş ekranındaki düğmeler): üzerindeki yazı / simge koyu (Pal.onBright).
+const kGoldLight = [Color(0xFFFFE9A3), Color(0xFFE6B13A), Color(0xFFA9760F)];
 
 /// Boşluk ölçüleri (dp). Ekranlarda bu değerler kullanılır; elle sayı yazılmaz.
 class Gap {
@@ -61,7 +68,7 @@ TextTheme _textTheme() {
 ThemeData buildAppTheme() {
   final scheme = ColorScheme.fromSeed(seedColor: Pal.cyan, brightness: Brightness.dark).copyWith(
     primary: Pal.cyan,
-    onPrimary: const Color(0xFF00212A),
+    onPrimary: Pal.onBright,
     secondary: Pal.pink,
     tertiary: Pal.amber,
     surface: Pal.surface,
@@ -120,11 +127,11 @@ ThemeData buildAppTheme() {
       hintStyle: const TextStyle(color: Pal.textDim),
     ),
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(backgroundColor: Pal.cyan, foregroundColor: const Color(0xFF00212A), shape: shape, minimumSize: const Size(64, 48)),
+      style: FilledButton.styleFrom(backgroundColor: Pal.cyan, foregroundColor: Pal.onBright, shape: shape, minimumSize: const Size(64, 48)),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(foregroundColor: Pal.cyan, side: const BorderSide(color: Pal.outline), shape: shape, minimumSize: const Size(64, 48))),
     textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(foregroundColor: Pal.cyan, minimumSize: const Size(48, 48))),
-    floatingActionButtonTheme: FloatingActionButtonThemeData(backgroundColor: Pal.cyan, foregroundColor: const Color(0xFF00212A), shape: shape),
+    floatingActionButtonTheme: FloatingActionButtonThemeData(backgroundColor: Pal.cyan, foregroundColor: Pal.onBright, shape: shape),
     chipTheme: ChipThemeData(backgroundColor: Pal.surface, side: const BorderSide(color: Pal.outline), labelStyle: const TextStyle(color: Pal.text), shape: const StadiumBorder()),
     listTileTheme: const ListTileThemeData(iconColor: Pal.cyan, textColor: Pal.text),
     switchTheme: SwitchThemeData(thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Pal.cyan : Pal.textDim)),

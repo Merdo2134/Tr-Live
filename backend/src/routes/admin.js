@@ -511,14 +511,33 @@ function tailFile(name, lines) {
   }
 }
 router.get('/server/status', requireSuperAdmin, async (_req, res) => {
+  let gitToken = false;
+  try { gitToken = fs.statSync(`${STATE_DIR}/git-token`).size > 0; } catch { /* yok */ }
   res.json({
     serverVersion: SERVER_VERSION,
+    gitToken,
     available: (() => {
       try { fs.accessSync(`${STATE_DIR}/update`, fs.constants.W_OK); return true; } catch { return false; }
     })(),
     updateLog: tailFile('update.log', 25),
     installLog: tailFile('install.log', 40),
   });
+});
+// Depo gizliyse sunucunun güncellemeyi indirebilmesi için GitHub erişim anahtarı (yalnızca okuma izinli).
+// Anahtar yalnızca sunucuya yazılır; geri okunamaz (dosya yalnız yazılabilir). Boş gönderilirse silinir.
+router.post('/server/git-token', requireSuperAdmin, async (req, res) => {
+  const token = String(req.body?.token ?? '').trim();
+  if (token && !/^(github_pat_|ghp_)[A-Za-z0-9_]{20,250}$/.test(token)) {
+    throw fail('Anahtar geçersiz görünüyor. GitHub anahtarı "github_pat_" ya da "ghp_" ile başlar.');
+  }
+  try {
+    fs.writeFileSync(`${STATE_DIR}/git-token`, token ? `${token}\n` : '', { mode: 0o600 });
+  } catch {
+    throw fail('Sunucu anahtarı kaydedemedi (sunucu henüz bu sürüme güncellenmemiş olabilir).');
+  }
+  // Hemen dene.
+  try { fs.writeFileSync(`${STATE_DIR}/update`, `${new Date().toISOString()}\n`); } catch { /* sonraki kontrolde */ }
+  res.json({ ok: true, saved: Boolean(token) });
 });
 router.post('/server/update', requireSuperAdmin, async (_req, res) => {
   try {

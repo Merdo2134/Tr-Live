@@ -491,7 +491,7 @@ class _SupportThreadPageState extends State<_SupportThreadPage> {
                   decoration: BoxDecoration(color: m['fromStaff'] == true ? Pal.cyan.withValues(alpha: 0.9) : const Color(0xFF26262A), borderRadius: BorderRadius.circular(14)),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     if (m['category'] != null) Text('[${m['category']}]', style: const TextStyle(fontSize: 10, color: Color(0xFFFFEB3B), fontWeight: FontWeight.w800)),
-                    Text((m['text'] ?? '').toString(), style: TextStyle(color: m['fromStaff'] == true ? const Color(0xFF00212A) : Colors.white)),
+                    Text((m['text'] ?? '').toString(), style: TextStyle(color: m['fromStaff'] == true ? Pal.onBright : Colors.white)),
                   ]),
                 ),
               ),
